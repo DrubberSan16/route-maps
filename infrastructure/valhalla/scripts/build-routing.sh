@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds the Valhalla routing graph of a region. Runs inside the Valhalla image
-# (docker compose run --rm routing-builder <region>), never at service start.
+# Builds the Valhalla routing graph of a region. Runs inside the data-tools image
+# (make build-routing REGION=<region>), never at service start.
 #
 # Input : /data/imports/<region>.osm.pbf
 # Output: /data/routing/<region>/

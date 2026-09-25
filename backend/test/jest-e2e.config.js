@@ -4,7 +4,7 @@
  * by a deterministic fake; Valhalla itself is covered by the adapter tests and
  * by infrastructure/scripts/smoke-test.sh against the Docker stack.
  *
- *   E2E_DATABASE_URL=postgresql://maps:maps@localhost:5432/maps_e2e npm run test:e2e
+ *   E2E_DATABASE_URL=postgresql://maps:<password>@localhost:5432/maps_e2e npm run test:e2e
  */
 module.exports = {
   rootDir: '..',
