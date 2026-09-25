@@ -1,0 +1,168 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (lint, pruebas y e2e con PostGIS)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgis/postgis:17-3.5
+        env:
+          POSTGRES_DB: maps_e2e
+          POSTGRES_USER: maps
+          # Throwaway database of this job only, reachable from the runner.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U maps -d maps_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      # Prisma reads DATABASE_URL even for `prisma generate` (npm ci).
+      DATABASE_URL: postgresql://maps@localhost:5432/maps_e2e?schema=public
+      E2E_DATABASE_URL: postgresql://maps@localhost:5432/maps_e2e?schema=public
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm test -- --ci
+      - run: npm run build
+      - run: npm run test:e2e -- --ci
+
+  tilegen:
+    name: Generador de mapas (Planetiler)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+          cache-dependency-path: infrastructure/maps/tilegen/pom.xml
+      - run: mvn -B -ntp -f infrastructure/maps/tilegen/pom.xml verify
+
+  consistency:
+    name: Configuración y recursos compartidos
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: La app usa el mismo estilo que el servidor
+        run: cmp infrastructure/maps/style/style.json mobile/assets/map/style.json
+      - name: La app lleva los mismos glifos que sirve Nginx
+        run: diff -r --exclude=README.md infrastructure/maps/fonts mobile/assets/fonts
+      - name: Catálogo de regiones válido
+        run: jq -e '.regions | length > 0 and all(.code | test("^[a-z0-9][a-z0-9-]{1,62}$"))' infrastructure/regions/regions.json
+      - name: Docker Compose válido (desarrollo y producción)
+        run: |
+          ./infrastructure/scripts/init-env.sh
+          docker compose config --quiet
+          docker compose --profile tools --profile geocoding config --quiet
+          CORS_ORIGINS=https://maps.example.com \
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
+
+  mobile:
+    name: App Flutter (análisis, pruebas y APK)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.5
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Formato (sin el código generado por build_runner)
+        run: dart format --output=none --set-exit-if-changed $(find lib test -name '*.dart' ! -name '*.g.dart')
+      - run: flutter analyze
+      - name: Código generado de Drift al día
+        run: |
+          dart run build_runner build --delete-conflicting-outputs
+          git diff --exit-code -- lib
+      - run: flutter test
+      - name: APK de release (firmado con la clave de depuración si no hay key.properties)
+        run: flutter build apk --release
+
+  ios:
+    name: App iOS (compilación sin firma)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.5
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build ios --release --no-codesign
+
+  stack:
+    name: Stack Docker completo con Mónaco
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Crear .env con secretos aleatorios, Mónaco y Nominatim
+        run: |
+          make init
+          sed -i -e 's/^ROUTING_REGION=.*/ROUTING_REGION=monaco/' \
+            -e 's/^NOMINATIM_REGION=.*/NOMINATIM_REGION=monaco/' \
+            -e 's/^GEOCODING_PROVIDER=.*/GEOCODING_PROVIDER=nominatim/' \
+            -e 's/^GEOCODING_COUNTRY_CODES=.*/GEOCODING_COUNTRY_CODES=mc/' .env
+      - name: Construir y levantar el stack
+        run: make up
+      - name: Preparar Mónaco (extracto de Geofabrik, mapa, routing y registro)
+        run: make prepare-region REGION=monaco
+      - name: Importar Mónaco en Nominatim
+        run: make geocoding-up
+      - name: Esperar a que todos los servicios estén sanos
+        run: docker compose --profile geocoding up -d --wait --wait-timeout 900
+      - name: Prueba de humo a través de Nginx
+        run: REGION=monaco ./infrastructure/scripts/smoke-test.sh http://localhost:8080
+      - name: Estado y logs de los servicios
+        if: failure()
+        run: |
+          docker compose --profile geocoding ps
+          docker compose --profile geocoding logs --no-color --tail=300
+      - name: Apagar el stack
+        if: always()
+        run: docker compose --profile geocoding down -v

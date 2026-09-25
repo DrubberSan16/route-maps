@@ -1,0 +1,51 @@
+name: maps_platform
+description: "Maps Platform: mapas offline, rutas y tracking sobre OpenStreetMap."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.0
+  flutter: ">=3.47.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # Map rendering: MapLibre Native (Android 13.x / iOS 6.x) with PMTiles sources.
+  maplibre_gl: ^0.27.1
+  # State management and dependency injection.
+  flutter_riverpod: ^3.4.3
+  # HTTP client for our NestJS API (never used from widgets).
+  dio: ^5.11.1
+  # Local database (SQLite through drift).
+  drift: ^2.35.0
+  drift_flutter: ^0.3.1
+  # Device services.
+  geolocator: ^14.0.3
+  connectivity_plus: ^7.3.1
+  path_provider: ^2.1.6
+  disk_space_2: ^1.0.13
+  flutter_secure_storage: ^11.2.0
+  # Utilities.
+  crypto: ^3.0.7
+  path: ^1.9.1
+  uuid: ^4.6.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  build_runner: ^2.16.1
+  drift_dev: ^2.35.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    # Map style template (same file Nginx serves at /maps/style/style.json).
+    - assets/map/
+    # SDF glyphs for map labels, copied to disk on first start so they work offline.
+    - assets/fonts/Noto Sans Regular/
+    - assets/fonts/Noto Sans Medium/
+    - assets/fonts/Noto Sans Italic/

@@ -1,0 +1,11 @@
+targets:
+  $default:
+    builders:
+      drift_dev:
+        options:
+          # Keep millisecond precision (GPS fixes) and readable values in SQLite.
+          store_date_time_values_as_text: true
+          # Plain Drift queries are used; the generated table managers are not needed.
+          generate_manager: false
+          databases:
+            app_database: lib/data/local/app_database.dart

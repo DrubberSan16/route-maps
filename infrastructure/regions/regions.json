@@ -1,0 +1,69 @@
+{
+  "description": "Catalog of offline regions. A region is either downloaded from a legitimate OpenStreetMap extract provider (source.url) or clipped from its parent extract with a bounding box (source.parent + bbox, [minLng, minLat, maxLng, maxLat]). mapDir is the folder under storage/maps.",
+  "regions": [
+    {
+      "code": "ecuador",
+      "name": "Ecuador",
+      "country": "EC",
+      "mapDir": "ecuador",
+      "source": {
+        "url": "https://download.geofabrik.de/south-america/ecuador-latest.osm.pbf"
+      }
+    },
+    {
+      "code": "guayas",
+      "name": "Guayas",
+      "country": "EC",
+      "province": "Guayas",
+      "mapDir": "ecuador",
+      "bbox": [-80.65, -3.05, -79.2, -1.35],
+      "source": {
+        "parent": "ecuador"
+      }
+    },
+    {
+      "code": "guayaquil",
+      "name": "Guayaquil",
+      "country": "EC",
+      "province": "Guayas",
+      "city": "Guayaquil",
+      "mapDir": "ecuador",
+      "bbox": [-80.1, -2.33, -79.78, -2.0],
+      "source": {
+        "parent": "ecuador"
+      }
+    },
+    {
+      "code": "pichincha",
+      "name": "Pichincha",
+      "country": "EC",
+      "province": "Pichincha",
+      "mapDir": "ecuador",
+      "bbox": [-79.3, -0.85, -77.9, 0.35],
+      "source": {
+        "parent": "ecuador"
+      }
+    },
+    {
+      "code": "quito",
+      "name": "Quito",
+      "country": "EC",
+      "province": "Pichincha",
+      "city": "Quito",
+      "mapDir": "ecuador",
+      "bbox": [-78.62, -0.42, -78.3, 0.05],
+      "source": {
+        "parent": "ecuador"
+      }
+    },
+    {
+      "code": "monaco",
+      "name": "Mónaco",
+      "country": "MC",
+      "mapDir": "europe",
+      "source": {
+        "url": "https://download.geofabrik.de/europe/monaco-latest.osm.pbf"
+      }
+    }
+  ]
+}

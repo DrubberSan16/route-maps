@@ -1,0 +1,63 @@
+# Secrets / local config
+.env
+.env.*
+!.env.example
+*.local
+docker-compose.override.yml
+infrastructure/nginx/certs/*
+!infrastructure/nginx/certs/README.md
+*.pem
+
+# Node / backend
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+backend/src/generated/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/app/debug/
+mobile/android/app/profile/
+mobile/android/app/release/
+mobile/ios/Pods/
+mobile/ios/.symlinks/
+mobile/ios/Flutter/Generated.xcconfig
+mobile/ios/Flutter/flutter_export_environment.sh
+*.iml
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Java (tile generator)
+infrastructure/maps/tilegen/target/
+
+# GIS data: never commit large datasets or generated artefacts
+*.osm.pbf
+*.osm
+*.o5m
+*.pmtiles
+*.mbtiles
+*.valhalla.tar
+*.osrm
+*.osrm.*
+storage/maps/**
+storage/routing/**
+storage/imports/**
+storage/nominatim/**
+!storage/**/.gitkeep
+!storage/**/README.md
+
+# OS / editors
+.DS_Store
+Thumbs.db
+*.swp
+*.log
