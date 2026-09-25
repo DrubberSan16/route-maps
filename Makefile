@@ -104,4 +104,4 @@ test-mobile: ## Pruebas de la app Flutter
 
 lint: ## Lint y formato del backend, flutter analyze
 	cd backend && npm run lint && npm run format:check
-	cd mobile && dart format --output=none --set-exit-if-changed lib test && flutter analyze
+	cd mobile && dart format --output=none --set-exit-if-changed $$(find lib test -name '*.dart' ! -name '*.g.dart') && flutter analyze

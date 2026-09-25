@@ -1,0 +1,5740 @@
+{
+  "version": 8,
+  "name": "Maps Platform Light",
+  "metadata": {
+    "maps-platform:schema": "1.0.0",
+    "maps-platform:placeholders": {
+      "__PMTILES_URL__": "PMTiles archive, e.g. https://host/maps/ecuador/guayaquil.pmtiles or file:///…",
+      "__GLYPHS_URL__": "Base URL of the glyph folders, e.g. https://host/maps/fonts or file:///…/fonts"
+    }
+  },
+  "sources": {
+    "basemap": {
+      "type": "vector",
+      "url": "pmtiles://__PMTILES_URL__",
+      "attribution": "<a href=\"https://www.openstreetmap.org/copyright\">© OpenStreetMap contributors</a>"
+    }
+  },
+  "glyphs": "__GLYPHS_URL__/{fontstack}/{range}.pbf",
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#f6f3ee"
+      }
+    },
+    {
+      "id": "landuse-natural",
+      "type": "fill",
+      "source": "basemap",
+      "source-layer": "landuse",
+      "filter": [
+        "in",
+        [
+          "get",
+          "class"
+        ],
+        [
+          "literal",
+          [
+            "forest",
+            "grass",
+            "scrub",
+            "farmland",
+            "wetland",
+            "sand",
+            "rock",
+            "glacier"
+          ]
+        ]
+      ],
+      "paint": {
+        "fill-color": [
+          "case",
+          [
+            "==",
+            [
+              "get",
+              "subclass"
+            ],
+            "mangrove"
+          ],
+          "#c7dfcd",
+          [
+            "match",
+            [
+              "get",
+              "class"
+            ],
+            "forest",
+            "#cfe3bd",
+            "grass",
+            "#e2eecf",
+            "scrub",
+            "#d9e6c6",
+            "farmland",
+            "#eef1d9",
+            "wetland",
+            "#d6e8df",
+            "sand",
+            "#f4ead0",
+            "rock",
+            "#e5e0d8",
+            "glacier",
+            "#f2f8fb",
+            "#e2eecf"
+          ]
+        ],
+        "fill-opacity": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          7,
+          0.6,
+          12,
+          1
+        ]
+      }
+    },
+    {
+      "id": "landuse-urban",
+      "type": "fill",
+      "source": "basemap",
+      "source-layer": "landuse",
+      "filter": [
+        "in",
+        [
+          "get",
+          "class"
+        ],
+        [
+          "literal",
+          [
+            "residential",
+            "commercial",
+            "industrial",
+            "military",
+            "construction"
+          ]
+        ]
+      ],
+      "paint": {
+        "fill-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          "residential",
+          "#ede8e1",
+          "commercial",
+          "#f2e6e3",
+          "industrial",
+          "#ebe6ee",
+          "military",
+          "#f2dddd",
+          "construction",
+          "#ebe5d9",
+          "#ede8e1"
+        ],
+        "fill-opacity": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          9,
+          0.5,
+          13,
+          1
+        ]
+      }
+    },
+    {
+      "id": "landuse-amenity",
+      "type": "fill",
+      "source": "basemap",
+      "source-layer": "landuse",
+      "filter": [
+        "in",
+        [
+          "get",
+          "class"
+        ],
+        [
+          "literal",
+          [
+            "cemetery",
+            "hospital",
+            "school",
+            "sports",
+            "parking",
+            "aerodrome",
+            "apron"
+          ]
+        ]
+      ],
+      "paint": {
+        "fill-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          "cemetery",
+          "#dde7d4",
+          "hospital",
+          "#f7e2e2",
+          "school",
+          "#f4efd9",
+          "sports",
+          "#d9ecd6",
+          "parking",
+          "#ececec",
+          "aerodrome",
+          "#e7e5ee",
+          "apron",
+          "#dcd9e6",
+          "#ececec"
+        ]
+      }
+    },
+    {
+      "id": "landuse-park",
+      "type": "fill",
+      "source": "basemap",
+      "source-layer": "landuse",
+      "filter": [
+        "in",
+        [
+          "get",
+          "class"
+        ],
+        [
+          "literal",
+          [
+            "park"
+          ]
+        ]
+      ],
+      "paint": {
+        "fill-color": "#d3e7c2",
+        "fill-opacity": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          9,
+          0.6,
+          13,
+          1
+        ]
+      }
+    },
+    {
+      "id": "water",
+      "type": "fill",
+      "source": "basemap",
+      "source-layer": "water",
+      "paint": {
+        "fill-color": "#a9d0ee"
+      }
+    },
+    {
+      "id": "waterway-river",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "waterway",
+      "filter": [
+        "all",
+        [
+          "in",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "literal",
+            [
+              "river",
+              "canal"
+            ]
+          ]
+        ],
+        [
+          "!=",
+          [
+            "get",
+            "brunnel"
+          ],
+          "tunnel"
+        ]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#a9d0ee",
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.3
+          ],
+          [
+            "zoom"
+          ],
+          8,
+          0.6,
+          12,
+          1.6,
+          14,
+          3,
+          18,
+          12
+        ]
+      }
+    },
+    {
+      "id": "waterway-stream",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "waterway",
+      "filter": [
+        "all",
+        [
+          "in",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "literal",
+            [
+              "stream",
+              "drain"
+            ]
+          ]
+        ],
+        [
+          "!=",
+          [
+            "get",
+            "brunnel"
+          ],
+          "tunnel"
+        ]
+      ],
+      "minzoom": 12,
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#a9d0ee",
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.3
+          ],
+          [
+            "zoom"
+          ],
+          12,
+          0.5,
+          14,
+          1,
+          18,
+          3
+        ]
+      }
+    },
+    {
+      "id": "building",
+      "type": "fill",
+      "source": "basemap",
+      "source-layer": "building",
+      "minzoom": 13,
+      "paint": {
+        "fill-color": "#e3dbd2",
+        "fill-outline-color": "#d3c7ba",
+        "fill-opacity": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          13,
+          0.4,
+          15,
+          1
+        ]
+      }
+    },
+    {
+      "id": "aeroway-runway",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "transportation",
+      "filter": [
+        "in",
+        [
+          "get",
+          "class"
+        ],
+        [
+          "literal",
+          [
+            "runway"
+          ]
+        ]
+      ],
+      "paint": {
+        "line-color": "#d9d5e3",
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.5
+          ],
+          [
+            "zoom"
+          ],
+          10,
+          1,
+          14,
+          14,
+          18,
+          70
+        ]
+      }
+    },
+    {
+      "id": "aeroway-taxiway",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "transportation",
+      "filter": [
+        "in",
+        [
+          "get",
+          "class"
+        ],
+        [
+          "literal",
+          [
+            "taxiway"
+          ]
+        ]
+      ],
+      "minzoom": 13,
+      "paint": {
+        "line-color": "#d9d5e3",
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.5
+          ],
+          [
+            "zoom"
+          ],
+          13,
+          1,
+          18,
+          12
+        ]
+      }
+    },
+    {
+      "id": "road-tunnel-casing",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "in",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "literal",
+            [
+              "motorway",
+              "trunk",
+              "primary",
+              "secondary",
+              "tertiary",
+              "busway",
+              "minor",
+              "service"
+            ]
+          ]
+        ],
+        [
+          "==",
+          [
+            "get",
+            "brunnel"
+          ],
+          "tunnel"
+        ]
+      ],
+      "minzoom": 12,
+      "layout": {
+        "line-join": "round",
+        "line-sort-key": [
+          "+",
+          [
+            "match",
+            [
+              "get",
+              "class"
+            ],
+            "motorway",
+            7,
+            "trunk",
+            6,
+            "primary",
+            5,
+            "secondary",
+            4,
+            "tertiary",
+            3,
+            "busway",
+            2,
+            "minor",
+            1,
+            "service",
+            0,
+            0
+          ],
+          [
+            "*",
+            [
+              "coalesce",
+              [
+                "get",
+                "layer"
+              ],
+              0
+            ],
+            10
+          ]
+        ]
+      },
+      "paint": {
+        "line-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          "motorway",
+          "#d9803a",
+          "trunk",
+          "#d69f4e",
+          "primary",
+          "#d3b262",
+          "secondary",
+          "#d5c7ae",
+          "tertiary",
+          "#d9cdb9",
+          "busway",
+          "#c69fcc",
+          "minor",
+          "#ddd3c3",
+          "service",
+          "#e0d6c8",
+          "#ddd3c3"
+        ],
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.4
+          ],
+          [
+            "zoom"
+          ],
+          5,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                1.7999999999999998,
+                "trunk",
+                1.7,
+                "primary",
+                0,
+                "secondary",
+                0,
+                "tertiary",
+                0,
+                "busway",
+                0,
+                "minor",
+                0,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              1.7999999999999998,
+              "trunk",
+              1.7,
+              "primary",
+              0,
+              "secondary",
+              0,
+              "tertiary",
+              0,
+              "busway",
+              0,
+              "minor",
+              0,
+              "service",
+              0,
+              0
+            ]
+          ],
+          8,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                2.5,
+                "trunk",
+                2.4,
+                "primary",
+                2.0,
+                "secondary",
+                0,
+                "tertiary",
+                0,
+                "busway",
+                0,
+                "minor",
+                0,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              2.5,
+              "trunk",
+              2.4,
+              "primary",
+              2.0,
+              "secondary",
+              0,
+              "tertiary",
+              0,
+              "busway",
+              0,
+              "minor",
+              0,
+              "service",
+              0,
+              0
+            ]
+          ],
+          10,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                3.4000000000000004,
+                "trunk",
+                3.2,
+                "primary",
+                2.8,
+                "secondary",
+                2.3,
+                "tertiary",
+                1.7999999999999998,
+                "busway",
+                0,
+                "minor",
+                0,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              3.4000000000000004,
+              "trunk",
+              3.2,
+              "primary",
+              2.8,
+              "secondary",
+              2.3,
+              "tertiary",
+              1.7999999999999998,
+              "busway",
+              0,
+              "minor",
+              0,
+              "service",
+              0,
+              0
+            ]
+          ],
+          12,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                4.8,
+                "trunk",
+                4.4,
+                "primary",
+                4.0,
+                "secondary",
+                3.4000000000000004,
+                "tertiary",
+                2.9,
+                "busway",
+                2.2,
+                "minor",
+                2.0,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              4.8,
+              "trunk",
+              4.4,
+              "primary",
+              4.0,
+              "secondary",
+              3.4000000000000004,
+              "tertiary",
+              2.9,
+              "busway",
+              2.2,
+              "minor",
+              2.0,
+              "service",
+              0,
+              0
+            ]
+          ],
+          14,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                7.7,
+                "trunk",
+                7.2,
+                "primary",
+                6.6000000000000005,
+                "secondary",
+                5.8,
+                "tertiary",
+                5.0,
+                "busway",
+                4.0,
+                "minor",
+                4.0,
+                "service",
+                2.5,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              7.7,
+              "trunk",
+              7.2,
+              "primary",
+              6.6000000000000005,
+              "secondary",
+              5.8,
+              "tertiary",
+              5.0,
+              "busway",
+              4.0,
+              "minor",
+              4.0,
+              "service",
+              2.5,
+              0
+            ]
+          ],
+          16,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                14.2,
+                "trunk",
+                13.2,
+                "primary",
+                12.2,
+                "secondary",
+                10.7,
+                "tertiary",
+                9.7,
+                "busway",
+                7.7,
+                "minor",
+                7.7,
+                "service",
+                4.4,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              14.2,
+              "trunk",
+              13.2,
+              "primary",
+              12.2,
+              "secondary",
+              10.7,
+              "tertiary",
+              9.7,
+              "busway",
+              7.7,
+              "minor",
+              7.7,
+              "service",
+              4.4,
+              0
+            ]
+          ],
+          18,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                31.2,
+                "trunk",
+                29.2,
+                "primary",
+                27.2,
+                "secondary",
+                23.2,
+                "tertiary",
+                21.2,
+                "busway",
+                16.2,
+                "minor",
+                16.2,
+                "service",
+                9.2,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              31.2,
+              "trunk",
+              29.2,
+              "primary",
+              27.2,
+              "secondary",
+              23.2,
+              "tertiary",
+              21.2,
+              "busway",
+              16.2,
+              "minor",
+              16.2,
+              "service",
+              9.2,
+              0
+            ]
+          ]
+        ],
+        "line-dasharray": [
+          0.6,
+          0.4
+        ]
+      }
+    },
+    {
+      "id": "road-tunnel",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "in",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "literal",
+            [
+              "motorway",
+              "trunk",
+              "primary",
+              "secondary",
+              "tertiary",
+              "busway",
+              "minor",
+              "service"
+            ]
+          ]
+        ],
+        [
+          "==",
+          [
+            "get",
+            "brunnel"
+          ],
+          "tunnel"
+        ]
+      ],
+      "minzoom": 12,
+      "layout": {
+        "line-join": "round",
+        "line-cap": "round",
+        "line-sort-key": [
+          "+",
+          [
+            "match",
+            [
+              "get",
+              "class"
+            ],
+            "motorway",
+            7,
+            "trunk",
+            6,
+            "primary",
+            5,
+            "secondary",
+            4,
+            "tertiary",
+            3,
+            "busway",
+            2,
+            "minor",
+            1,
+            "service",
+            0,
+            0
+          ],
+          [
+            "*",
+            [
+              "coalesce",
+              [
+                "get",
+                "layer"
+              ],
+              0
+            ],
+            10
+          ]
+        ]
+      },
+      "paint": {
+        "line-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          "motorway",
+          "#f5a462",
+          "trunk",
+          "#f8c57b",
+          "primary",
+          "#fde19a",
+          "secondary",
+          "#fffdf2",
+          "tertiary",
+          "#ffffff",
+          "busway",
+          "#efd9f3",
+          "minor",
+          "#ffffff",
+          "service",
+          "#ffffff",
+          "#ffffff"
+        ],
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.4
+          ],
+          [
+            "zoom"
+          ],
+          5,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                0.6,
+                "trunk",
+                0.5,
+                "primary",
+                0,
+                "secondary",
+                0,
+                "tertiary",
+                0,
+                "busway",
+                0,
+                "minor",
+                0,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              0.6,
+              "trunk",
+              0.5,
+              "primary",
+              0,
+              "secondary",
+              0,
+              "tertiary",
+              0,
+              "busway",
+              0,
+              "minor",
+              0,
+              "service",
+              0,
+              0
+            ]
+          ],
+          8,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                1.3,
+                "trunk",
+                1.2,
+                "primary",
+                0.8,
+                "secondary",
+                0,
+                "tertiary",
+                0,
+                "busway",
+                0,
+                "minor",
+                0,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              1.3,
+              "trunk",
+              1.2,
+              "primary",
+              0.8,
+              "secondary",
+              0,
+              "tertiary",
+              0,
+              "busway",
+              0,
+              "minor",
+              0,
+              "service",
+              0,
+              0
+            ]
+          ],
+          10,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                2.2,
+                "trunk",
+                2.0,
+                "primary",
+                1.6,
+                "secondary",
+                1.1,
+                "tertiary",
+                0.6,
+                "busway",
+                0,
+                "minor",
+                0,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              2.2,
+              "trunk",
+              2.0,
+              "primary",
+              1.6,
+              "secondary",
+              1.1,
+              "tertiary",
+              0.6,
+              "busway",
+              0,
+              "minor",
+              0,
+              "service",
+              0,
+              0
+            ]
+          ],
+          12,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                3.6,
+                "trunk",
+                3.2,
+                "primary",
+                2.8,
+                "secondary",
+                2.2,
+                "tertiary",
+                1.7,
+                "busway",
+                1.0,
+                "minor",
+                0.8,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              3.6,
+              "trunk",
+              3.2,
+              "primary",
+              2.8,
+              "secondary",
+              2.2,
+              "tertiary",
+              1.7,
+              "busway",
+              1.0,
+              "minor",
+              0.8,
+              "service",
+              0,
+              0
+            ]
+          ],
+          14,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                6.5,
+                "trunk",
+                6.0,
+                "primary",
+                5.4,
+                "secondary",
+                4.6,
+                "tertiary",
+                3.8,
+                "busway",
+                2.8,
+                "minor",
+                2.8,
+                "service",
+                1.3,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              6.5,
+              "trunk",
+              6.0,
+              "primary",
+              5.4,
+              "secondary",
+              4.6,
+              "tertiary",
+              3.8,
+              "busway",
+              2.8,
+              "minor",
+              2.8,
+              "service",
+              1.3,
+              0
+            ]
+          ],
+          16,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                13.0,
+                "trunk",
+                12.0,
+                "primary",
+                11.0,
+                "secondary",
+                9.5,
+                "tertiary",
+                8.5,
+                "busway",
+                6.5,
+                "minor",
+                6.5,
+                "service",
+                3.2,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              13.0,
+              "trunk",
+              12.0,
+              "primary",
+              11.0,
+              "secondary",
+              9.5,
+              "tertiary",
+              8.5,
+              "busway",
+              6.5,
+              "minor",
+              6.5,
+              "service",
+              3.2,
+              0
+            ]
+          ],
+          18,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                30.0,
+                "trunk",
+                28.0,
+                "primary",
+                26.0,
+                "secondary",
+                22.0,
+                "tertiary",
+                20.0,
+                "busway",
+                15.0,
+                "minor",
+                15.0,
+                "service",
+                8.0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              30.0,
+              "trunk",
+              28.0,
+              "primary",
+              26.0,
+              "secondary",
+              22.0,
+              "tertiary",
+              20.0,
+              "busway",
+              15.0,
+              "minor",
+              15.0,
+              "service",
+              8.0,
+              0
+            ]
+          ]
+        ],
+        "line-opacity": 0.6
+      }
+    },
+    {
+      "id": "road-path",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "in",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "literal",
+            [
+              "path",
+              "track"
+            ]
+          ]
+        ],
+        [
+          "!=",
+          [
+            "get",
+            "brunnel"
+          ],
+          "tunnel"
+        ]
+      ],
+      "minzoom": 13,
+      "layout": {
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": [
+          "case",
+          [
+            "==",
+            [
+              "get",
+              "subclass"
+            ],
+            "cycleway"
+          ],
+          "#5d8fd1",
+          [
+            "==",
+            [
+              "get",
+              "class"
+            ],
+            "track"
+          ],
+          "#b8976b",
+          "#a1968a"
+        ],
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.3
+          ],
+          [
+            "zoom"
+          ],
+          13,
+          0.6,
+          16,
+          1.4,
+          18,
+          2.6
+        ],
+        "line-dasharray": [
+          2,
+          1.2
+        ]
+      }
+    },
+    {
+      "id": "road-casing",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "in",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "literal",
+            [
+              "motorway",
+              "trunk",
+              "primary",
+              "secondary",
+              "tertiary",
+              "busway",
+              "minor",
+              "service"
+            ]
+          ]
+        ],
+        [
+          "!",
+          [
+            "in",
+            [
+              "get",
+              "brunnel"
+            ],
+            [
+              "literal",
+              [
+                "tunnel",
+                "bridge"
+              ]
+            ]
+          ]
+        ]
+      ],
+      "minzoom": 10,
+      "layout": {
+        "line-join": "round",
+        "line-cap": "round",
+        "line-sort-key": [
+          "+",
+          [
+            "match",
+            [
+              "get",
+              "class"
+            ],
+            "motorway",
+            7,
+            "trunk",
+            6,
+            "primary",
+            5,
+            "secondary",
+            4,
+            "tertiary",
+            3,
+            "busway",
+            2,
+            "minor",
+            1,
+            "service",
+            0,
+            0
+          ],
+          [
+            "*",
+            [
+              "coalesce",
+              [
+                "get",
+                "layer"
+              ],
+              0
+            ],
+            10
+          ]
+        ]
+      },
+      "paint": {
+        "line-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          "motorway",
+          "#d9803a",
+          "trunk",
+          "#d69f4e",
+          "primary",
+          "#d3b262",
+          "secondary",
+          "#d5c7ae",
+          "tertiary",
+          "#d9cdb9",
+          "busway",
+          "#c69fcc",
+          "minor",
+          "#ddd3c3",
+          "service",
+          "#e0d6c8",
+          "#ddd3c3"
+        ],
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.4
+          ],
+          [
+            "zoom"
+          ],
+          5,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                1.7999999999999998,
+                "trunk",
+                1.7,
+                "primary",
+                0,
+                "secondary",
+                0,
+                "tertiary",
+                0,
+                "busway",
+                0,
+                "minor",
+                0,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              1.7999999999999998,
+              "trunk",
+              1.7,
+              "primary",
+              0,
+              "secondary",
+              0,
+              "tertiary",
+              0,
+              "busway",
+              0,
+              "minor",
+              0,
+              "service",
+              0,
+              0
+            ]
+          ],
+          8,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                2.5,
+                "trunk",
+                2.4,
+                "primary",
+                2.0,
+                "secondary",
+                0,
+                "tertiary",
+                0,
+                "busway",
+                0,
+                "minor",
+                0,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              2.5,
+              "trunk",
+              2.4,
+              "primary",
+              2.0,
+              "secondary",
+              0,
+              "tertiary",
+              0,
+              "busway",
+              0,
+              "minor",
+              0,
+              "service",
+              0,
+              0
+            ]
+          ],
+          10,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                3.4000000000000004,
+                "trunk",
+                3.2,
+                "primary",
+                2.8,
+                "secondary",
+                2.3,
+                "tertiary",
+                1.7999999999999998,
+                "busway",
+                0,
+                "minor",
+                0,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              3.4000000000000004,
+              "trunk",
+              3.2,
+              "primary",
+              2.8,
+              "secondary",
+              2.3,
+              "tertiary",
+              1.7999999999999998,
+              "busway",
+              0,
+              "minor",
+              0,
+              "service",
+              0,
+              0
+            ]
+          ],
+          12,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                4.8,
+                "trunk",
+                4.4,
+                "primary",
+                4.0,
+                "secondary",
+                3.4000000000000004,
+                "tertiary",
+                2.9,
+                "busway",
+                2.2,
+                "minor",
+                2.0,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              4.8,
+              "trunk",
+              4.4,
+              "primary",
+              4.0,
+              "secondary",
+              3.4000000000000004,
+              "tertiary",
+              2.9,
+              "busway",
+              2.2,
+              "minor",
+              2.0,
+              "service",
+              0,
+              0
+            ]
+          ],
+          14,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                7.7,
+                "trunk",
+                7.2,
+                "primary",
+                6.6000000000000005,
+                "secondary",
+                5.8,
+                "tertiary",
+                5.0,
+                "busway",
+                4.0,
+                "minor",
+                4.0,
+                "service",
+                2.5,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              7.7,
+              "trunk",
+              7.2,
+              "primary",
+              6.6000000000000005,
+              "secondary",
+              5.8,
+              "tertiary",
+              5.0,
+              "busway",
+              4.0,
+              "minor",
+              4.0,
+              "service",
+              2.5,
+              0
+            ]
+          ],
+          16,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                14.2,
+                "trunk",
+                13.2,
+                "primary",
+                12.2,
+                "secondary",
+                10.7,
+                "tertiary",
+                9.7,
+                "busway",
+                7.7,
+                "minor",
+                7.7,
+                "service",
+                4.4,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              14.2,
+              "trunk",
+              13.2,
+              "primary",
+              12.2,
+              "secondary",
+              10.7,
+              "tertiary",
+              9.7,
+              "busway",
+              7.7,
+              "minor",
+              7.7,
+              "service",
+              4.4,
+              0
+            ]
+          ],
+          18,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                31.2,
+                "trunk",
+                29.2,
+                "primary",
+                27.2,
+                "secondary",
+                23.2,
+                "tertiary",
+                21.2,
+                "busway",
+                16.2,
+                "minor",
+                16.2,
+                "service",
+                9.2,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              31.2,
+              "trunk",
+              29.2,
+              "primary",
+              27.2,
+              "secondary",
+              23.2,
+              "tertiary",
+              21.2,
+              "busway",
+              16.2,
+              "minor",
+              16.2,
+              "service",
+              9.2,
+              0
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "road",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "in",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "literal",
+            [
+              "motorway",
+              "trunk",
+              "primary",
+              "secondary",
+              "tertiary",
+              "busway",
+              "minor",
+              "service"
+            ]
+          ]
+        ],
+        [
+          "!",
+          [
+            "in",
+            [
+              "get",
+              "brunnel"
+            ],
+            [
+              "literal",
+              [
+                "tunnel",
+                "bridge"
+              ]
+            ]
+          ]
+        ]
+      ],
+      "layout": {
+        "line-join": "round",
+        "line-cap": "round",
+        "line-sort-key": [
+          "+",
+          [
+            "match",
+            [
+              "get",
+              "class"
+            ],
+            "motorway",
+            7,
+            "trunk",
+            6,
+            "primary",
+            5,
+            "secondary",
+            4,
+            "tertiary",
+            3,
+            "busway",
+            2,
+            "minor",
+            1,
+            "service",
+            0,
+            0
+          ],
+          [
+            "*",
+            [
+              "coalesce",
+              [
+                "get",
+                "layer"
+              ],
+              0
+            ],
+            10
+          ]
+        ]
+      },
+      "paint": {
+        "line-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          "motorway",
+          "#f5a462",
+          "trunk",
+          "#f8c57b",
+          "primary",
+          "#fde19a",
+          "secondary",
+          "#fffdf2",
+          "tertiary",
+          "#ffffff",
+          "busway",
+          "#efd9f3",
+          "minor",
+          "#ffffff",
+          "service",
+          "#ffffff",
+          "#ffffff"
+        ],
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.4
+          ],
+          [
+            "zoom"
+          ],
+          5,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                0.6,
+                "trunk",
+                0.5,
+                "primary",
+                0,
+                "secondary",
+                0,
+                "tertiary",
+                0,
+                "busway",
+                0,
+                "minor",
+                0,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              0.6,
+              "trunk",
+              0.5,
+              "primary",
+              0,
+              "secondary",
+              0,
+              "tertiary",
+              0,
+              "busway",
+              0,
+              "minor",
+              0,
+              "service",
+              0,
+              0
+            ]
+          ],
+          8,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                1.3,
+                "trunk",
+                1.2,
+                "primary",
+                0.8,
+                "secondary",
+                0,
+                "tertiary",
+                0,
+                "busway",
+                0,
+                "minor",
+                0,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              1.3,
+              "trunk",
+              1.2,
+              "primary",
+              0.8,
+              "secondary",
+              0,
+              "tertiary",
+              0,
+              "busway",
+              0,
+              "minor",
+              0,
+              "service",
+              0,
+              0
+            ]
+          ],
+          10,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                2.2,
+                "trunk",
+                2.0,
+                "primary",
+                1.6,
+                "secondary",
+                1.1,
+                "tertiary",
+                0.6,
+                "busway",
+                0,
+                "minor",
+                0,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              2.2,
+              "trunk",
+              2.0,
+              "primary",
+              1.6,
+              "secondary",
+              1.1,
+              "tertiary",
+              0.6,
+              "busway",
+              0,
+              "minor",
+              0,
+              "service",
+              0,
+              0
+            ]
+          ],
+          12,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                3.6,
+                "trunk",
+                3.2,
+                "primary",
+                2.8,
+                "secondary",
+                2.2,
+                "tertiary",
+                1.7,
+                "busway",
+                1.0,
+                "minor",
+                0.8,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              3.6,
+              "trunk",
+              3.2,
+              "primary",
+              2.8,
+              "secondary",
+              2.2,
+              "tertiary",
+              1.7,
+              "busway",
+              1.0,
+              "minor",
+              0.8,
+              "service",
+              0,
+              0
+            ]
+          ],
+          14,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                6.5,
+                "trunk",
+                6.0,
+                "primary",
+                5.4,
+                "secondary",
+                4.6,
+                "tertiary",
+                3.8,
+                "busway",
+                2.8,
+                "minor",
+                2.8,
+                "service",
+                1.3,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              6.5,
+              "trunk",
+              6.0,
+              "primary",
+              5.4,
+              "secondary",
+              4.6,
+              "tertiary",
+              3.8,
+              "busway",
+              2.8,
+              "minor",
+              2.8,
+              "service",
+              1.3,
+              0
+            ]
+          ],
+          16,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                13.0,
+                "trunk",
+                12.0,
+                "primary",
+                11.0,
+                "secondary",
+                9.5,
+                "tertiary",
+                8.5,
+                "busway",
+                6.5,
+                "minor",
+                6.5,
+                "service",
+                3.2,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              13.0,
+              "trunk",
+              12.0,
+              "primary",
+              11.0,
+              "secondary",
+              9.5,
+              "tertiary",
+              8.5,
+              "busway",
+              6.5,
+              "minor",
+              6.5,
+              "service",
+              3.2,
+              0
+            ]
+          ],
+          18,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                30.0,
+                "trunk",
+                28.0,
+                "primary",
+                26.0,
+                "secondary",
+                22.0,
+                "tertiary",
+                20.0,
+                "busway",
+                15.0,
+                "minor",
+                15.0,
+                "service",
+                8.0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              30.0,
+              "trunk",
+              28.0,
+              "primary",
+              26.0,
+              "secondary",
+              22.0,
+              "tertiary",
+              20.0,
+              "busway",
+              15.0,
+              "minor",
+              15.0,
+              "service",
+              8.0,
+              0
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "rail",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "in",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "literal",
+            [
+              "rail",
+              "transit"
+            ]
+          ]
+        ],
+        [
+          "!=",
+          [
+            "get",
+            "brunnel"
+          ],
+          "tunnel"
+        ]
+      ],
+      "paint": {
+        "line-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          "transit",
+          "#9d8dc0",
+          "#a9a39c"
+        ],
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.3
+          ],
+          [
+            "zoom"
+          ],
+          9,
+          0.6,
+          14,
+          2,
+          18,
+          4
+        ]
+      }
+    },
+    {
+      "id": "rail-hatch",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "all",
+          [
+            "in",
+            [
+              "get",
+              "class"
+            ],
+            [
+              "literal",
+              [
+                "rail",
+                "transit"
+              ]
+            ]
+          ],
+          [
+            "!=",
+            [
+              "get",
+              "brunnel"
+            ],
+            "tunnel"
+          ]
+        ],
+        [
+          "in",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "literal",
+            [
+              "rail"
+            ]
+          ]
+        ]
+      ],
+      "minzoom": 13,
+      "paint": {
+        "line-color": "#ffffff",
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.3
+          ],
+          [
+            "zoom"
+          ],
+          13,
+          0.8,
+          18,
+          2
+        ],
+        "line-dasharray": [
+          2,
+          2
+        ]
+      }
+    },
+    {
+      "id": "road-bridge-casing",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "in",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "literal",
+            [
+              "motorway",
+              "trunk",
+              "primary",
+              "secondary",
+              "tertiary",
+              "busway",
+              "minor",
+              "service"
+            ]
+          ]
+        ],
+        [
+          "==",
+          [
+            "get",
+            "brunnel"
+          ],
+          "bridge"
+        ]
+      ],
+      "minzoom": 12,
+      "layout": {
+        "line-join": "round",
+        "line-sort-key": [
+          "+",
+          [
+            "match",
+            [
+              "get",
+              "class"
+            ],
+            "motorway",
+            7,
+            "trunk",
+            6,
+            "primary",
+            5,
+            "secondary",
+            4,
+            "tertiary",
+            3,
+            "busway",
+            2,
+            "minor",
+            1,
+            "service",
+            0,
+            0
+          ],
+          [
+            "*",
+            [
+              "coalesce",
+              [
+                "get",
+                "layer"
+              ],
+              0
+            ],
+            10
+          ]
+        ]
+      },
+      "paint": {
+        "line-color": "#bfae98",
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.4
+          ],
+          [
+            "zoom"
+          ],
+          5,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                2.6,
+                "trunk",
+                2.5,
+                "primary",
+                0,
+                "secondary",
+                0,
+                "tertiary",
+                0,
+                "busway",
+                0,
+                "minor",
+                0,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              2.6,
+              "trunk",
+              2.5,
+              "primary",
+              0,
+              "secondary",
+              0,
+              "tertiary",
+              0,
+              "busway",
+              0,
+              "minor",
+              0,
+              "service",
+              0,
+              0
+            ]
+          ],
+          8,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                3.3,
+                "trunk",
+                3.2,
+                "primary",
+                2.8,
+                "secondary",
+                0,
+                "tertiary",
+                0,
+                "busway",
+                0,
+                "minor",
+                0,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              3.3,
+              "trunk",
+              3.2,
+              "primary",
+              2.8,
+              "secondary",
+              0,
+              "tertiary",
+              0,
+              "busway",
+              0,
+              "minor",
+              0,
+              "service",
+              0,
+              0
+            ]
+          ],
+          10,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                4.2,
+                "trunk",
+                4,
+                "primary",
+                3.6,
+                "secondary",
+                3.1,
+                "tertiary",
+                2.6,
+                "busway",
+                0,
+                "minor",
+                0,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              4.2,
+              "trunk",
+              4,
+              "primary",
+              3.6,
+              "secondary",
+              3.1,
+              "tertiary",
+              2.6,
+              "busway",
+              0,
+              "minor",
+              0,
+              "service",
+              0,
+              0
+            ]
+          ],
+          12,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                5.6,
+                "trunk",
+                5.2,
+                "primary",
+                4.8,
+                "secondary",
+                4.2,
+                "tertiary",
+                3.7,
+                "busway",
+                3,
+                "minor",
+                2.8,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              5.6,
+              "trunk",
+              5.2,
+              "primary",
+              4.8,
+              "secondary",
+              4.2,
+              "tertiary",
+              3.7,
+              "busway",
+              3,
+              "minor",
+              2.8,
+              "service",
+              0,
+              0
+            ]
+          ],
+          14,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                8.5,
+                "trunk",
+                8,
+                "primary",
+                7.4,
+                "secondary",
+                6.6,
+                "tertiary",
+                5.8,
+                "busway",
+                4.8,
+                "minor",
+                4.8,
+                "service",
+                3.3,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              8.5,
+              "trunk",
+              8,
+              "primary",
+              7.4,
+              "secondary",
+              6.6,
+              "tertiary",
+              5.8,
+              "busway",
+              4.8,
+              "minor",
+              4.8,
+              "service",
+              3.3,
+              0
+            ]
+          ],
+          16,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                15,
+                "trunk",
+                14,
+                "primary",
+                13,
+                "secondary",
+                11.5,
+                "tertiary",
+                10.5,
+                "busway",
+                8.5,
+                "minor",
+                8.5,
+                "service",
+                5.2,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              15,
+              "trunk",
+              14,
+              "primary",
+              13,
+              "secondary",
+              11.5,
+              "tertiary",
+              10.5,
+              "busway",
+              8.5,
+              "minor",
+              8.5,
+              "service",
+              5.2,
+              0
+            ]
+          ],
+          18,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                32,
+                "trunk",
+                30,
+                "primary",
+                28,
+                "secondary",
+                24,
+                "tertiary",
+                22,
+                "busway",
+                17,
+                "minor",
+                17,
+                "service",
+                10,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              32,
+              "trunk",
+              30,
+              "primary",
+              28,
+              "secondary",
+              24,
+              "tertiary",
+              22,
+              "busway",
+              17,
+              "minor",
+              17,
+              "service",
+              10,
+              0
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "road-bridge",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "in",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "literal",
+            [
+              "motorway",
+              "trunk",
+              "primary",
+              "secondary",
+              "tertiary",
+              "busway",
+              "minor",
+              "service"
+            ]
+          ]
+        ],
+        [
+          "==",
+          [
+            "get",
+            "brunnel"
+          ],
+          "bridge"
+        ]
+      ],
+      "minzoom": 12,
+      "layout": {
+        "line-join": "round",
+        "line-sort-key": [
+          "+",
+          [
+            "match",
+            [
+              "get",
+              "class"
+            ],
+            "motorway",
+            7,
+            "trunk",
+            6,
+            "primary",
+            5,
+            "secondary",
+            4,
+            "tertiary",
+            3,
+            "busway",
+            2,
+            "minor",
+            1,
+            "service",
+            0,
+            0
+          ],
+          [
+            "*",
+            [
+              "coalesce",
+              [
+                "get",
+                "layer"
+              ],
+              0
+            ],
+            10
+          ]
+        ]
+      },
+      "paint": {
+        "line-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          "motorway",
+          "#f5a462",
+          "trunk",
+          "#f8c57b",
+          "primary",
+          "#fde19a",
+          "secondary",
+          "#fffdf2",
+          "tertiary",
+          "#ffffff",
+          "busway",
+          "#efd9f3",
+          "minor",
+          "#ffffff",
+          "service",
+          "#ffffff",
+          "#ffffff"
+        ],
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.4
+          ],
+          [
+            "zoom"
+          ],
+          5,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                0.6,
+                "trunk",
+                0.5,
+                "primary",
+                0,
+                "secondary",
+                0,
+                "tertiary",
+                0,
+                "busway",
+                0,
+                "minor",
+                0,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              0.6,
+              "trunk",
+              0.5,
+              "primary",
+              0,
+              "secondary",
+              0,
+              "tertiary",
+              0,
+              "busway",
+              0,
+              "minor",
+              0,
+              "service",
+              0,
+              0
+            ]
+          ],
+          8,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                1.3,
+                "trunk",
+                1.2,
+                "primary",
+                0.8,
+                "secondary",
+                0,
+                "tertiary",
+                0,
+                "busway",
+                0,
+                "minor",
+                0,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              1.3,
+              "trunk",
+              1.2,
+              "primary",
+              0.8,
+              "secondary",
+              0,
+              "tertiary",
+              0,
+              "busway",
+              0,
+              "minor",
+              0,
+              "service",
+              0,
+              0
+            ]
+          ],
+          10,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                2.2,
+                "trunk",
+                2.0,
+                "primary",
+                1.6,
+                "secondary",
+                1.1,
+                "tertiary",
+                0.6,
+                "busway",
+                0,
+                "minor",
+                0,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              2.2,
+              "trunk",
+              2.0,
+              "primary",
+              1.6,
+              "secondary",
+              1.1,
+              "tertiary",
+              0.6,
+              "busway",
+              0,
+              "minor",
+              0,
+              "service",
+              0,
+              0
+            ]
+          ],
+          12,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                3.6,
+                "trunk",
+                3.2,
+                "primary",
+                2.8,
+                "secondary",
+                2.2,
+                "tertiary",
+                1.7,
+                "busway",
+                1.0,
+                "minor",
+                0.8,
+                "service",
+                0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              3.6,
+              "trunk",
+              3.2,
+              "primary",
+              2.8,
+              "secondary",
+              2.2,
+              "tertiary",
+              1.7,
+              "busway",
+              1.0,
+              "minor",
+              0.8,
+              "service",
+              0,
+              0
+            ]
+          ],
+          14,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                6.5,
+                "trunk",
+                6.0,
+                "primary",
+                5.4,
+                "secondary",
+                4.6,
+                "tertiary",
+                3.8,
+                "busway",
+                2.8,
+                "minor",
+                2.8,
+                "service",
+                1.3,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              6.5,
+              "trunk",
+              6.0,
+              "primary",
+              5.4,
+              "secondary",
+              4.6,
+              "tertiary",
+              3.8,
+              "busway",
+              2.8,
+              "minor",
+              2.8,
+              "service",
+              1.3,
+              0
+            ]
+          ],
+          16,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                13.0,
+                "trunk",
+                12.0,
+                "primary",
+                11.0,
+                "secondary",
+                9.5,
+                "tertiary",
+                8.5,
+                "busway",
+                6.5,
+                "minor",
+                6.5,
+                "service",
+                3.2,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              13.0,
+              "trunk",
+              12.0,
+              "primary",
+              11.0,
+              "secondary",
+              9.5,
+              "tertiary",
+              8.5,
+              "busway",
+              6.5,
+              "minor",
+              6.5,
+              "service",
+              3.2,
+              0
+            ]
+          ],
+          18,
+          [
+            "case",
+            [
+              "==",
+              [
+                "get",
+                "ramp"
+              ],
+              true
+            ],
+            [
+              "*",
+              [
+                "match",
+                [
+                  "get",
+                  "class"
+                ],
+                "motorway",
+                30.0,
+                "trunk",
+                28.0,
+                "primary",
+                26.0,
+                "secondary",
+                22.0,
+                "tertiary",
+                20.0,
+                "busway",
+                15.0,
+                "minor",
+                15.0,
+                "service",
+                8.0,
+                0
+              ],
+              0.7
+            ],
+            [
+              "match",
+              [
+                "get",
+                "class"
+              ],
+              "motorway",
+              30.0,
+              "trunk",
+              28.0,
+              "primary",
+              26.0,
+              "secondary",
+              22.0,
+              "tertiary",
+              20.0,
+              "busway",
+              15.0,
+              "minor",
+              15.0,
+              "service",
+              8.0,
+              0
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "ferry",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "transportation",
+      "filter": [
+        "in",
+        [
+          "get",
+          "class"
+        ],
+        [
+          "literal",
+          [
+            "ferry"
+          ]
+        ]
+      ],
+      "paint": {
+        "line-color": "#6d9fd6",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          7,
+          0.6,
+          14,
+          1.5
+        ],
+        "line-dasharray": [
+          3,
+          2
+        ]
+      }
+    },
+    {
+      "id": "aerialway",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "transportation",
+      "filter": [
+        "in",
+        [
+          "get",
+          "class"
+        ],
+        [
+          "literal",
+          [
+            "aerialway"
+          ]
+        ]
+      ],
+      "minzoom": 12,
+      "paint": {
+        "line-color": "#7a6f85",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          12,
+          0.8,
+          18,
+          2
+        ],
+        "line-dasharray": [
+          4,
+          1
+        ]
+      }
+    },
+    {
+      "id": "boundary-other",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "boundary",
+      "filter": [
+        "all",
+        [
+          ">",
+          [
+            "get",
+            "admin_level"
+          ],
+          4
+        ],
+        [
+          "!=",
+          [
+            "get",
+            "maritime"
+          ],
+          true
+        ]
+      ],
+      "minzoom": 10,
+      "paint": {
+        "line-color": "#c6c1d2",
+        "line-width": 0.8,
+        "line-dasharray": [
+          2,
+          2
+        ]
+      }
+    },
+    {
+      "id": "boundary-state",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "boundary",
+      "filter": [
+        "all",
+        [
+          ">",
+          [
+            "get",
+            "admin_level"
+          ],
+          2
+        ],
+        [
+          "<=",
+          [
+            "get",
+            "admin_level"
+          ],
+          4
+        ],
+        [
+          "!=",
+          [
+            "get",
+            "maritime"
+          ],
+          true
+        ]
+      ],
+      "paint": {
+        "line-color": "#aea8c0",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          4,
+          0.5,
+          12,
+          1.3,
+          16,
+          2
+        ],
+        "line-dasharray": [
+          3,
+          2
+        ]
+      }
+    },
+    {
+      "id": "boundary-country-halo",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "boundary",
+      "filter": [
+        "all",
+        [
+          "<=",
+          [
+            "get",
+            "admin_level"
+          ],
+          2
+        ],
+        [
+          "!=",
+          [
+            "get",
+            "maritime"
+          ],
+          true
+        ]
+      ],
+      "paint": {
+        "line-color": "#e4e0ec",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          2,
+          2,
+          10,
+          6,
+          16,
+          10
+        ],
+        "line-opacity": 0.7
+      }
+    },
+    {
+      "id": "boundary-country",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "boundary",
+      "filter": [
+        "all",
+        [
+          "all",
+          [
+            "<=",
+            [
+              "get",
+              "admin_level"
+            ],
+            2
+          ],
+          [
+            "!=",
+            [
+              "get",
+              "maritime"
+            ],
+            true
+          ]
+        ],
+        [
+          "!=",
+          [
+            "get",
+            "disputed"
+          ],
+          true
+        ]
+      ],
+      "paint": {
+        "line-color": "#8e88a3",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          2,
+          0.6,
+          10,
+          1.5,
+          16,
+          2.5
+        ]
+      }
+    },
+    {
+      "id": "boundary-country-disputed",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "boundary",
+      "filter": [
+        "all",
+        [
+          "all",
+          [
+            "<=",
+            [
+              "get",
+              "admin_level"
+            ],
+            2
+          ],
+          [
+            "!=",
+            [
+              "get",
+              "maritime"
+            ],
+            true
+          ]
+        ],
+        [
+          "==",
+          [
+            "get",
+            "disputed"
+          ],
+          true
+        ]
+      ],
+      "paint": {
+        "line-color": "#8e88a3",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          2,
+          0.6,
+          10,
+          1.5,
+          16,
+          2.5
+        ],
+        "line-dasharray": [
+          2,
+          2
+        ]
+      }
+    },
+    {
+      "id": "waterway-label",
+      "type": "symbol",
+      "source": "basemap",
+      "source-layer": "waterway",
+      "filter": [
+        "all",
+        [
+          "in",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "literal",
+            [
+              "river",
+              "canal"
+            ]
+          ]
+        ],
+        [
+          "has",
+          "name"
+        ]
+      ],
+      "minzoom": 10,
+      "layout": {
+        "symbol-placement": "line",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name_es"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Italic"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          10,
+          10,
+          16,
+          13
+        ],
+        "text-letter-spacing": 0.1,
+        "symbol-spacing": 350
+      },
+      "paint": {
+        "text-color": "#4a7fb0",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.2
+      }
+    },
+    {
+      "id": "water-name",
+      "type": "symbol",
+      "source": "basemap",
+      "source-layer": "water_name",
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name_es"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Italic"
+        ],
+        "text-size": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          "ocean",
+          16,
+          "sea",
+          14,
+          12
+        ],
+        "text-max-width": 8,
+        "text-letter-spacing": 0.1
+      },
+      "paint": {
+        "text-color": "#4a7fb0",
+        "text-halo-color": "rgba(255,255,255,0.7)",
+        "text-halo-width": 1
+      }
+    },
+    {
+      "id": "road-oneway",
+      "type": "symbol",
+      "source": "basemap",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "has",
+          "oneway"
+        ],
+        [
+          "in",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "literal",
+            [
+              "motorway",
+              "trunk",
+              "primary",
+              "secondary",
+              "tertiary",
+              "busway",
+              "minor",
+              "service"
+            ]
+          ]
+        ]
+      ],
+      "minzoom": 16,
+      "layout": {
+        "symbol-placement": "line",
+        "symbol-spacing": 120,
+        "text-field": [
+          "case",
+          [
+            "==",
+            [
+              "get",
+              "oneway"
+            ],
+            -1
+          ],
+          "←",
+          "→"
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": 12,
+        "text-keep-upright": false,
+        "text-allow-overlap": true,
+        "text-ignore-placement": true
+      },
+      "paint": {
+        "text-color": "#9a8f82"
+      }
+    },
+    {
+      "id": "road-label",
+      "type": "symbol",
+      "source": "basemap",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "has",
+          "name"
+        ],
+        [
+          "in",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "literal",
+            [
+              "motorway",
+              "trunk",
+              "primary",
+              "secondary",
+              "tertiary",
+              "busway",
+              "minor",
+              "service",
+              "path",
+              "track"
+            ]
+          ]
+        ]
+      ],
+      "minzoom": 12,
+      "layout": {
+        "symbol-placement": "line",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name_es"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          12,
+          9.5,
+          16,
+          12.5,
+          18,
+          14
+        ],
+        "symbol-spacing": 300,
+        "text-max-angle": 30,
+        "symbol-sort-key": [
+          "-",
+          10,
+          [
+            "match",
+            [
+              "get",
+              "class"
+            ],
+            "motorway",
+            7,
+            "trunk",
+            6,
+            "primary",
+            5,
+            "secondary",
+            4,
+            "tertiary",
+            3,
+            "busway",
+            2,
+            "minor",
+            1,
+            "service",
+            0,
+            0
+          ]
+        ]
+      },
+      "paint": {
+        "text-color": "#4d4640",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.5
+      }
+    },
+    {
+      "id": "road-ref",
+      "type": "symbol",
+      "source": "basemap",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "has",
+          "ref"
+        ],
+        [
+          "in",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "literal",
+            [
+              "motorway",
+              "trunk",
+              "primary"
+            ]
+          ]
+        ]
+      ],
+      "minzoom": 8,
+      "layout": {
+        "symbol-placement": "line",
+        "text-field": [
+          "get",
+          "ref"
+        ],
+        "text-font": [
+          "Noto Sans Medium"
+        ],
+        "text-size": 10,
+        "symbol-spacing": 400,
+        "text-rotation-alignment": "viewport"
+      },
+      "paint": {
+        "text-color": "#7a5a2e",
+        "text-halo-color": "#fff6e5",
+        "text-halo-width": 2
+      }
+    },
+    {
+      "id": "housenumber",
+      "type": "symbol",
+      "source": "basemap",
+      "source-layer": "housenumber",
+      "minzoom": 17,
+      "layout": {
+        "text-field": [
+          "get",
+          "housenumber"
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": 10
+      },
+      "paint": {
+        "text-color": "#8a7f76",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1
+      }
+    },
+    {
+      "id": "poi-dot-major",
+      "type": "circle",
+      "source": "basemap",
+      "source-layer": "poi",
+      "filter": [
+        "<=",
+        [
+          "get",
+          "rank"
+        ],
+        10
+      ],
+      "minzoom": 14,
+      "paint": {
+        "circle-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          "hospital",
+          "#d9534f",
+          "health",
+          "#d9534f",
+          "pharmacy",
+          "#d9534f",
+          "emergency",
+          "#d9534f",
+          "food",
+          "#e07b39",
+          "cafe",
+          "#e07b39",
+          "bar",
+          "#e07b39",
+          "shop",
+          "#b5579a",
+          "mall",
+          "#b5579a",
+          "supermarket",
+          "#b5579a",
+          "grocery",
+          "#b5579a",
+          "market",
+          "#b5579a",
+          "lodging",
+          "#3f7fbf",
+          "school",
+          "#8c6d3f",
+          "college",
+          "#8c6d3f",
+          "library",
+          "#8c6d3f",
+          "park",
+          "#4f9a4f",
+          "playground",
+          "#4f9a4f",
+          "campsite",
+          "#4f9a4f",
+          "sports",
+          "#4f9a4f",
+          "stadium",
+          "#4f9a4f",
+          "airport",
+          "#5b5fb0",
+          "railway_station",
+          "#5b5fb0",
+          "transit_station",
+          "#5b5fb0",
+          "bus_station",
+          "#5b5fb0",
+          "bus_stop",
+          "#5b5fb0",
+          "tram_stop",
+          "#5b5fb0",
+          "ferry_terminal",
+          "#5b5fb0",
+          "taxi",
+          "#5b5fb0",
+          "fuel",
+          "#6b6b6b",
+          "parking",
+          "#6b6b6b",
+          "charging_station",
+          "#6b6b6b",
+          "bank",
+          "#6b6b6b",
+          "museum",
+          "#9c5a3c",
+          "attraction",
+          "#9c5a3c",
+          "historic",
+          "#9c5a3c",
+          "culture",
+          "#9c5a3c",
+          "worship",
+          "#7d7d7d",
+          "government",
+          "#7d7d7d",
+          "post",
+          "#7d7d7d",
+          "#7d7d7d"
+        ],
+        "circle-radius": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          14,
+          3,
+          18,
+          5
+        ],
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 1.2
+      }
+    },
+    {
+      "id": "poi-label-major",
+      "type": "symbol",
+      "source": "basemap",
+      "source-layer": "poi",
+      "filter": [
+        "all",
+        [
+          "<=",
+          [
+            "get",
+            "rank"
+          ],
+          10
+        ],
+        [
+          "has",
+          "name"
+        ]
+      ],
+      "minzoom": 14,
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name_es"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": 11,
+        "text-max-width": 8,
+        "text-variable-anchor": [
+          "left",
+          "right",
+          "top",
+          "bottom"
+        ],
+        "text-radial-offset": 0.7,
+        "text-justify": "auto",
+        "symbol-sort-key": [
+          "get",
+          "rank"
+        ]
+      },
+      "paint": {
+        "text-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          "hospital",
+          "#d9534f",
+          "health",
+          "#d9534f",
+          "pharmacy",
+          "#d9534f",
+          "emergency",
+          "#d9534f",
+          "food",
+          "#e07b39",
+          "cafe",
+          "#e07b39",
+          "bar",
+          "#e07b39",
+          "shop",
+          "#b5579a",
+          "mall",
+          "#b5579a",
+          "supermarket",
+          "#b5579a",
+          "grocery",
+          "#b5579a",
+          "market",
+          "#b5579a",
+          "lodging",
+          "#3f7fbf",
+          "school",
+          "#8c6d3f",
+          "college",
+          "#8c6d3f",
+          "library",
+          "#8c6d3f",
+          "park",
+          "#4f9a4f",
+          "playground",
+          "#4f9a4f",
+          "campsite",
+          "#4f9a4f",
+          "sports",
+          "#4f9a4f",
+          "stadium",
+          "#4f9a4f",
+          "airport",
+          "#5b5fb0",
+          "railway_station",
+          "#5b5fb0",
+          "transit_station",
+          "#5b5fb0",
+          "bus_station",
+          "#5b5fb0",
+          "bus_stop",
+          "#5b5fb0",
+          "tram_stop",
+          "#5b5fb0",
+          "ferry_terminal",
+          "#5b5fb0",
+          "taxi",
+          "#5b5fb0",
+          "fuel",
+          "#6b6b6b",
+          "parking",
+          "#6b6b6b",
+          "charging_station",
+          "#6b6b6b",
+          "bank",
+          "#6b6b6b",
+          "museum",
+          "#9c5a3c",
+          "attraction",
+          "#9c5a3c",
+          "historic",
+          "#9c5a3c",
+          "culture",
+          "#9c5a3c",
+          "worship",
+          "#7d7d7d",
+          "government",
+          "#7d7d7d",
+          "post",
+          "#7d7d7d",
+          "#7d7d7d"
+        ],
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.4
+      }
+    },
+    {
+      "id": "poi-dot",
+      "type": "circle",
+      "source": "basemap",
+      "source-layer": "poi",
+      "filter": [
+        ">",
+        [
+          "get",
+          "rank"
+        ],
+        10
+      ],
+      "minzoom": 16,
+      "paint": {
+        "circle-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          "hospital",
+          "#d9534f",
+          "health",
+          "#d9534f",
+          "pharmacy",
+          "#d9534f",
+          "emergency",
+          "#d9534f",
+          "food",
+          "#e07b39",
+          "cafe",
+          "#e07b39",
+          "bar",
+          "#e07b39",
+          "shop",
+          "#b5579a",
+          "mall",
+          "#b5579a",
+          "supermarket",
+          "#b5579a",
+          "grocery",
+          "#b5579a",
+          "market",
+          "#b5579a",
+          "lodging",
+          "#3f7fbf",
+          "school",
+          "#8c6d3f",
+          "college",
+          "#8c6d3f",
+          "library",
+          "#8c6d3f",
+          "park",
+          "#4f9a4f",
+          "playground",
+          "#4f9a4f",
+          "campsite",
+          "#4f9a4f",
+          "sports",
+          "#4f9a4f",
+          "stadium",
+          "#4f9a4f",
+          "airport",
+          "#5b5fb0",
+          "railway_station",
+          "#5b5fb0",
+          "transit_station",
+          "#5b5fb0",
+          "bus_station",
+          "#5b5fb0",
+          "bus_stop",
+          "#5b5fb0",
+          "tram_stop",
+          "#5b5fb0",
+          "ferry_terminal",
+          "#5b5fb0",
+          "taxi",
+          "#5b5fb0",
+          "fuel",
+          "#6b6b6b",
+          "parking",
+          "#6b6b6b",
+          "charging_station",
+          "#6b6b6b",
+          "bank",
+          "#6b6b6b",
+          "museum",
+          "#9c5a3c",
+          "attraction",
+          "#9c5a3c",
+          "historic",
+          "#9c5a3c",
+          "culture",
+          "#9c5a3c",
+          "worship",
+          "#7d7d7d",
+          "government",
+          "#7d7d7d",
+          "post",
+          "#7d7d7d",
+          "#7d7d7d"
+        ],
+        "circle-radius": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          16,
+          3,
+          18,
+          5
+        ],
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 1.2
+      }
+    },
+    {
+      "id": "poi-label",
+      "type": "symbol",
+      "source": "basemap",
+      "source-layer": "poi",
+      "filter": [
+        "all",
+        [
+          ">",
+          [
+            "get",
+            "rank"
+          ],
+          10
+        ],
+        [
+          "has",
+          "name"
+        ]
+      ],
+      "minzoom": 16,
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name_es"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": 11,
+        "text-max-width": 8,
+        "text-variable-anchor": [
+          "left",
+          "right",
+          "top",
+          "bottom"
+        ],
+        "text-radial-offset": 0.7,
+        "text-justify": "auto",
+        "symbol-sort-key": [
+          "get",
+          "rank"
+        ]
+      },
+      "paint": {
+        "text-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          "hospital",
+          "#d9534f",
+          "health",
+          "#d9534f",
+          "pharmacy",
+          "#d9534f",
+          "emergency",
+          "#d9534f",
+          "food",
+          "#e07b39",
+          "cafe",
+          "#e07b39",
+          "bar",
+          "#e07b39",
+          "shop",
+          "#b5579a",
+          "mall",
+          "#b5579a",
+          "supermarket",
+          "#b5579a",
+          "grocery",
+          "#b5579a",
+          "market",
+          "#b5579a",
+          "lodging",
+          "#3f7fbf",
+          "school",
+          "#8c6d3f",
+          "college",
+          "#8c6d3f",
+          "library",
+          "#8c6d3f",
+          "park",
+          "#4f9a4f",
+          "playground",
+          "#4f9a4f",
+          "campsite",
+          "#4f9a4f",
+          "sports",
+          "#4f9a4f",
+          "stadium",
+          "#4f9a4f",
+          "airport",
+          "#5b5fb0",
+          "railway_station",
+          "#5b5fb0",
+          "transit_station",
+          "#5b5fb0",
+          "bus_station",
+          "#5b5fb0",
+          "bus_stop",
+          "#5b5fb0",
+          "tram_stop",
+          "#5b5fb0",
+          "ferry_terminal",
+          "#5b5fb0",
+          "taxi",
+          "#5b5fb0",
+          "fuel",
+          "#6b6b6b",
+          "parking",
+          "#6b6b6b",
+          "charging_station",
+          "#6b6b6b",
+          "bank",
+          "#6b6b6b",
+          "museum",
+          "#9c5a3c",
+          "attraction",
+          "#9c5a3c",
+          "historic",
+          "#9c5a3c",
+          "culture",
+          "#9c5a3c",
+          "worship",
+          "#7d7d7d",
+          "government",
+          "#7d7d7d",
+          "post",
+          "#7d7d7d",
+          "#7d7d7d"
+        ],
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.4
+      }
+    },
+    {
+      "id": "place-neighbourhood",
+      "type": "symbol",
+      "source": "basemap",
+      "source-layer": "place",
+      "filter": [
+        "in",
+        [
+          "get",
+          "class"
+        ],
+        [
+          "literal",
+          [
+            "neighbourhood",
+            "quarter",
+            "hamlet",
+            "locality"
+          ]
+        ]
+      ],
+      "minzoom": 13,
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name_es"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          13,
+          10,
+          16,
+          12
+        ],
+        "text-max-width": 8,
+        "symbol-sort-key": [
+          "get",
+          "rank"
+        ],
+        "text-transform": "uppercase",
+        "text-letter-spacing": 0.08
+      },
+      "paint": {
+        "text-color": "#6f655b",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.6
+      }
+    },
+    {
+      "id": "place-island",
+      "type": "symbol",
+      "source": "basemap",
+      "source-layer": "place",
+      "filter": [
+        "in",
+        [
+          "get",
+          "class"
+        ],
+        [
+          "literal",
+          [
+            "island",
+            "islet"
+          ]
+        ]
+      ],
+      "minzoom": 8,
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name_es"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Italic"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          8,
+          10,
+          14,
+          13
+        ],
+        "text-max-width": 8,
+        "symbol-sort-key": [
+          "get",
+          "rank"
+        ]
+      },
+      "paint": {
+        "text-color": "#4d5a4d",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.6
+      }
+    },
+    {
+      "id": "place-suburb",
+      "type": "symbol",
+      "source": "basemap",
+      "source-layer": "place",
+      "filter": [
+        "in",
+        [
+          "get",
+          "class"
+        ],
+        [
+          "literal",
+          [
+            "suburb"
+          ]
+        ]
+      ],
+      "minzoom": 11,
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name_es"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          11,
+          10,
+          15,
+          13
+        ],
+        "text-max-width": 8,
+        "symbol-sort-key": [
+          "get",
+          "rank"
+        ],
+        "text-transform": "uppercase",
+        "text-letter-spacing": 0.1
+      },
+      "paint": {
+        "text-color": "#6f655b",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.6
+      }
+    },
+    {
+      "id": "place-village",
+      "type": "symbol",
+      "source": "basemap",
+      "source-layer": "place",
+      "filter": [
+        "in",
+        [
+          "get",
+          "class"
+        ],
+        [
+          "literal",
+          [
+            "village"
+          ]
+        ]
+      ],
+      "minzoom": 11,
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name_es"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          11,
+          10.5,
+          16,
+          14
+        ],
+        "text-max-width": 8,
+        "symbol-sort-key": [
+          "get",
+          "rank"
+        ]
+      },
+      "paint": {
+        "text-color": "#3a3530",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.6
+      }
+    },
+    {
+      "id": "place-town",
+      "type": "symbol",
+      "source": "basemap",
+      "source-layer": "place",
+      "filter": [
+        "in",
+        [
+          "get",
+          "class"
+        ],
+        [
+          "literal",
+          [
+            "town"
+          ]
+        ]
+      ],
+      "minzoom": 7,
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name_es"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          7,
+          10.5,
+          12,
+          13,
+          16,
+          17
+        ],
+        "text-max-width": 8,
+        "symbol-sort-key": [
+          "get",
+          "rank"
+        ]
+      },
+      "paint": {
+        "text-color": "#3a3530",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.6
+      }
+    },
+    {
+      "id": "place-city",
+      "type": "symbol",
+      "source": "basemap",
+      "source-layer": "place",
+      "filter": [
+        "in",
+        [
+          "get",
+          "class"
+        ],
+        [
+          "literal",
+          [
+            "city"
+          ]
+        ]
+      ],
+      "minzoom": 4,
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name_es"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Medium"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          4,
+          11,
+          8,
+          14,
+          12,
+          18,
+          16,
+          22
+        ],
+        "text-max-width": 8,
+        "symbol-sort-key": [
+          "get",
+          "rank"
+        ]
+      },
+      "paint": {
+        "text-color": "#2d2925",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 2
+      }
+    },
+    {
+      "id": "place-state",
+      "type": "symbol",
+      "source": "basemap",
+      "source-layer": "place",
+      "filter": [
+        "in",
+        [
+          "get",
+          "class"
+        ],
+        [
+          "literal",
+          [
+            "state"
+          ]
+        ]
+      ],
+      "minzoom": 4,
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name_es"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          4,
+          9.5,
+          8,
+          12
+        ],
+        "text-max-width": 8,
+        "symbol-sort-key": [
+          "get",
+          "rank"
+        ],
+        "text-transform": "uppercase",
+        "text-letter-spacing": 0.15
+      },
+      "paint": {
+        "text-color": "#8a7e9c",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.6
+      },
+      "maxzoom": 10
+    },
+    {
+      "id": "place-country",
+      "type": "symbol",
+      "source": "basemap",
+      "source-layer": "place",
+      "filter": [
+        "in",
+        [
+          "get",
+          "class"
+        ],
+        [
+          "literal",
+          [
+            "country"
+          ]
+        ]
+      ],
+      "minzoom": 2,
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name_es"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Medium"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          2,
+          11,
+          6,
+          16
+        ],
+        "text-max-width": 8,
+        "symbol-sort-key": [
+          "get",
+          "rank"
+        ],
+        "text-transform": "uppercase",
+        "text-letter-spacing": 0.1
+      },
+      "paint": {
+        "text-color": "#5d546e",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 2
+      },
+      "maxzoom": 8
+    }
+  ]
+}
