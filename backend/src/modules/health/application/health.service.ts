@@ -28,8 +28,13 @@ export interface HealthReport {
   providers: { routing: string; geocoding: string };
 }
 
-const withTimeout = <T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> =>
-  Promise.race([promise, new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))]);
+const withTimeout = <T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> => {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+};
 
 @Injectable()
 export class HealthService {

@@ -62,6 +62,7 @@ $commands = [ordered]@{
   'prod-down'       = 'Producción: detiene el stack'
   'prod-logs'       = 'Producción: sigue los logs'
   'test-backend'    = 'Pruebas del backend (Jest)'
+  'test-e2e'        = 'Pruebas e2e del backend (PostGIS real; requiere $env:E2E_DATABASE_URL a una BD *_e2e)'
   'test-tilegen'    = 'Pruebas del generador de mapas (Maven, Java 21)'
   'test-mobile'     = 'Pruebas de la app Flutter'
 }
@@ -108,6 +109,10 @@ switch ($Command) {
   'test-backend' {
     Push-Location backend
     try { npm test; if ($LASTEXITCODE -ne 0) { throw 'Backend tests failed.' } } finally { Pop-Location }
+  }
+  'test-e2e' {
+    Push-Location backend
+    try { npm run test:e2e; if ($LASTEXITCODE -ne 0) { throw 'Backend e2e tests failed.' } } finally { Pop-Location }
   }
   'test-tilegen' {
     mvn -B -f infrastructure/maps/tilegen/pom.xml test

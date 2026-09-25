@@ -50,24 +50,30 @@ export class RegionDownloadService {
 
     const fileName = relativePath.split('/').pop() ?? `${region.code}.bin`;
     const etag = checksum ? `"${checksum}"` : `"${file.size}-${file.modifiedAt.getTime()}"`;
-    res.setHeader('Content-Type', CONTENT_TYPES[kind]);
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-    res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('ETag', etag);
-    res.setHeader('Last-Modified', file.modifiedAt.toUTCString());
-    res.setHeader('Cache-Control', 'public, max-age=3600');
-    res.setHeader('X-Region-Version', region.version);
-    if (checksum) res.setHeader('X-Checksum-Sha256', checksum);
+    const setFileHeaders = () => {
+      res.setHeader('Content-Type', CONTENT_TYPES[kind]);
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('ETag', etag);
+      res.setHeader('Last-Modified', file.modifiedAt.toUTCString());
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.setHeader('X-Region-Version', region.version);
+      if (checksum) res.setHeader('X-Checksum-Sha256', checksum);
+    };
 
     const maps = this.config.get('maps');
     if (maps.accelRedirect) {
+      // Nginx serves the internal location itself, including Range and conditional requests.
+      setFileHeaders();
       const prefix = kind === 'map' ? maps.accelMapsPrefix : maps.accelRoutingPrefix;
       res.setHeader('X-Accel-Redirect', `${prefix}${encodeURI(relativePath)}`);
       res.status(HttpStatus.OK).end();
       return;
     }
 
+    // Preconditions first (RFC 9110 §13.2.2): If-None-Match, then If-Range, then Range.
     if (req.headers['if-none-match'] === etag) {
+      setFileHeaders();
       res.status(HttpStatus.NOT_MODIFIED).end();
       return;
     }
@@ -76,6 +82,7 @@ export class RegionDownloadService {
     const rangeHeader = ifRange && ifRange !== etag ? undefined : req.headers.range;
     const parsed = parseRangeHeader(rangeHeader, file.size);
     if (parsed.type === 'unsatisfiable') {
+      // The error body is the JSON envelope, so the file headers are not set.
       res.setHeader('Content-Range', `bytes */${file.size}`);
       throw new AppException(
         ErrorCode.INVALID_RANGE,
@@ -84,6 +91,7 @@ export class RegionDownloadService {
       );
     }
 
+    setFileHeaders();
     if (parsed.type === 'range') {
       const { start, end } = parsed.range;
       res.status(HttpStatus.PARTIAL_CONTENT);

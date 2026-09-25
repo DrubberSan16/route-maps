@@ -18,7 +18,7 @@ PREPARE_FLAGS := $(if $(SKIP_ROUTING),--skip-routing) $(if $(WATER),--water-poly
 
 .PHONY: help init up down restart ps logs build config migrate seed regions regions-sync \
         download-region build-map build-routing prepare-region geocoding-up \
-        prod-up prod-down prod-logs test test-backend test-tilegen test-mobile lint check-region
+        prod-up prod-down prod-logs test test-backend test-e2e test-tilegen test-mobile lint check-region
 
 help: ## Muestra esta ayuda
 	@grep -hE '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -92,6 +92,9 @@ test: test-backend test-tilegen test-mobile ## Ejecuta todas las pruebas (backen
 
 test-backend: ## Pruebas del backend (Jest)
 	cd backend && npm test
+
+test-e2e: ## Pruebas e2e del backend (PostGIS real; requiere E2E_DATABASE_URL a una BD *_e2e)
+	cd backend && npm run test:e2e
 
 test-tilegen: ## Pruebas del generador de mapas (Maven, Java 21)
 	mvn -B -f infrastructure/maps/tilegen/pom.xml test

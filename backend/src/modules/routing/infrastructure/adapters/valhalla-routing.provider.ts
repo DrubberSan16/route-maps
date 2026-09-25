@@ -62,9 +62,20 @@ const MANEUVERS: Record<number, ManeuverType> = {
   27: 'ROUNDABOUT_EXIT',
   28: 'FERRY',
   29: 'FERRY',
-  36: 'WAYPOINT',
   37: 'MERGE',
   38: 'MERGE',
+};
+
+/** Destination maneuvers (4-6); on every leg but the last they mark an intermediate stop. */
+const ARRIVAL_TYPES = new Set([4, 5, 6]);
+
+/**
+ * Valhalla words an intermediate stop like the final destination, which is
+ * misleading when read aloud; these replace it for the supported languages.
+ */
+const STOP_REACHED: Record<string, (stop: number) => string> = {
+  es: (stop) => `Ha llegado a la parada ${stop}`,
+  en: (stop) => `You have reached stop ${stop}`,
 };
 
 /** Valhalla error codes meaning "no route" rather than a server problem. */
@@ -78,7 +89,7 @@ interface ValhallaManeuver {
   time: number;
   begin_shape_index: number;
   end_shape_index: number;
-  street_names?: string[];
+  street_names?: string[] | null;
 }
 
 interface ValhallaLeg {
@@ -90,6 +101,7 @@ interface ValhallaTrip {
   legs: ValhallaLeg[];
   summary: { length: number; time: number; has_toll?: boolean; has_ferry?: boolean };
   units: string;
+  language?: string;
 }
 
 interface ValhallaRouteResponse {
@@ -146,11 +158,8 @@ export class ValhallaRoutingProvider implements RoutingProvider {
     if (input.options?.avoidFerries) costingOptions.use_ferry = 0;
 
     return {
-      locations: stops.map((stop, index) => ({
-        lat: stop.latitude,
-        lon: stop.longitude,
-        type: index === 0 || index === stops.length - 1 ? 'break' : 'via',
-      })),
+      // Every location is a stop ("break"): intermediate ones split the trip into legs.
+      locations: stops.map((stop) => ({ lat: stop.latitude, lon: stop.longitude, type: 'break' })),
       costing,
       ...(Object.keys(costingOptions).length > 0
         ? { costing_options: { [costing]: costingOptions } }
@@ -167,25 +176,30 @@ export class ValhallaRoutingProvider implements RoutingProvider {
     const coordinates: Position[] = [];
     const steps: RouteStep[] = [];
 
-    for (const leg of trip.legs) {
+    const stopReached = STOP_REACHED[(trip.language ?? '').slice(0, 2).toLowerCase()];
+
+    trip.legs.forEach((leg, legIndex) => {
       const shape = decodePolyline(leg.shape, 6);
       // Consecutive legs share their joint point; keep it once.
       const offset = coordinates.length === 0 ? 0 : coordinates.length - 1;
       coordinates.push(...(coordinates.length === 0 ? shape : shape.slice(1)));
+      const isLastLeg = legIndex === trip.legs.length - 1;
       for (const maneuver of leg.maneuvers) {
         const begin = offset + maneuver.begin_shape_index;
         const end = offset + maneuver.end_shape_index;
+        const reachesStop = !isLastLeg && ARRIVAL_TYPES.has(maneuver.type);
         steps.push({
-          instruction: maneuver.instruction,
+          instruction:
+            reachesStop && stopReached ? stopReached(legIndex + 1) : maneuver.instruction,
           distanceMeters: Math.round(maneuver.length * factor * 10) / 10,
           durationSeconds: Math.round(maneuver.time * 10) / 10,
-          maneuver: MANEUVERS[maneuver.type] ?? 'OTHER',
+          maneuver: reachesStop ? 'WAYPOINT' : (MANEUVERS[maneuver.type] ?? 'OTHER'),
           location: coordinates[begin] ?? coordinates[coordinates.length - 1],
           streetNames: maneuver.street_names ?? [],
           geometryIndex: [begin, end],
         });
       }
-    }
+    });
 
     return {
       distanceMeters: Math.round(trip.summary.length * factor),

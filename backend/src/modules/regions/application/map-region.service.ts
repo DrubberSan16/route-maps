@@ -124,6 +124,9 @@ export class MapRegionService {
   ): Promise<'registered' | 'unchanged'> {
     if (!CODE_PATTERN.test(manifest.code))
       throw new Error(`Invalid region code "${manifest.code}"`);
+    if (!/^[A-Z]{2}$/.test(manifest.country ?? '')) {
+      throw new Error(`Invalid country "${manifest.country}": use an ISO 3166-1 alpha-2 code`);
+    }
     const [minLng, minLat, maxLng, maxLat] = manifest.bbox;
     if (!(minLng < maxLng && minLat < maxLat)) throw new Error('Invalid bounding box');
 

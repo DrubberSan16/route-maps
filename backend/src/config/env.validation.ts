@@ -1,3 +1,5 @@
+// class-transformer reads design:type metadata for the implicit conversions below.
+import 'reflect-metadata';
 import { plainToInstance } from 'class-transformer';
 import {
   IsIn,

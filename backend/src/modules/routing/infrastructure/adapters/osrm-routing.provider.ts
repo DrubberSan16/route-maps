@@ -42,6 +42,9 @@ interface OsrmResponse {
   routes?: OsrmRoute[];
 }
 
+/** Maximum distance between a requested point and the road it is snapped to. */
+const SNAP_RADIUS_METERS = 5000;
+
 export interface OsrmConfig {
   /** One osrm-routed instance per prepared profile (OSRM profiles are baked at build time). */
   urls: Partial<Record<RoutingProfile, string>>;
@@ -76,6 +79,8 @@ export class OsrmRoutingProvider implements RoutingProvider {
       steps: 'true',
       geometries: 'geojson',
       overview: 'full',
+      // Without a radius OSRM snaps any point to the nearest road, even thousands of km away.
+      radiuses: stops.map(() => String(SNAP_RADIUS_METERS)).join(';'),
     });
     const exclude = [
       input.options?.avoidTolls ? 'toll' : null,
@@ -114,21 +119,27 @@ export class OsrmRoutingProvider implements RoutingProvider {
     const coordinates = route.geometry.coordinates;
     const steps: RouteStep[] = [];
     let cursor = 0;
-    for (const leg of route.legs) {
+    route.legs.forEach((leg, legIndex) => {
+      const isLastLeg = legIndex === route.legs.length - 1;
       for (const step of leg.steps) {
-        const length = Math.max(step.geometry.coordinates.length - 1, 0);
+        const arrival = step.maneuver.type === 'arrive';
+        // Arrival steps carry a zero-length [p, p] geometry that the overview does not repeat.
+        const length = arrival ? 0 : Math.max(step.geometry.coordinates.length - 1, 0);
+        const reachesStop = arrival && !isLastLeg;
         steps.push({
-          instruction: buildSpanishInstruction(step.maneuver, step.name),
+          instruction: reachesStop
+            ? `Ha llegado a la parada ${legIndex + 1}`
+            : buildSpanishInstruction(step.maneuver, step.name),
           distanceMeters: Math.round(step.distance * 10) / 10,
           durationSeconds: Math.round(step.duration * 10) / 10,
-          maneuver: osrmManeuverType(step.maneuver),
+          maneuver: reachesStop ? 'WAYPOINT' : osrmManeuverType(step.maneuver),
           location: step.maneuver.location,
           streetNames: step.name ? [step.name] : [],
           geometryIndex: [cursor, Math.min(cursor + length, coordinates.length - 1)],
         });
         cursor += length;
       }
-    }
+    });
     return {
       distanceMeters: Math.round(route.distance),
       durationSeconds: Math.round(route.duration),

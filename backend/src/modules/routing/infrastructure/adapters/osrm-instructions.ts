@@ -30,8 +30,16 @@ export function buildSpanishInstruction(maneuver: OsrmManeuver, name: string): s
   switch (maneuver.type) {
     case 'depart':
       return `Inicie el recorrido${onto}`;
-    case 'arrive':
-      return 'Ha llegado a su destino';
+    case 'arrive': {
+      const side = modifier.endsWith('left')
+        ? 'izquierda'
+        : modifier.endsWith('right')
+          ? 'derecha'
+          : '';
+      return side ? `Ha llegado a su destino, a la ${side}` : 'Ha llegado a su destino';
+    }
+    case 'roundabout turn':
+      return turn ? `En la rotonda, gire ${turn}${onto}` : `En la rotonda, continúe recto${onto}`;
     case 'roundabout':
     case 'rotary':
       return maneuver.exit
