@@ -1,0 +1,29 @@
+{
+  "place_id": 101080,
+  "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+  "osm_type": "way",
+  "osm_id": 4229537,
+  "lat": "43.738283275071836",
+  "lon": "7.424561077306763",
+  "category": "highway",
+  "type": "residential",
+  "place_rank": 26,
+  "importance": 0.0533433333333333,
+  "addresstype": "road",
+  "name": "Avenue de l'Hermitage",
+  "display_name": "Avenue de l'Hermitage, Monte-Carlo, Mónaco, 98000, Mónaco",
+  "address": {
+    "road": "Avenue de l'Hermitage",
+    "suburb": "Monte-Carlo",
+    "city": "Mónaco",
+    "postcode": "98000",
+    "country": "Mónaco",
+    "country_code": "mc"
+  },
+  "boundingbox": [
+    "43.7380696",
+    "43.7386004",
+    "7.4242974",
+    "7.4256506"
+  ]
+}

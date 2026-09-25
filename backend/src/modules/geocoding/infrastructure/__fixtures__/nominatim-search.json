@@ -1,0 +1,61 @@
+[
+  {
+    "place_id": 101292,
+    "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+    "osm_type": "node",
+    "osm_id": 954713831,
+    "lat": "43.735333",
+    "lon": "7.421016",
+    "category": "shop",
+    "type": "convenience",
+    "place_rank": 30,
+    "importance": 9.99999999995449e-06,
+    "addresstype": "shop",
+    "name": "Casino",
+    "display_name": "Casino, Rue Princesse Antoinette, La Condamine, Mónaco, 98000, Mónaco",
+    "address": {
+      "shop": "Casino",
+      "road": "Rue Princesse Antoinette",
+      "suburb": "La Condamine",
+      "city": "Mónaco",
+      "postcode": "98000",
+      "country": "Mónaco",
+      "country_code": "mc"
+    },
+    "boundingbox": [
+      "43.7352830",
+      "43.7353830",
+      "7.4209660",
+      "7.4210660"
+    ]
+  },
+  {
+    "place_id": 101170,
+    "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+    "osm_type": "way",
+    "osm_id": 4229659,
+    "lat": "43.73949819705011",
+    "lon": "7.427726026616955",
+    "category": "highway",
+    "type": "residential",
+    "place_rank": 26,
+    "importance": 0.0533433333333333,
+    "addresstype": "road",
+    "name": "Place du Casino",
+    "display_name": "Place du Casino, Monte-Carlo, Mónaco, 98000, Mónaco",
+    "address": {
+      "road": "Place du Casino",
+      "suburb": "Monte-Carlo",
+      "city": "Mónaco",
+      "postcode": "98000",
+      "country": "Mónaco",
+      "country_code": "mc"
+    },
+    "boundingbox": [
+      "43.7391664",
+      "43.7396889",
+      "7.4273087",
+      "7.4278641"
+    ]
+  }
+]

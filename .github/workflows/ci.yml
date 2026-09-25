@@ -141,23 +141,28 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
-      - name: Crear .env con secretos aleatorios y servir Mónaco
+      - name: Crear .env con secretos aleatorios, Mónaco y Nominatim
         run: |
           make init
-          sed -i 's/^ROUTING_REGION=.*/ROUTING_REGION=monaco/' .env
+          sed -i -e 's/^ROUTING_REGION=.*/ROUTING_REGION=monaco/' \
+            -e 's/^NOMINATIM_REGION=.*/NOMINATIM_REGION=monaco/' \
+            -e 's/^GEOCODING_PROVIDER=.*/GEOCODING_PROVIDER=nominatim/' \
+            -e 's/^GEOCODING_COUNTRY_CODES=.*/GEOCODING_COUNTRY_CODES=mc/' .env
       - name: Construir y levantar el stack
         run: make up
       - name: Preparar Mónaco (extracto de Geofabrik, mapa, routing y registro)
         run: make prepare-region REGION=monaco
+      - name: Importar Mónaco en Nominatim
+        run: make geocoding-up
       - name: Esperar a que todos los servicios estén sanos
-        run: docker compose up -d --wait --wait-timeout 300
+        run: docker compose --profile geocoding up -d --wait --wait-timeout 900
       - name: Prueba de humo a través de Nginx
         run: REGION=monaco ./infrastructure/scripts/smoke-test.sh http://localhost:8080
       - name: Estado y logs de los servicios
         if: failure()
         run: |
-          docker compose ps
-          docker compose logs --no-color --tail=300
+          docker compose --profile geocoding ps
+          docker compose --profile geocoding logs --no-color --tail=300
       - name: Apagar el stack
         if: always()
-        run: docker compose down -v
+        run: docker compose --profile geocoding down -v

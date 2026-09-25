@@ -234,6 +234,14 @@ section "Geocoding, Swagger and viewer"
 status=$(http GET "/geocoding/search?q=hospital")
 if [[ "$status" == 200 ]]; then
   pass "geocoding search -> 200 ($(json '.data | length') results)"
+  if [[ -s "$WORK/route.json" ]]; then
+    # The first point of the calculated route lies on a street.
+    R_LNG=$(jq -r '.data.geometry.coordinates[0][0]' "$WORK/route.json")
+    R_LAT=$(jq -r '.data.geometry.coordinates[0][1]' "$WORK/route.json")
+    status=$(http GET "/geocoding/reverse?lat=$R_LAT&lng=$R_LNG")
+    expect "reverse geocoding of the route start -> $(json .data.displayName)" \
+      test "$status:$(json '.data.displayName | length > 0')" = "200:true"
+  fi
 else
   expect "geocoding disabled -> 503 GEOCODING_PROVIDER_UNAVAILABLE" test "$status:$(json .error.code)" = "503:GEOCODING_PROVIDER_UNAVAILABLE"
 fi
