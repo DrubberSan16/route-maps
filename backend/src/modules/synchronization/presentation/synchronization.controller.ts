@@ -28,8 +28,17 @@ export class SynchronizationController {
   }
 
   @Get('pull')
-  @ApiOperation({ summary: 'Saved routes changed since a timestamp (multi-device restore)' })
+  @ApiOperation({
+    summary: 'Saved and deleted routes since a cursor (multi-device restore)',
+    description:
+      'Pages of at most `limit` changes, oldest first. While `hasMore` is true, ask again ' +
+      'with `since` and `afterId` taken from `next`.',
+  })
   pull(@CurrentUser() user: AuthenticatedUser, @Query() query: SyncPullQueryDto) {
-    return this.sync.pull(user.id, query.since ? new Date(query.since) : undefined);
+    return this.sync.pull(
+      user.id,
+      { since: query.since ? new Date(query.since) : undefined, afterId: query.afterId },
+      query.limit,
+    );
   }
 }

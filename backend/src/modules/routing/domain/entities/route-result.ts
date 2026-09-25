@@ -6,25 +6,28 @@ import {
 } from '../../../../common/geo/geojson';
 import { RoutingProfile } from '../value-objects/routing-profile';
 
-export type ManeuverType =
-  | 'DEPART'
-  | 'ARRIVE'
-  | 'CONTINUE'
-  | 'TURN_LEFT'
-  | 'TURN_RIGHT'
-  | 'SLIGHT_LEFT'
-  | 'SLIGHT_RIGHT'
-  | 'SHARP_LEFT'
-  | 'SHARP_RIGHT'
-  | 'UTURN'
-  | 'ROUNDABOUT_ENTER'
-  | 'ROUNDABOUT_EXIT'
-  | 'MERGE'
-  | 'RAMP'
-  | 'EXIT'
-  | 'FERRY'
-  | 'WAYPOINT'
-  | 'OTHER';
+export const MANEUVER_TYPES = [
+  'DEPART',
+  'ARRIVE',
+  'CONTINUE',
+  'TURN_LEFT',
+  'TURN_RIGHT',
+  'SLIGHT_LEFT',
+  'SLIGHT_RIGHT',
+  'SHARP_LEFT',
+  'SHARP_RIGHT',
+  'UTURN',
+  'ROUNDABOUT_ENTER',
+  'ROUNDABOUT_EXIT',
+  'MERGE',
+  'RAMP',
+  'EXIT',
+  'FERRY',
+  'WAYPOINT',
+  'OTHER',
+] as const;
+
+export type ManeuverType = (typeof MANEUVER_TYPES)[number];
 
 /** One normalised navigation instruction. */
 export interface RouteStep {

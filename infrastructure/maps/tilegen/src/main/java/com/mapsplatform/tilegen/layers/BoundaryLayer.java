@@ -74,6 +74,7 @@ public final class BoundaryLayer implements Layer {
         adminLevel = relation.adminLevel();
       }
       disputed |= relation.disputed();
+      maritime |= relation.maritime();
     }
     if (adminLevel == null && feature.hasTag("boundary", "administrative")) {
       Integer own = Parse.parseIntOrNull(feature.getTag("admin_level"));

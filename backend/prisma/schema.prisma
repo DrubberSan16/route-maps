@@ -86,6 +86,7 @@ model User {
   geofences         Geofence[]
   downloadedRegions DownloadedRegion[]
   syncEvents        SynchronizationEvent[]
+  routeTombstones   RouteTombstone[]
 
   @@map("users")
 }
@@ -242,8 +243,25 @@ model Route {
   trips  Trip[]
 
   @@index([userId, createdAt])
+  /// Change feed of `GET /sync/pull`, ordered by (updated_at, id).
+  @@index([userId, updatedAt, id])
   @@index([geometry], type: Gist)
   @@map("routes")
+}
+
+/// Saved routes that were deleted, so `GET /sync/pull` tells the user's other
+/// devices to remove them. A route id is either in `routes` or here, never in
+/// both: saving the route again removes its tombstone.
+model RouteTombstone {
+  userId    String   @map("user_id") @db.Uuid
+  routeId   String   @map("route_id") @db.Uuid
+  deletedAt DateTime @default(now()) @map("deleted_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, routeId])
+  @@index([userId, deletedAt, routeId])
+  @@map("route_tombstones")
 }
 
 /// Ordered stops of a route (origin, waypoints, destination). Prepared for multi-stop routing.

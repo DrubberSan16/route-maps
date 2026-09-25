@@ -10,6 +10,9 @@ import 'app_database.dart';
 /// Access to the `sync_queue` table. Repositories call [add] inside their own
 /// transactions, so a local change and its queued operation are stored
 /// atomically (no change is lost if the app dies in between).
+///
+/// Every operation belongs to the account that made the change (null without
+/// an account): a session only sends, counts and retries its own operations.
 class SyncQueueStore {
   SyncQueueStore(this._db, {this._uuid = const Uuid(), DateTime Function()? clock})
     : _clock = clock ?? DateTime.now;
@@ -21,6 +24,7 @@ class SyncQueueStore {
   $SyncQueueTable get _table => _db.syncQueue;
 
   Future<String> add({
+    required String? accountId,
     required String entity,
     required String operation,
     required Map<String, Object?> payload,
@@ -36,18 +40,19 @@ class SyncQueueStore {
             payload: jsonEncode(payload),
             createdAt: utcMillis(_clock()),
             status: SyncStatus.pending,
+            accountId: Value(accountId),
           ),
         );
     return id;
   }
 
-  /// Pending operations in queue order, up to the first one that is still
-  /// waiting for its next attempt: later operations may depend on it (a trip
-  /// must reach the server before its points), so they wait too.
-  Future<List<SyncOperation>> nextBatch({required int limit}) async {
+  /// Pending operations of [accountId] in queue order, up to the first one
+  /// that is still waiting for its next attempt: later operations may depend
+  /// on it (a trip must reach the server before its points), so they wait too.
+  Future<List<SyncOperation>> nextBatch({required String accountId, required int limit}) async {
     final now = utcMillis(_clock());
     final ready = <SyncOperation>[];
-    for (final row in await _pendingQuery(limit).get()) {
+    for (final row in await _pendingQuery(accountId, limit).get()) {
       final nextAttempt = row.nextAttemptAt;
       if (nextAttempt != null && nextAttempt.isAfter(now)) break;
       ready.add(_toOperation(row));
@@ -55,25 +60,29 @@ class SyncQueueStore {
     return ready;
   }
 
-  /// When the operation at the head of the queue may be retried (null when
-  /// it can be sent now or the queue is empty).
-  Future<DateTime?> nextAttemptAt() async {
-    final head = await _pendingQuery(1).getSingleOrNull();
+  /// When the operation at the head of the queue of [accountId] may be
+  /// retried (null when it can be sent now or the queue is empty).
+  Future<DateTime?> nextAttemptAt({required String accountId}) async {
+    final head = await _pendingQuery(accountId, 1).getSingleOrNull();
     final nextAttempt = head?.nextAttemptAt;
     return nextAttempt != null && nextAttempt.isAfter(utcMillis(_clock())) ? nextAttempt : null;
   }
 
-  SimpleSelectStatement<$SyncQueueTable, SyncQueueRow> _pendingQuery(int limit) =>
+  SimpleSelectStatement<$SyncQueueTable, SyncQueueRow> _pendingQuery(String accountId, int limit) =>
       _db.select(_table)
-        ..where((t) => t.status.equalsValue(SyncStatus.pending))
+        ..where((t) => t.status.equalsValue(SyncStatus.pending) & t.accountId.equals(accountId))
         // Insertion order (rowid), not createdAt: a clock change on the device
         // must not send an operation before the ones it depends on.
         ..orderBy([(t) => OrderingTerm.asc(t.rowId)])
         ..limit(limit);
 
-  Future<List<SyncOperation>> byStatus(SyncStatus status, {int limit = 100}) async {
+  Future<List<SyncOperation>> byStatus(
+    SyncStatus status, {
+    required String? accountId,
+    int limit = 100,
+  }) async {
     final query = _db.select(_table)
-      ..where((t) => t.status.equalsValue(status))
+      ..where((t) => t.status.equalsValue(status) & _ownedBy(t, accountId))
       ..orderBy([(t) => OrderingTerm.asc(t.rowId)])
       ..limit(limit);
     return (await query.get()).map(_toOperation).toList();
@@ -123,8 +132,10 @@ class SyncQueueStore {
         const SyncQueueCompanion(status: Value(SyncStatus.pending)),
       );
 
-  Future<int> retryFailed() =>
-      (_db.update(_table)..where((t) => t.status.equalsValue(SyncStatus.failed))).write(
+  Future<int> retryFailed({required String? accountId}) =>
+      (_db.update(
+        _table,
+      )..where((t) => t.status.equalsValue(SyncStatus.failed) & _ownedBy(t, accountId))).write(
         const SyncQueueCompanion(
           status: Value(SyncStatus.pending),
           retryCount: Value(0),
@@ -155,11 +166,13 @@ class SyncQueueStore {
     return rows.isNotEmpty;
   }
 
-  /// Number of pending (including in-flight) and failed operations.
-  Stream<({int pending, int failed})> watchCounts() {
+  /// Number of pending (including in-flight) and failed operations of
+  /// [accountId] (null: those made without an account).
+  Stream<({int pending, int failed})> watchCounts({required String? accountId}) {
     final count = _table.id.count();
     final query = _db.selectOnly(_table)
       ..addColumns([_table.status, count])
+      ..where(_ownedBy(_table, accountId))
       ..groupBy([_table.status]);
     return query.watch().map((rows) {
       var pending = 0, failed = 0;
@@ -172,6 +185,9 @@ class SyncQueueStore {
       return (pending: pending, failed: failed);
     });
   }
+
+  static Expression<bool> _ownedBy($SyncQueueTable t, String? accountId) =>
+      accountId == null ? t.accountId.isNull() : t.accountId.equals(accountId);
 
   Future<void> _setStatus(Iterable<String> ids, SyncStatus status) => (_db.update(
     _table,

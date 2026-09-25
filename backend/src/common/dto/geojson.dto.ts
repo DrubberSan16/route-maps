@@ -1,4 +1,22 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { buildMessage, ValidateBy, ValidationOptions } from 'class-validator';
+import { isValidPosition } from '../geo/geojson';
+
+/** A GeoJSON position `[longitude, latitude]` within range. */
+export const IsPosition = (options?: ValidationOptions): PropertyDecorator =>
+  ValidateBy(
+    {
+      name: 'isPosition',
+      validator: {
+        validate: (value: unknown) => isValidPosition(value),
+        defaultMessage: buildMessage(
+          (each) => `${each}$property must be a [longitude, latitude] position`,
+          options,
+        ),
+      },
+    },
+    options,
+  );
 
 export class LineStringDto {
   @ApiProperty({ enum: ['LineString'], example: 'LineString' })

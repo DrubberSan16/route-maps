@@ -2,11 +2,11 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { AppException } from '../../../common/errors/app.exception';
 import { ErrorCode } from '../../../common/errors/error-codes';
-import { LineStringGeometry, PointGeometry } from '../../../common/geo/geojson';
+import { PointGeometry } from '../../../common/geo/geojson';
 import { RoutingProfile, TripStatus } from '../../../generated/prisma/enums';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 import { UsersService } from '../../users/application/users.service';
-import { Trip, TripPath } from '../domain/trip.entity';
+import { MAX_PATH_POINTS, Trip, TripPath } from '../domain/trip.entity';
 
 export interface StartTripInput {
   id?: string;
@@ -125,16 +125,14 @@ export class TripsService {
       WHERE id = ${tripId}::uuid`;
   }
 
-  async path(userId: string, id: string, maxPoints = 10000): Promise<TripPath> {
+  /**
+   * Recorded track. Longer recordings are thinned out to `maxPoints` fixes spread evenly
+   * from the first to the last one, and the geometry is drawn through those same fixes;
+   * the distance is still measured over every fix.
+   */
+  async path(userId: string, id: string, maxPoints = MAX_PATH_POINTS): Promise<TripPath> {
     await this.get(userId, id);
-    const [line] = await this.prisma.$queryRaw<
-      { geometry: LineStringGeometry | null; distance: number | null }[]
-    >`
-      SELECT CASE WHEN count(*) >= 2
-               THEN ST_AsGeoJSON(ST_MakeLine(location ORDER BY recorded_at))::json END AS geometry,
-             ST_Length(ST_MakeLine(location ORDER BY recorded_at)::geography) AS distance
-      FROM trip_points WHERE trip_id = ${id}::uuid`;
-    const points = await this.prisma.$queryRaw<
+    const rows = await this.prisma.$queryRaw<
       {
         location: PointGeometry;
         accuracy: number | null;
@@ -142,24 +140,51 @@ export class TripsService {
         heading: number | null;
         altitude: number | null;
         recorded_at: Date;
+        total: bigint;
+        distance: number | null;
       }[]
     >`
-      SELECT ST_AsGeoJSON(location)::json AS location, accuracy, speed, heading, altitude, recorded_at
-      FROM trip_points WHERE trip_id = ${id}::uuid
-      ORDER BY recorded_at ASC LIMIT ${maxPoints}`;
+      WITH track AS (
+        SELECT location, accuracy, speed, heading, altitude, recorded_at,
+               row_number() OVER w - 1 AS position,
+               count(*) OVER () AS total,
+               ST_Distance(location::geography, (lag(location) OVER w)::geography) AS step_meters
+        FROM trip_points WHERE trip_id = ${id}::uuid
+        WINDOW w AS (ORDER BY recorded_at)
+      )
+      SELECT ST_AsGeoJSON(location)::json AS location, accuracy, speed, heading, altitude,
+             recorded_at, total, (SELECT sum(step_meters) FROM track) AS distance
+      FROM track, (SELECT ${Math.max(2, Math.floor(maxPoints))}::int AS max_points) AS params
+      WHERE CASE
+        WHEN total <= max_points THEN true
+        -- Keeps the fix at or right after each of max_points evenly spaced marks.
+        ELSE position = 0
+          OR position * (max_points - 1) / (total - 1)
+             > (position - 1) * (max_points - 1) / (total - 1)
+      END
+      ORDER BY recorded_at`;
+
+    const points = rows.map((row) => ({
+      longitude: row.location.coordinates[0],
+      latitude: row.location.coordinates[1],
+      accuracy: row.accuracy,
+      speed: row.speed,
+      heading: row.heading,
+      altitude: row.altitude,
+      recordedAt: row.recorded_at,
+    }));
     return {
       tripId: id,
-      geometry: line?.geometry ?? null,
-      distanceMeters: Math.round(line?.distance ?? 0),
-      points: points.map((point) => ({
-        longitude: point.location.coordinates[0],
-        latitude: point.location.coordinates[1],
-        accuracy: point.accuracy,
-        speed: point.speed,
-        heading: point.heading,
-        altitude: point.altitude,
-        recordedAt: point.recorded_at,
-      })),
+      geometry:
+        points.length >= 2
+          ? {
+              type: 'LineString',
+              coordinates: points.map((point) => [point.longitude, point.latitude]),
+            }
+          : null,
+      distanceMeters: Math.round(rows[0]?.distance ?? 0),
+      totalPoints: Number(rows[0]?.total ?? 0),
+      points,
     };
   }
 

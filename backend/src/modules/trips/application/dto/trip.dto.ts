@@ -13,6 +13,7 @@ import {
   Min,
 } from 'class-validator';
 import { RoutingProfile, TripStatus } from '../../../../generated/prisma/enums';
+import { MAX_PATH_POINTS } from '../../domain/trip.entity';
 
 export class StartTripDto {
   @ApiPropertyOptional({ format: 'uuid', description: 'Client generated id (idempotent)' })
@@ -74,4 +75,19 @@ export class ListTripsQueryDto {
   @IsInt()
   @Min(0)
   offset = 0;
+}
+
+export class TripPathQueryDto {
+  @ApiPropertyOptional({
+    default: MAX_PATH_POINTS,
+    minimum: 2,
+    maximum: MAX_PATH_POINTS,
+    description: 'Longer tracks are sampled evenly, always keeping the first and last point',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(2)
+  @Max(MAX_PATH_POINTS)
+  maxPoints = MAX_PATH_POINTS;
 }

@@ -10,6 +10,7 @@ import 'package:maps_platform/domain/entities/offline_route.dart';
 import 'package:maps_platform/domain/entities/routing_profile.dart';
 import 'package:maps_platform/domain/entities/sync.dart';
 import 'package:maps_platform/domain/entities/trip.dart';
+import 'package:maps_platform/domain/entities/user.dart';
 import 'package:maps_platform/domain/services/connectivity_service.dart';
 import 'package:maps_platform/services/sync/sync_service.dart';
 
@@ -36,9 +37,9 @@ void main() {
 
   /// Server behaviour for `POST sync/push` and `GET sync/pull`.
   late StubResponse Function(List<Operation> operations) onPush;
-  late StubResponse Function(String? since) onPull;
+  late StubResponse Function(Map<String, Object?> query) onPull;
   late List<List<Operation>> pushed;
-  late List<String?> pulls;
+  late List<Map<String, Object?>> pulls;
 
   StubResponse results(List<Operation> operations, [String status = 'APPLIED']) => StubResponse.ok({
     'results': [
@@ -47,11 +48,12 @@ void main() {
     'serverTime': '2026-09-25T12:00:00.000Z',
   });
 
-  StubResponse noChanges(String? since) => StubResponse.ok({
+  StubResponse noChanges(Map<String, Object?> query) => StubResponse.ok({
     'serverTime': '2026-09-25T12:00:00.000Z',
     'routes': <Object?>[],
     'deletedRouteIds': <Object?>[],
     'hasMore': false,
+    'next': null,
   });
 
   SyncService createService({int batchSize = 100}) => SyncService(
@@ -72,8 +74,14 @@ void main() {
     db = memoryDatabase();
     clock = TestClock();
     queue = SyncQueueStore(db, clock: clock.call);
-    trips = TripRepositoryImpl(db: db, queue: queue, clock: clock.call);
-    savedRoutes = SavedRouteRepositoryImpl(db: db, queue: queue, clock: clock.call);
+    String? account() => auth.currentSession?.user.id;
+    trips = TripRepositoryImpl(db: db, queue: queue, account: account, clock: clock.call);
+    savedRoutes = SavedRouteRepositoryImpl(
+      db: db,
+      queue: queue,
+      account: account,
+      clock: clock.call,
+    );
     settings = SettingsRepositoryImpl(db);
     auth = FakeAuthRepository(testSession);
     connectivity = FakeConnectivityService();
@@ -90,9 +98,9 @@ void main() {
           pushed.add(operations);
           return onPush(operations);
         case 'sync/pull':
-          final since = request.queryParameters['since'] as String?;
-          pulls.add(since);
-          return onPull(since);
+          final query = Map<String, Object?>.of(request.queryParameters);
+          pulls.add(query);
+          return onPull(query);
         default:
           return StubResponse.error(404, 'NOT_FOUND', 'No encontrado');
       }
@@ -127,6 +135,22 @@ void main() {
     for (final op in operations) '${op['entity']}:${op['operation']}',
   ];
 
+  Future<List<SyncOperation>> waiting([String accountId = 'user-1']) =>
+      queue.nextBatch(accountId: accountId, limit: 10);
+
+  Future<String> queueRouteDelete(String id) => queue.add(
+    accountId: 'user-1',
+    entity: SyncEntities.route,
+    operation: SyncOperations.delete,
+    payload: {'id': id},
+  );
+
+  const otherSession = AuthSession(
+    accessToken: 'access-2',
+    refreshToken: 'refresh-2',
+    user: UserProfile(id: 'user-2', email: 'otra@maps.local', name: 'Otra', role: 'USER'),
+  );
+
   test('nothing is sent without a session', () async {
     auth = FakeAuthRepository();
     await sync.dispose();
@@ -143,7 +167,7 @@ void main() {
     final report = await sync.synchronize();
     expect(report.skipped, SyncSkipReason.offline);
     expect(adapter.requests, isEmpty);
-    expect(await queue.nextBatch(limit: 10), hasLength(3));
+    expect(await waiting(), hasLength(3));
   });
 
   test('sends the queue in order and brings the routes saved on other devices', () async {
@@ -156,13 +180,13 @@ void main() {
     expect(entities(pushed.single), ['trip:CREATE', 'tracking_point:CREATE', 'trip:FINISH']);
     expect(report.completed, 3);
     expect(report.pulledRoutes, 1);
-    expect(await queue.nextBatch(limit: 10), isEmpty);
+    expect(await waiting(), isEmpty);
     expect((await savedRoutes.getAll()).single.name, 'Casa → Oficina');
     expect(sync.state.lastSyncAt, clock.now);
     expect(sync.state.lastError, isNull);
     expect(await settings.read('sync.lastSyncAt'), '2026-09-25T12:00:00.000Z');
     // Next pull starts shortly before the server time of this one.
-    expect(await settings.read('sync.pullCursor.user-1'), '2026-09-25T19:34:29.918Z');
+    expect(await settings.read('sync.pullCursor.user-1'), '2026-09-25T22:11:38.087Z');
   });
 
   test('the same installation id is sent in every round', () async {
@@ -198,8 +222,11 @@ void main() {
     final first = await sync.synchronize();
     expect(first.retried, 3, reason: 'the points and the finish wait for the trip');
     expect(first.failed, 0);
-    expect(await queue.nextBatch(limit: 10), isEmpty);
-    expect(await queue.nextAttemptAt(), clock.now.add(const Duration(seconds: 5)));
+    expect(await waiting(), isEmpty);
+    expect(
+      await queue.nextAttemptAt(accountId: 'user-1'),
+      clock.now.add(const Duration(seconds: 5)),
+    );
 
     // Before the backoff expires nothing is sent.
     await sync.synchronize();
@@ -213,7 +240,12 @@ void main() {
   });
 
   test('an operation rejected by the server is set aside and does not block the rest', () async {
-    await queue.add(entity: SyncEntities.place, operation: SyncOperations.create, payload: {});
+    await queue.add(
+      accountId: 'user-1',
+      entity: SyncEntities.place,
+      operation: SyncOperations.create,
+      payload: {},
+    );
     await recordTrip();
     onPush = (operations) => StubResponse.ok({
       'results': [
@@ -236,7 +268,7 @@ void main() {
 
     expect(report.failed, 1);
     expect(report.completed, 3);
-    final failed = (await queue.byStatus(SyncStatus.failed)).single;
+    final failed = (await queue.byStatus(SyncStatus.failed, accountId: 'user-1')).single;
     expect(failed.entity, SyncEntities.place);
     expect(failed.lastError, contains('VALIDATION_ERROR'));
     expect(failed.lastError, contains('name must be a string'));
@@ -256,9 +288,9 @@ void main() {
     final report = await sync.synchronize();
 
     expect(report.completed, 0);
-    final waiting = await queue.nextBatch(limit: 10);
-    expect(waiting, hasLength(3));
-    expect(waiting.every((op) => op.retryCount == 0), isTrue);
+    final left = await waiting();
+    expect(left, hasLength(3));
+    expect(left.every((op) => op.retryCount == 0), isTrue);
     expect(connectivity.failuresReported, greaterThan(0));
     expect(sync.state.lastError, 'No hay conexión con el servidor.');
     expect(sync.state.lastSyncAt, isNull);
@@ -274,26 +306,14 @@ void main() {
     expect(report.retried, 3);
     expect(pulls, isEmpty);
     expect(sync.state.lastError, 'El servidor no está disponible (HTTP 503).');
-    expect(await queue.nextAttemptAt(), isNotNull);
+    expect(await queue.nextAttemptAt(accountId: 'user-1'), isNotNull);
   });
 
   test('a request rejected as a whole is split to find the operation at fault', () async {
     final ids = [
-      await queue.add(
-        entity: SyncEntities.route,
-        operation: SyncOperations.delete,
-        payload: {'id': 'r1'},
-      ),
-      await queue.add(
-        entity: SyncEntities.route,
-        operation: SyncOperations.delete,
-        payload: {'id': 'bad'},
-      ),
-      await queue.add(
-        entity: SyncEntities.route,
-        operation: SyncOperations.delete,
-        payload: {'id': 'r3'},
-      ),
+      await queueRouteDelete('r1'),
+      await queueRouteDelete('bad'),
+      await queueRouteDelete('r3'),
     ];
     onPush = (operations) {
       final hasBad = operations.any((op) => (op['payload']! as Map)['id'] == 'bad');
@@ -307,18 +327,14 @@ void main() {
     expect(pushed.map((batch) => batch.length), [3, 1, 1, 1]);
     expect(report.completed, 2);
     expect(report.failed, 1);
-    expect((await queue.byStatus(SyncStatus.failed)).single.id, ids[1]);
+    expect((await queue.byStatus(SyncStatus.failed, accountId: 'user-1')).single.id, ids[1]);
   });
 
   test('large queues are sent in several requests, in order', () async {
     await sync.dispose();
     sync = createService(batchSize: 2);
     for (var i = 0; i < 5; i++) {
-      await queue.add(
-        entity: SyncEntities.route,
-        operation: SyncOperations.delete,
-        payload: {'id': 'r$i'},
-      );
+      await queueRouteDelete('r$i');
     }
     expect((await sync.synchronize()).completed, 5);
     expect(pushed.map((batch) => batch.length), [2, 2, 1]);
@@ -331,7 +347,7 @@ void main() {
     );
   });
 
-  test('the pull follows pages and remembers where it stopped', () async {
+  test('the pull follows the cursor of the server, also across pages without routes', () async {
     Map<String, Object?> route(String id, String updatedAt) => {
       'id': id,
       'name': 'Ruta $id',
@@ -354,34 +370,51 @@ void main() {
       'updatedAt': updatedAt,
     };
     await savedRoutes.applyRemote(
+      accountId: 'user-1',
       routes: [OfflineRoute.fromApi(route('old', '2026-09-01T00:00:00.000Z'))],
       deletedIds: const [],
     );
-    onPull = (since) => switch (since) {
-      null => StubResponse.ok({
+    // Route a and the deletion of "old" happened in the same millisecond.
+    const tie = '2026-09-20T10:00:00.000Z';
+    onPull = (query) => switch ((query['since'], query['afterId'])) {
+      (null, null) => StubResponse.ok({
         'serverTime': '2026-09-25T12:00:00.000Z',
-        'routes': [route('a', '2026-09-20T10:00:00.000Z')],
+        'routes': [route('a', tie)],
         'deletedRouteIds': <Object?>[],
         'hasMore': true,
+        'next': {'since': tie, 'afterId': 'a'},
       }),
-      '2026-09-20T10:00:00.000Z' => StubResponse.ok({
-        'serverTime': '2026-09-25T12:00:00.000Z',
-        'routes': [route('b', '2026-09-21T10:00:00.000Z')],
+      (tie, 'a') => StubResponse.ok({
+        'serverTime': '2026-09-25T12:00:01.000Z',
+        'routes': <Object?>[],
         'deletedRouteIds': ['old'],
-        'hasMore': false,
+        'hasMore': true,
+        'next': {'since': tie, 'afterId': 'old'},
       }),
-      _ => noChanges(since),
+      (tie, 'old') => StubResponse.ok({
+        'serverTime': '2026-09-25T12:00:02.000Z',
+        'routes': [route('b', '2026-09-21T10:00:00.000Z')],
+        'deletedRouteIds': <Object?>[],
+        'hasMore': false,
+        'next': {'since': '2026-09-21T10:00:00.000Z', 'afterId': 'b'},
+      }),
+      _ => noChanges(query),
     };
 
     final report = await sync.synchronize();
 
-    expect(pulls, [null, '2026-09-20T10:00:00.000Z']);
+    expect(pulls, [
+      <String, Object?>{},
+      {'since': tie, 'afterId': 'a'},
+      {'since': tie, 'afterId': 'old'},
+    ]);
     expect(report.pulledRoutes, 2);
     expect(report.deletedRoutes, 1);
     expect((await savedRoutes.getAll()).map((r) => r.routeId).toSet(), {'a', 'b'});
 
+    // Up to date: the next round starts a little before the first page was answered.
     await sync.synchronize();
-    expect(pulls.last, '2026-09-25T11:59:55.000Z');
+    expect(pulls.last, {'since': '2026-09-25T11:59:55.000Z'});
   });
 
   test('a route deleted here and not sent yet is not brought back by the server', () async {
@@ -390,7 +423,7 @@ void main() {
               .first!
           as Map<String, Object?>,
     );
-    await savedRoutes.applyRemote(routes: [remote], deletedIds: const []);
+    await savedRoutes.applyRemote(accountId: 'user-1', routes: [remote], deletedIds: const []);
     await savedRoutes.delete(remote.routeId);
     // The delete cannot be applied yet (the server is busy) but the pull runs.
     onPush = (operations) => StubResponse.ok({
@@ -423,7 +456,7 @@ void main() {
       inFlight--;
       return request.path == 'sync/push'
           ? results(((request.data as Map)['operations'] as List).cast<Operation>())
-          : noChanges(null);
+          : noChanges(const {});
     };
     await Future.wait([sync.synchronize(), sync.synchronize(), sync.synchronize()]);
     // The extra calls asked for one more round; wait for it to end.
@@ -456,8 +489,65 @@ void main() {
     await recordTrip();
     await sync.start();
     expect(sync.state.isAuthenticated, isFalse);
+    // What AuthRepositoryImpl does on login: the trip recorded without an
+    // account is the new session's.
+    await db.adoptGuestData(testUser.id);
     loggedOut.session = testSession;
     await eventually(() => pushed.isNotEmpty && !sync.state.isSyncing);
     expect(sync.state.isAuthenticated, isTrue);
+  });
+
+  test('another account on the same phone neither sends nor sees the first one\'s data', () async {
+    await recordTrip();
+    // user-1 logs out and user-2 logs in.
+    auth
+      ..session = null
+      ..session = otherSession;
+    onPull = (_) => StubResponse(200, json: loadFixture('sync_pull_response'));
+
+    final report = await sync.synchronize();
+
+    expect(pushed, isEmpty, reason: 'the trip of user-1 waits for user-1');
+    expect(report.pulledRoutes, 1);
+    expect((await savedRoutes.getAll()).single.name, 'Casa → Oficina');
+    expect(await settings.read('sync.pullCursor.user-2'), isNotNull);
+    expect(await settings.read('sync.pullCursor.user-1'), isNull);
+
+    // user-1 comes back: its trip goes to its account and user-2's route is hidden.
+    auth.session = testSession;
+    onPull = noChanges;
+    expect(await savedRoutes.getAll(), isEmpty);
+    await sync.synchronize();
+    expect(entities(pushed.single), ['trip:CREATE', 'tracking_point:CREATE', 'trip:FINISH']);
+  });
+
+  test('a round stops sending when another account logs in meanwhile', () async {
+    await sync.dispose();
+    sync = createService(batchSize: 1);
+    await recordTrip();
+    onPush = (operations) {
+      // While the first request travels, user-1 leaves and user-2 logs in.
+      auth.session = otherSession;
+      return results(operations);
+    };
+
+    await sync.synchronize();
+
+    expect(pushed, hasLength(1));
+    expect(pulls, isEmpty);
+    expect(await waiting(), hasLength(2));
+    expect(await waiting('user-2'), isEmpty);
+  });
+
+  test('the pending count shown is the one of the account logged in', () async {
+    connectivity.status = ConnectivityStatus.offline;
+    await recordTrip();
+    await sync.start();
+    await eventually(() => sync.state.pending == 3);
+
+    auth.session = otherSession;
+    await eventually(() => sync.state.pending == 0);
+    auth.session = testSession;
+    await eventually(() => sync.state.pending == 3);
   });
 }

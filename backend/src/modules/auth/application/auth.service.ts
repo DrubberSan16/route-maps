@@ -9,7 +9,10 @@ import { UsersService } from '../../users/application/users.service';
 import { toUserProfile, UserEntity, UserProfile } from '../../users/domain/user.entity';
 import { AuthTokens, RefreshTokenPayload } from '../domain/auth-tokens';
 import { PASSWORD_HASHER, type PasswordHasher } from '../domain/password-hasher';
-import { RefreshTokenRepository } from '../infrastructure/refresh-token.repository';
+import {
+  NewRefreshToken,
+  RefreshTokenRepository,
+} from '../infrastructure/refresh-token.repository';
 import { LoginDto, RegisterDto } from './dto/auth.dto';
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -71,18 +74,16 @@ export class AuthService {
     if (!stored || stored.userId !== payload.sub || stored.tokenHash !== sha256(refreshToken)) {
       throw this.invalidRefresh();
     }
-    if (stored.revokedAt) {
-      this.logger.warn(
-        { userId: stored.userId },
-        'Refresh token reuse detected; revoking sessions',
-      );
-      await this.refreshTokens.revokeAllForUser(stored.userId);
-      throw this.invalidRefresh();
-    }
+    if (stored.revokedAt) throw await this.reuseDetected(stored.userId);
     if (stored.expiresAt.getTime() <= Date.now()) throw this.invalidRefresh();
 
     const user = await this.users.getById(stored.userId);
-    const tokens = await this.issueTokens(user, userAgent, stored.id);
+    const { tokens, record } = await this.signTokens(user, userAgent);
+    // The token may have been rotated since it was read (the same token sent twice at
+    // once): only the request that claims it gets a successor, the other is a re-use.
+    if (!(await this.refreshTokens.rotate(stored.id, record))) {
+      throw await this.reuseDetected(stored.userId);
+    }
     return tokens;
   }
 
@@ -96,11 +97,17 @@ export class AuthService {
     return toUserProfile(await this.users.getById(userId));
   }
 
-  private async issueTokens(
+  private async issueTokens(user: UserEntity, userAgent?: string): Promise<AuthTokens> {
+    const { tokens, record } = await this.signTokens(user, userAgent);
+    await this.refreshTokens.create(record);
+    return tokens;
+  }
+
+  /** Signs a token pair; the refresh token is stored by the caller (only its SHA-256). */
+  private async signTokens(
     user: UserEntity,
     userAgent?: string,
-    replacesTokenId?: string,
-  ): Promise<AuthTokens> {
+  ): Promise<{ tokens: AuthTokens; record: NewRefreshToken }> {
     const { accessSecret, refreshSecret, accessTtlSeconds, refreshTtlSeconds } =
       this.config.get('jwt');
     const accessPayload: AccessTokenPayload = {
@@ -117,22 +124,28 @@ export class AuthService {
       this.jwt.signAsync(refreshPayload, { secret: refreshSecret, expiresIn: refreshTtlSeconds }),
     ]);
 
-    await this.refreshTokens.create({
-      id: jti,
-      userId: user.id,
-      tokenHash: sha256(refreshToken),
-      expiresAt: new Date(Date.now() + refreshTtlSeconds * 1000),
-      userAgent: userAgent?.slice(0, 255),
-    });
-    if (replacesTokenId) await this.refreshTokens.revoke(replacesTokenId, jti);
-
     return {
-      accessToken,
-      refreshToken,
-      tokenType: 'Bearer',
-      expiresIn: accessTtlSeconds,
-      refreshExpiresIn: refreshTtlSeconds,
+      tokens: {
+        accessToken,
+        refreshToken,
+        tokenType: 'Bearer',
+        expiresIn: accessTtlSeconds,
+        refreshExpiresIn: refreshTtlSeconds,
+      },
+      record: {
+        id: jti,
+        userId: user.id,
+        tokenHash: sha256(refreshToken),
+        expiresAt: new Date(Date.now() + refreshTtlSeconds * 1000),
+        userAgent: userAgent?.slice(0, 255),
+      },
     };
+  }
+
+  private async reuseDetected(userId: string): Promise<AppException> {
+    this.logger.warn({ userId }, 'Refresh token reuse detected; revoking sessions');
+    await this.refreshTokens.revokeAllForUser(userId);
+    return this.invalidRefresh();
   }
 
   private async verifyRefreshToken(token: string): Promise<RefreshTokenPayload> {

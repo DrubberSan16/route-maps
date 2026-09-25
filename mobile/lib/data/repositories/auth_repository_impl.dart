@@ -6,10 +6,13 @@ import '../remote/api_client.dart';
 import '../remote/session_store.dart';
 
 class AuthRepositoryImpl implements AuthRepository {
-  AuthRepositoryImpl({required this._api, required this._sessions});
+  AuthRepositoryImpl({required this._api, required this._sessions, required this._adoptGuestData});
 
   final ApiClient _api;
   final SessionStore _sessions;
+
+  /// Gives the local data created without an account to the given account.
+  final Future<void> Function(String accountId) _adoptGuestData;
 
   @override
   AuthSession? get currentSession => _sessions.current;
@@ -19,7 +22,12 @@ class AuthRepositoryImpl implements AuthRepository {
       currentAndChanges(() => _sessions.current, _sessions.changes);
 
   @override
-  Future<void> restore() => _sessions.load();
+  Future<void> restore() async {
+    final session = await _sessions.load();
+    // Only data from before accounts were recorded can be unowned while a
+    // session is open: it was created by that session.
+    if (session != null) await _adoptGuestData(session.user.id);
+  }
 
   @override
   Future<AuthSession> login({required String email, required String password}) =>
@@ -60,6 +68,10 @@ class AuthRepositoryImpl implements AuthRepository {
         user: UserProfile.fromJson(json['user']! as Map<String, Object?>),
       );
     }, body: body);
+    // What was saved or recorded on this device without an account stays
+    // with the account that logs in (before the session is visible, so the
+    // first synchronization already sends it).
+    await _adoptGuestData(session.user.id);
     await _sessions.save(session);
     return session;
   }

@@ -6,6 +6,8 @@ import { ErrorCode } from '../../../../common/errors/error-codes';
 import { isValidCoordinate, isValidLineString } from '../../../../common/geo/geojson';
 import {
   ROUTE_REPOSITORY,
+  RouteChangeCursor,
+  RouteChanges,
   type RouteRepository,
   SavedRoute,
   SaveRouteInput,
@@ -31,6 +33,18 @@ export class SavedRoutesService {
     if (input.geometry.coordinates.length > MAX_GEOMETRY_POINTS) {
       throw new AppException(ErrorCode.INVALID_GEOMETRY, 'Route geometry has too many points');
     }
+    // The app cuts the geometry by these ranges when it reuses the route offline.
+    const lastVertex = input.geometry.coordinates.length - 1;
+    const outside = input.steps.findIndex(
+      ({ geometryIndex: range }) =>
+        range !== undefined && (range[0] > range[1] || range[1] > lastVertex),
+    );
+    if (outside >= 0) {
+      throw new AppException(
+        ErrorCode.INVALID_GEOMETRY,
+        `steps.${outside}.geometryIndex must be a range of vertices of the route geometry`,
+      );
+    }
     const saved = await this.routes.upsert(userId, { ...input, id: input.id ?? randomUUID() });
     if (!saved) {
       throw new AppException(
@@ -50,13 +64,19 @@ export class SavedRoutesService {
 
   async list(
     userId: string,
-    options: { limit: number; offset: number; includeGeometry: boolean; updatedSince?: Date },
+    options: { limit: number; offset: number; includeGeometry: boolean },
   ): Promise<Paginated<SavedRoute>> {
     const { items, total } = await this.routes.list(userId, options);
     return { items, total, limit: options.limit, offset: options.offset };
   }
 
+  /** Deletes the route; other devices learn it from the change feed (tombstone). */
   async delete(userId: string, id: string): Promise<{ deleted: boolean }> {
     return { deleted: await this.routes.delete(userId, id) };
+  }
+
+  /** Saved and deleted routes after the cursor, for `GET /sync/pull`. */
+  changes(userId: string, after: RouteChangeCursor, limit: number): Promise<RouteChanges> {
+    return this.routes.changes(userId, after, limit);
   }
 }

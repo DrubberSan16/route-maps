@@ -116,6 +116,7 @@ erDiagram
   users ||--o{ favorite_places : marca
   users ||--o{ geofences : define
   users ||--o{ synchronization_events : envía
+  users ||--o{ route_tombstones : "borró"
   devices ||--o{ downloaded_regions : almacena
   map_regions ||--o{ downloaded_regions : "se descarga en"
   routes ||--o{ route_points : "paradas"
@@ -129,7 +130,9 @@ con índices GiST; Prisma las declara como `Unsupported` y los repositorios las
 leen y escriben con SQL parametrizado (`ST_GeomFromGeoJSON`, `ST_AsGeoJSON`).
 `synchronization_events` registra cada operación offline por
 `(user_id, client_operation_id)`: es la clave de idempotencia de la
-sincronización.
+sincronización. `route_tombstones` recuerda las rutas borradas (por la API o
+por la sincronización) hasta que se vuelven a guardar, para que
+`GET /sync/pull` avise del borrado a los demás dispositivos.
 
 ## App móvil
 
@@ -224,7 +227,7 @@ sequenceDiagram
   Note over Q: sin conexión: la cola espera
   Q->>API: POST /sync/push (lotes en orden)
   API-->>Q: APPLIED · DUPLICATE · FAILED (retryable o no)
-  Q->>API: GET /sync/pull?since=cursor
+  Q->>API: GET /sync/pull?since=&afterId= (cursor)
   API-->>DB: rutas cambiadas y borradas en otros dispositivos
 ```
 

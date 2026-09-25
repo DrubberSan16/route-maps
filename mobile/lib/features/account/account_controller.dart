@@ -29,9 +29,16 @@ class AccountController extends Notifier<AccountFormState> {
     () => ref.read(authRepositoryProvider).register(email: email, password: password, name: name),
   );
 
-  Future<bool> logout() => _run(() => ref.read(authRepositoryProvider).logout());
+  /// Ends the session. A trip being recorded is finished first: the phone
+  /// stops tracking an account that has left, and the trip is sent when that
+  /// account logs in again.
+  Future<bool> logout() => _run(() async {
+    final recorder = ref.read(tripRecorderProvider);
+    if (recorder.state.isRecording) await recorder.finish();
+    await ref.read(authRepositoryProvider).logout();
+  });
 
-  Future<bool> _run(Future<Object?> Function() action) async {
+  Future<bool> _run(Future<void> Function() action) async {
     state = const AccountFormState(isBusy: true);
     try {
       await action();

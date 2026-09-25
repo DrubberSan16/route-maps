@@ -119,6 +119,9 @@ class OfflineRoutes extends Table {
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
 
+  /// Owner account (user id); null for a route saved without an account.
+  TextColumn get accountId => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {routeId};
 }
@@ -143,6 +146,10 @@ class SyncQueue extends Table {
   DateTimeColumn get nextAttemptAt => dateTime().nullable()();
   DateTimeColumn get completedAt => dateTime().nullable()();
 
+  /// Account whose session sends the operation; null for a change made
+  /// without an account.
+  TextColumn get accountId => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -160,6 +167,9 @@ class Trips extends Table {
   DateTimeColumn get endedAt => dateTime().nullable()();
   RealColumn get distanceMeters => real().withDefault(const Constant(0))();
   IntColumn get pointCount => integer().withDefault(const Constant(0))();
+
+  /// Owner account (user id); null for a trip recorded without an account.
+  TextColumn get accountId => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};

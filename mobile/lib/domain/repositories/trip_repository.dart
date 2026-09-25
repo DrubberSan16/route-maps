@@ -3,8 +3,10 @@ import '../entities/trip.dart';
 
 /// Trips and their GPS points, stored locally first.
 abstract class TripRepository {
+  /// Trips of the current account, newest first.
   Stream<List<Trip>> watchTrips({int limit = 50});
 
+  /// The trip being recorded on this device, if any.
   Future<Trip?> activeTrip();
 
   /// Creates an active trip and queues `trip:CREATE`.
