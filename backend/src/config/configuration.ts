@@ -8,6 +8,8 @@ export interface AppConfig {
   trustProxy: boolean;
   swaggerEnabled: boolean;
   logLevel: string;
+  /** Human-readable logs (pino-pretty, a dev dependency). JSON otherwise. */
+  logPretty: boolean;
   database: { url: string };
   redis: {
     enabled: boolean;
@@ -86,6 +88,7 @@ export const loadConfiguration = (): AppConfig => {
     trustProxy: bool(env.TRUST_PROXY, true),
     swaggerEnabled: bool(env.SWAGGER_ENABLED, true),
     logLevel: env.LOG_LEVEL ?? (env.NODE_ENV === 'production' ? 'info' : 'debug'),
+    logPretty: bool(env.LOG_PRETTY, false),
     database: { url: env.DATABASE_URL ?? '' },
     redis: {
       enabled: bool(env.REDIS_ENABLED, true),

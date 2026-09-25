@@ -60,7 +60,7 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
   if (config.NODE_ENV === 'production') {
     for (const key of ['JWT_SECRET', 'JWT_REFRESH_SECRET'] as const) {
       const value = String(config[key]);
-      if (WEAK_SECRETS.has(value) || value.length < 32) {
+      if (WEAK_SECRETS.has(value) || /change_?me/i.test(value) || value.length < 32) {
         throw new Error(`${key} must be a strong secret (>= 32 chars) in production`);
       }
     }

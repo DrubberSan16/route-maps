@@ -6,10 +6,13 @@
 // using parameterised raw SQL (ST_GeomFromGeoJSON / ST_AsGeoJSON).
 
 generator client {
-  provider        = "prisma-client"
-  output          = "../src/generated/prisma"
-  moduleFormat    = "cjs"
-  previewFeatures = ["postgresqlExtensions"]
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "cjs"
+  // Extension-less relative imports, as expected by the CommonJS TypeScript build
+  // (explicit, so generation does not depend on finding tsconfig.json).
+  importFileExtension = ""
+  previewFeatures     = ["postgresqlExtensions"]
 }
 
 datasource db {

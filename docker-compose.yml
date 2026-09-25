@@ -1,0 +1,247 @@
+# Maps Platform - local / development stack.
+#
+#   cp .env.example .env          # or: make init (generates random secrets)
+#   docker compose up -d --build
+#
+# Only Nginx publishes a port. PostgreSQL, Redis, the backend and the routing
+# engine live in the private network maps-network (internal: no Internet access
+# and no published ports).
+#
+# Region data (OSM extracts, PMTiles maps, routing graphs) lives in ./storage
+# (STORAGE_PATH) and is prepared on demand with the data-tools image:
+#   make prepare-region REGION=guayaquil
+# Nothing is downloaded or processed during `docker compose up`.
+#
+# Production: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Geocoding (Nominatim, heavy, optional): docker compose --profile geocoding up -d
+name: maps-platform
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: ${LOG_MAX_SIZE:-10m}
+    max-file: "${LOG_MAX_FILE:-5}"
+
+services:
+  nginx:
+    build:
+      context: ./infrastructure
+      dockerfile: nginx/Dockerfile
+    image: ${IMAGE_PREFIX:-maps-platform}/nginx:${IMAGE_TAG:-latest}
+    ports:
+      - "${NGINX_HTTP_PORT:-8080}:80"
+    volumes:
+      # PMTiles served with Range requests (/maps/...) and region downloads
+      # authorised by the backend (X-Accel-Redirect). Read-only.
+      - ${STORAGE_PATH:-./storage}/maps:/data/maps:ro
+      - ${STORAGE_PATH:-./storage}/routing:/data/routing:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/nginx-health || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks: [edge, maps-network]
+    logging: *logging
+
+  backend:
+    build:
+      context: ./backend
+    image: ${IMAGE_PREFIX:-maps-platform}/backend:${IMAGE_TAG:-latest}
+    init: true
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      APP_PORT: 3000
+      DATABASE_URL: postgresql://${DATABASE_USER:-maps}:${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}@${DATABASE_HOST:-postgres}:${DATABASE_PORT:-5432}/${DATABASE_NAME:-maps}?schema=public
+      REDIS_ENABLED: ${REDIS_ENABLED:-true}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in .env}
+      JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-900}
+      JWT_REFRESH_TTL_SECONDS: ${JWT_REFRESH_TTL_SECONDS:-2592000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      TRUST_PROXY: "true"
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_PRETTY: ${LOG_PRETTY:-false}
+      RATE_LIMIT_TTL_MS: ${RATE_LIMIT_TTL_MS:-60000}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-120}
+      ROUTING_PROVIDER: ${ROUTING_PROVIDER:-valhalla}
+      VALHALLA_URL: ${VALHALLA_URL:-http://routing:8002}
+      OSRM_URL: ${OSRM_URL:-}
+      ROUTING_LANGUAGE: ${ROUTING_LANGUAGE:-es-ES}
+      GEOCODING_PROVIDER: ${GEOCODING_PROVIDER:-none}
+      NOMINATIM_URL: ${NOMINATIM_URL:-http://nominatim:8080}
+      GEOCODING_COUNTRY_CODES: ${GEOCODING_COUNTRY_CODES:-}
+      MAP_STORAGE_PATH: /data/maps
+      ROUTING_STORAGE_PATH: /data/routing
+      PUBLIC_TILES_BASE_URL: ${PUBLIC_TILES_BASE_URL:-/maps}
+      MAP_DOWNLOAD_ACCEL_REDIRECT: "true"
+      REGIONS_SYNC_ON_STARTUP: "true"
+      RUN_MIGRATIONS: "true"
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      SEED_DEMO_PASSWORD: ${SEED_DEMO_PASSWORD:-}
+    volumes:
+      # Region manifests and files (read-only: the data-tools image writes them).
+      - ${STORAGE_PATH:-./storage}/maps:/data/maps:ro
+      - ${STORAGE_PATH:-./storage}/routing:/data/routing:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/health/live').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    stop_grace_period: 20s
+    networks: [maps-network]
+    logging: *logging
+
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgis/postgis:17-3.5}
+    environment:
+      POSTGRES_DB: ${DATABASE_NAME:-maps}
+      POSTGRES_USER: ${DATABASE_USER:-maps}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # CREATE EXTENSION postgis on the first initialisation of the volume.
+      - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d:ro
+    shm_size: 256mb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [maps-network]
+    logging: *logging
+
+  redis:
+    image: ${REDIS_IMAGE:-redis:8-alpine}
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-256mb}
+      - --maxmemory-policy
+      - allkeys-lru
+      - --requirepass
+      - ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+    environment:
+      # Used by redis-cli in the healthcheck.
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks: [maps-network]
+    logging: *logging
+
+  routing:
+    build:
+      context: ./infrastructure
+      dockerfile: valhalla/Dockerfile
+      args:
+        VALHALLA_IMAGE: ${VALHALLA_IMAGE:-ghcr.io/valhalla/valhalla:3.9.0}
+    image: ${IMAGE_PREFIX:-maps-platform}/routing:${IMAGE_TAG:-latest}
+    environment:
+      # Serves storage/routing/<ROUTING_REGION>/ built by `make prepare-region`.
+      ROUTING_REGION: ${ROUTING_REGION:-guayaquil}
+      VALHALLA_SERVER_THREADS: ${VALHALLA_SERVER_THREADS:-2}
+    volumes:
+      - ${STORAGE_PATH:-./storage}/routing:/data/routing:ro
+    healthcheck:
+      test: ["CMD", "routing-healthcheck.sh"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 60s
+    networks: [maps-network]
+    logging: *logging
+
+  # ---- On demand: region data pipeline (make prepare-region REGION=...) ----
+  data-tools:
+    profiles: [tools]
+    build:
+      context: ./infrastructure
+      dockerfile: data-tools/Dockerfile
+      args:
+        VALHALLA_IMAGE: ${VALHALLA_IMAGE:-ghcr.io/valhalla/valhalla:3.9.0}
+    image: ${IMAGE_PREFIX:-maps-platform}/data-tools:${IMAGE_TAG:-latest}
+    environment:
+      TILEGEN_MEMORY: ${TILEGEN_MEMORY:-2g}
+      VALHALLA_BUILD_THREADS: ${VALHALLA_BUILD_THREADS:-}
+      REGION_VERSION: ${REGION_VERSION:-}
+    volumes:
+      - ${STORAGE_PATH:-./storage}/imports:/data/imports
+      - ${STORAGE_PATH:-./storage}/maps:/data/maps
+      - ${STORAGE_PATH:-./storage}/routing:/data/routing
+    # Needs Internet access to download extracts, nothing else.
+    networks: [edge]
+    logging: *logging
+
+  # ---- Optional: geocoding (docker compose --profile geocoding up -d) ----
+  # Imports storage/imports/<NOMINATIM_REGION>.osm.pbf on the first start (download
+  # it first: make download-region REGION=...). Requirements in docs/routing.md.
+  nominatim:
+    profiles: [geocoding]
+    image: ${NOMINATIM_IMAGE:-mediagis/nominatim:5.1}
+    # Refuse to start without a password (the image would otherwise set an empty one).
+    entrypoint:
+      - /bin/bash
+      - -c
+      - '[ -n "$${NOMINATIM_PASSWORD}" ] || { echo "Set NOMINATIM_PASSWORD in .env" >&2; exit 1; }; exec /app/start.sh'
+    environment:
+      PBF_PATH: /data/imports/${NOMINATIM_REGION:-guayaquil}.osm.pbf
+      NOMINATIM_PASSWORD: ${NOMINATIM_PASSWORD:-}
+      IMPORT_STYLE: ${NOMINATIM_IMPORT_STYLE:-full}
+      THREADS: ${NOMINATIM_THREADS:-4}
+      GUNICORN_WORKERS: ${NOMINATIM_WORKERS:-2}
+      # Sized for a developer machine; the image defaults assume 32 GB+ of RAM.
+      POSTGRES_SHARED_BUFFERS: ${NOMINATIM_PG_SHARED_BUFFERS:-512MB}
+      POSTGRES_MAINTENANCE_WORK_MEM: ${NOMINATIM_PG_MAINTENANCE_WORK_MEM:-1GB}
+      POSTGRES_AUTOVACUUM_WORK_MEM: ${NOMINATIM_PG_AUTOVACUUM_WORK_MEM:-256MB}
+      POSTGRES_EFFECTIVE_CACHE_SIZE: ${NOMINATIM_PG_EFFECTIVE_CACHE_SIZE:-2GB}
+    volumes:
+      - nominatim_data:/var/lib/postgresql/16/main
+      - ${STORAGE_PATH:-./storage}/imports:/data/imports:ro
+    shm_size: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/status >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      # The first start imports the extract (minutes for a city, hours for a country).
+      start_period: 6h
+    networks: [maps-network]
+    logging: *logging
+
+networks:
+  # Public side: only Nginx publishes ports; data-tools uses it to download extracts.
+  edge: {}
+  # Private network of the platform: no Internet access, nothing published.
+  maps-network:
+    internal: true
+
+volumes:
+  postgres_data: {}
+  redis_data: {}
+  nominatim_data: {}

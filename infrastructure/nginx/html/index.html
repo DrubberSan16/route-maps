@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Visor de mapas · Maps Platform</title>
+  <link rel="stylesheet" href="vendor/maplibre-gl.css">
+  <link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+  <aside class="panel" aria-label="Controles">
+    <h1>Visor de mapas</h1>
+    <p class="hint">Herramienta de desarrollo: muestra las regiones preparadas con el estilo propio y
+      calcula rutas con la API. La app para usuarios es la aplicación Flutter.</p>
+
+    <label for="region">Región</label>
+    <select id="region" disabled><option>Cargando…</option></select>
+    <p id="region-info" class="muted"></p>
+
+    <label for="profile">Perfil de ruta</label>
+    <select id="profile">
+      <option value="CAR">Auto</option>
+      <option value="TRUCK">Camión</option>
+      <option value="MOTORCYCLE">Moto</option>
+      <option value="BICYCLE">Bicicleta</option>
+      <option value="PEDESTRIAN">Peatón</option>
+    </select>
+
+    <p class="hint">Haz clic en el mapa para marcar el <strong>origen</strong> y luego el
+      <strong>destino</strong>.</p>
+    <button id="clear" type="button">Limpiar ruta</button>
+
+    <div id="status" role="status" aria-live="polite"></div>
+    <ol id="routes"></ol>
+    <ol id="steps"></ol>
+  </aside>
+  <main id="map" aria-label="Mapa"></main>
+  <script src="vendor/pmtiles.js"></script>
+  <script type="module" src="viewer.js"></script>
+</body>
+</html>

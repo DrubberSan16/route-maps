@@ -1,0 +1,70 @@
+# Maps Platform - production overrides.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Differences with the development stack:
+#   - NODE_ENV=production (strong secrets enforced, JSON logs), no demo data,
+#     Swagger disabled unless SWAGGER_ENABLED=true;
+#   - restart: unless-stopped and memory limits on every service;
+#   - Nginx publishes 80/443; TLS with NGINX_SERVER_CONF=./infrastructure/nginx/tls/https.conf
+#     and the certificates in TLS_CERTS_PATH (fullchain.pem + privkey.pem);
+#   - PostgreSQL, Redis, backend and routing stay in the internal network maps-network.
+# Requires Docker Compose 2.24.4 or newer (!override).
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  nginx:
+    <<: *restart
+    ports: !override
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ${NGINX_SERVER_CONF:-./infrastructure/nginx/conf.d/default.conf}:/etc/nginx/conf.d/default.conf:ro
+      - ${TLS_CERTS_PATH:-./infrastructure/nginx/certs}:/etc/nginx/certs:ro
+    deploy:
+      resources:
+        limits:
+          memory: ${NGINX_MEMORY_LIMIT:-256m}
+
+  backend:
+    <<: *restart
+    environment:
+      NODE_ENV: production
+      LOG_PRETTY: "false"
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS in .env (comma separated origins)}
+    deploy:
+      resources:
+        limits:
+          memory: ${BACKEND_MEMORY_LIMIT:-1g}
+
+  postgres:
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          memory: ${POSTGRES_MEMORY_LIMIT:-2g}
+
+  redis:
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          memory: ${REDIS_MEMORY_LIMIT:-512m}
+
+  routing:
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          memory: ${ROUTING_MEMORY_LIMIT:-4g}
+
+  nominatim:
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          memory: ${NOMINATIM_MEMORY_LIMIT:-8g}

@@ -1,0 +1,15 @@
+# Optional local-development overrides. Copy to docker-compose.override.yml
+# (git-ignored; Docker Compose loads it automatically) to reach PostgreSQL, Redis
+# and Valhalla from your machine, e.g. to run the backend with `npm run start:dev`
+# or `npx prisma migrate dev`. Ports are bound to 127.0.0.1 only: never use this
+# file in production.
+services:
+  postgres:
+    ports: ["127.0.0.1:5432:5432"]
+    networks: [maps-network, edge]
+  redis:
+    ports: ["127.0.0.1:6379:6379"]
+    networks: [maps-network, edge]
+  routing:
+    ports: ["127.0.0.1:8002:8002"]
+    networks: [maps-network, edge]

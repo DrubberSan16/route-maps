@@ -76,5 +76,14 @@
     "tsx": "4.23.15",
     "typescript": "5.9.3",
     "typescript-eslint": "8.70.1"
+  },
+  "allowScripts": {
+    "@prisma/engines": true,
+    "prisma": true,
+    "argon2": true,
+    "esbuild": true,
+    "@parcel/watcher": true,
+    "unrs-resolver": true,
+    "@scarf/scarf": false
   }
 }

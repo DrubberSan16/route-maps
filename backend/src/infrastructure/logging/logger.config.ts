@@ -21,9 +21,9 @@ export const buildLoggerParams = (config: AppConfigService): Params => ({
   pinoHttp: {
     level: config.get('logLevel'),
     redact: { paths: REDACTED_PATHS, censor: '[REDACTED]' },
-    transport: config.isProduction
-      ? undefined
-      : { target: 'pino-pretty', options: { singleLine: true, translateTime: 'SYS:standard' } },
+    transport: config.get('logPretty')
+      ? { target: 'pino-pretty', options: { singleLine: true, translateTime: 'SYS:standard' } }
+      : undefined,
     genReqId: (req: IncomingMessage, res: ServerResponse) => {
       const header = req.headers['x-request-id'];
       const incoming = Array.isArray(header) ? header[0] : header;
@@ -52,8 +52,9 @@ export const buildLoggerParams = (config: AppConfigService): Params => ({
       statusCode: res.statusCode,
     }),
     customAttributeKeys: { responseTime: 'responseTime' },
+    // Probes (Docker healthchecks, load balancers) would flood the logs.
     autoLogging: {
-      ignore: (req) => req.url === '/health',
+      ignore: (req) => req.url === '/health' || req.url === '/health/live',
     },
   },
 });
