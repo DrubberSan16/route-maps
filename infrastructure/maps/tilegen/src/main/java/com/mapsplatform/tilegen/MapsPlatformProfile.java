@@ -5,6 +5,8 @@ import com.mapsplatform.tilegen.layers.BuildingLayer;
 import com.mapsplatform.tilegen.layers.HousenumberLayer;
 import com.mapsplatform.tilegen.layers.LanduseLayer;
 import com.mapsplatform.tilegen.layers.Layer;
+import com.mapsplatform.tilegen.layers.NaturalEarth;
+import com.mapsplatform.tilegen.layers.PlaceIndex;
 import com.mapsplatform.tilegen.layers.PlaceLayer;
 import com.mapsplatform.tilegen.layers.PoiLayer;
 import com.mapsplatform.tilegen.layers.TransportationLayer;
@@ -32,19 +34,28 @@ public final class MapsPlatformProfile implements Profile {
   public static final String WATER_POLYGONS_SOURCE = "water_polygons";
   public static final String SCHEMA_NAME = "maps-platform";
   public static final String SCHEMA_VERSION = "1.0.0";
+  public static final String NATURAL_EARTH_ATTRIBUTION =
+    "<a href=\"https://www.naturalearthdata.com/\" target=\"_blank\">Made with Natural Earth</a>";
 
   private final WaterLayer water = new WaterLayer();
   private final BoundaryLayer boundary = new BoundaryLayer();
   private final Map<String, Layer> layers = new LinkedHashMap<>();
+  private final PlaceIndex placeIndex = new PlaceIndex();
+  private final NaturalEarth naturalEarth = new NaturalEarth(placeIndex);
   private final String tilesetName;
+  private final boolean worldBaseMap;
 
   public MapsPlatformProfile() {
-    this(null);
+    this(null, false);
   }
 
-  /** @param tilesetName human readable name written into the archive metadata (for example the region name). */
-  public MapsPlatformProfile(String tilesetName) {
+  /**
+   * @param tilesetName  human readable name written into the archive metadata (for example the region name)
+   * @param worldBaseMap true for the world base map built from Natural Earth only (changes the attribution)
+   */
+  public MapsPlatformProfile(String tilesetName, boolean worldBaseMap) {
     this.tilesetName = tilesetName;
+    this.worldBaseMap = worldBaseMap;
     for (Layer layer : List.of(water, new WaterNameLayer(), new WaterwayLayer(), new LanduseLayer(),
       new BuildingLayer(), new TransportationLayer(), boundary, new PlaceLayer(), new PoiLayer(),
       new HousenumberLayer())) {
@@ -57,6 +68,11 @@ public final class MapsPlatformProfile implements Profile {
     return List.copyOf(layers.keySet());
   }
 
+  /** Countries and cities read from the Natural Earth sources (world base map only). */
+  public PlaceIndex placeIndex() {
+    return placeIndex;
+  }
+
   @Override
   public List<OsmRelationInfo> preprocessOsmRelation(OsmElement.Relation relation) {
     return boundary.preprocessOsmRelation(relation);
@@ -66,6 +82,10 @@ public final class MapsPlatformProfile implements Profile {
   public void processFeature(SourceFeature sourceFeature, FeatureCollector features) {
     if (WATER_POLYGONS_SOURCE.equals(sourceFeature.getSource())) {
       water.processOcean(features);
+      return;
+    }
+    if (NaturalEarth.isSource(sourceFeature.getSource())) {
+      naturalEarth.process(sourceFeature, features);
       return;
     }
     for (Layer layer : layers.values()) {
@@ -82,7 +102,7 @@ public final class MapsPlatformProfile implements Profile {
 
   @Override
   public boolean caresAboutSource(String name) {
-    return OSM_SOURCE.equals(name) || WATER_POLYGONS_SOURCE.equals(name);
+    return OSM_SOURCE.equals(name) || WATER_POLYGONS_SOURCE.equals(name) || NaturalEarth.isSource(name);
   }
 
   @Override
@@ -97,12 +117,13 @@ public final class MapsPlatformProfile implements Profile {
 
   @Override
   public String description() {
-    return "Vector tiles of the maps platform built from OpenStreetMap data";
+    return worldBaseMap ? "World base map of the maps platform built from Natural Earth data" :
+      "Vector tiles of the maps platform built from OpenStreetMap data";
   }
 
   @Override
   public String attribution() {
-    return OSM_ATTRIBUTION;
+    return worldBaseMap ? NATURAL_EARTH_ATTRIBUTION : OSM_ATTRIBUTION;
   }
 
   @Override

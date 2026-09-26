@@ -103,6 +103,34 @@ Los océanos solo existen si se pasan los polígonos de agua de OSMCoastline
 OpenStreetMap modela el mar como líneas de costa y no como polígonos. Sin
 ellos, el mar se ve con el color de fondo del estilo.
 
+### Mapa base mundial (Natural Earth)
+
+La región `world` (`make prepare-region REGION=world`) se genera con 10 capas
+de Natural Earth 1:10m (dominio público) en lugar de OpenStreetMap, para los
+zooms 0 a 7, con **el mismo esquema**, de modo que un solo estilo dibuja el
+mundo y las regiones:
+
+| Natural Earth | Capa | Atributos |
+| --- | --- | --- |
+| `ne_10m_ocean` | `water` | `class=ocean` |
+| `ne_10m_lakes` | `water` + `water_name` | `class=lake` / `reservoir`, nombres |
+| `ne_10m_rivers_lake_centerlines` | `waterway` | `class=river`, nombres desde z5 |
+| `ne_10m_geography_marine_polys` | `water_name` | `class=ocean` / `sea` / `bay` |
+| `ne_10m_admin_0_countries` | `place` (en su punto de etiqueta) | `class=country`, `rank=1` |
+| `ne_10m_admin_0_boundary_lines_land` | `boundary` | `admin_level=2`, `disputed` |
+| `ne_10m_admin_1_states_provinces_lines` | `boundary` | `admin_level=4` |
+| `ne_10m_populated_places` | `place` | `class=city` (capitales y 100.000+ hab.) o `town`, `capital`, `population` |
+| `ne_10m_roads` | `transportation` | `motorway` / `trunk` / `primary` / `secondary` / `ferry` |
+| `ne_10m_urban_areas` | `landuse` | `class=residential` |
+
+El zoom mínimo de cada elemento sale de los campos `min_zoom`/`min_label` de
+Natural Earth. Los países y ciudades se escriben además en
+`world/world.places.json` para la búsqueda (ver [routing.md](routing.md)).
+
+El visor pinta cada capa del estilo una vez por archivo, con el mundo debajo de
+las regiones y visible hasta el zoom 8; una región contenida en otra más grande
+(Guayaquil dentro de Ecuador) no se vuelve a dibujar.
+
 ## Estilo
 
 `infrastructure/maps/style/style.json` ("Maps Platform Light", 45 capas) es el
@@ -152,6 +180,9 @@ servidor no genera ni guarda teselas sueltas: todo sale del archivo PMTiles.
 - La atribución "© OpenStreetMap contributors" va en la metadata de cada
   PMTiles, en la fuente del estilo y siempre visible sobre el mapa en la app y
   en el visor.
-- Los glifos Noto Sans están bajo la SIL Open Font License 1.1.
+- El mapa base mundial usa Natural Earth (dominio público); el visor muestra
+  "Made with Natural Earth" junto a la atribución de OpenStreetMap.
+- Los glifos Noto Sans y la tipografía Inter del visor están bajo la SIL Open
+  Font License 1.1.
 - Planetiler, MapLibre y PMTiles mantienen sus licencias; el visor incluye las
   de MapLibre GL JS y PMTiles junto a sus archivos.

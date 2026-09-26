@@ -17,10 +17,18 @@
 #   --water-polygons             draw oceans with the OSMCoastline water polygons
 #                                (~1 GB download, kept in storage/imports)
 #
+# Regions
+#   Codes of infrastructure/regions/regions.json, or any Geofabrik extract id
+#   (countries, states, continents: peru, colombia, spain, ...). "world" is the
+#   world base map built from Natural Earth (low zooms, no routing), with the
+#   index of countries and cities used by the place search.
+#
 # Files (Docker bind mounts of ./storage on the host)
 #   /data/imports/<region>.osm.pbf           OpenStreetMap extract (input)
+#   /data/imports/naturalearth/*.zip         Natural Earth shapefiles (world input)
 #   /data/maps/<dir>/<region>.pmtiles        visual map, vector tiles
 #   /data/maps/<dir>/<region>.region.json    manifest registered by the backend
+#   /data/maps/world/world.places.json       countries and cities (world only)
 #   /data/routing/<region>/                  Valhalla graph + <region>.valhalla.tar package
 #
 # Every output is written to a temporary file first and renamed when complete,
@@ -33,7 +41,26 @@ MAPS_DIR="${MAPS_DIR:-/data/maps}"
 ROUTING_DIR="${ROUTING_DIR:-/data/routing}"
 TILEGEN_HOME="${TILEGEN_HOME:-/opt/tilegen}"
 TILEGEN_MEMORY="${TILEGEN_MEMORY:-2g}"
+TILEGEN_TMPDIR="${TILEGEN_TMPDIR:-/tmp}"
 WATER_POLYGONS_URL="${WATER_POLYGONS_URL:-https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip}"
+GEOFABRIK_INDEX_URL="${GEOFABRIK_INDEX_URL:-https://download.geofabrik.de/index-v1-nogeom.json}"
+NATURAL_EARTH_URL="${NATURAL_EARTH_URL:-https://naciscdn.org/naturalearth/10m}"
+# Natural Earth 10m layers of the world base map (public domain, ~45 MB), read
+# by tilegen as /data/imports/naturalearth/<name>.zip.
+NATURAL_EARTH_LAYERS=(
+  physical/ne_10m_ocean
+  physical/ne_10m_lakes
+  physical/ne_10m_rivers_lake_centerlines
+  physical/ne_10m_geography_marine_polys
+  cultural/ne_10m_admin_0_countries
+  cultural/ne_10m_admin_0_boundary_lines_land
+  cultural/ne_10m_admin_1_states_provinces_lines
+  cultural/ne_10m_populated_places
+  cultural/ne_10m_roads
+  cultural/ne_10m_urban_areas
+)
+# The world base map covers the low zooms; prepared regions add the detail.
+WORLD_MAX_ZOOM=7
 USER_AGENT="${DOWNLOAD_USER_AGENT:-maps-platform-data-tools/1.0}"
 CODE_PATTERN='^[a-z0-9][a-z0-9-]{1,62}$'
 
@@ -46,7 +73,7 @@ die() {
 }
 
 usage() {
-  sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'
+  awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
   exit "${1:-0}"
 }
 
@@ -55,11 +82,33 @@ usage() {
 region_json() {
   local code=$1
   [[ "$code" =~ $CODE_PATTERN ]] || die "invalid region code '$code'"
-  jq -ce --arg code "$code" '.regions[] | select(.code == $code)' "$CATALOG" 2>/dev/null ||
-    die "region '$code' is not in the catalog. Available: $(jq -r '[.regions[].code] | join(", ")' "$CATALOG")"
+  jq -ce --arg code "$code" '.regions[] | select(.code == $code)' "$CATALOG" 2>/dev/null && return 0
+  geofabrik_region "$code" ||
+    die "region '$code' is neither in the catalog ($(jq -r '[.regions[].code] | join(", ")' "$CATALOG")) nor a Geofabrik extract id (https://download.geofabrik.de)"
+}
+
+# Any Geofabrik extract by its id (peru, colombia, spain, ...). The index is
+# cached for a day in the imports folder.
+geofabrik_region() {
+  local code=$1 index="$IMPORTS_DIR/geofabrik-index.json"
+  if [[ ! -s "$index" || -n "$(find "$index" -mmin +1440 2>/dev/null)" ]]; then
+    mkdir -p "$IMPORTS_DIR"
+    log "Downloading the Geofabrik index"
+    curl --fail --silent --show-error --location --retry 3 --user-agent "$USER_AGENT" \
+      --output "$index.part" "$GEOFABRIK_INDEX_URL" || return 1
+    mv -f "$index.part" "$index"
+  fi
+  jq -ce --arg code "$code" '
+    .features[].properties
+    | select(.id == $code and .urls.pbf != null)
+    | {code: .id, name: .name, country: ((.["iso3166-1:alpha2"] // [])[0] // "ZZ"),
+       mapDir: (.parent // .id), source: {url: .urls.pbf}}' "$index"
 }
 
 field() { jq -r --arg name "$2" '.[$name] // empty' <<<"$1"; }
+
+# True for the world base map (Natural Earth, no OSM extract, no routing).
+is_natural_earth() { [[ $(jq -r '.source.naturalEarth // false' <<<"$1") == true ]]; }
 
 map_dir() {
   local dir
@@ -115,10 +164,36 @@ download_pbf() {
   die "could not download a verified copy of $url"
 }
 
+download_natural_earth() {
+  local force=$1 dir="$IMPORTS_DIR/naturalearth" layer name target
+  mkdir -p "$dir"
+  for layer in "${NATURAL_EARTH_LAYERS[@]}"; do
+    name=${layer##*/}
+    target="$dir/$name.zip"
+    if [[ -s "$target" && "$force" != true ]]; then
+      continue
+    fi
+    log "Downloading Natural Earth $name"
+    curl --fail --silent --show-error --location --retry 5 --retry-delay 5 \
+      --user-agent "$USER_AGENT" --output "$target.part" "$NATURAL_EARTH_URL/$layer.zip"
+    unzip -tq "$target.part" >/dev/null || {
+      rm -f "$target.part"
+      die "$name.zip is corrupt"
+    }
+    mv -f "$target.part" "$target"
+  done
+  match_owner "$dir" "$IMPORTS_DIR"
+  log "Natural Earth ready: $dir ($(du -sh "$dir" | cut -f1))"
+}
+
 cmd_download() {
   local code=$1 force=$2
   local region pbf url parent bbox
   region=$(region_json "$code")
+  if is_natural_earth "$region"; then
+    download_natural_earth "$force"
+    return 0
+  fi
   pbf="$IMPORTS_DIR/$code.osm.pbf"
   if [[ -s "$pbf" && "$force" != true ]]; then
     log "$pbf already exists (use --force-download to refresh it)"
@@ -166,35 +241,55 @@ ensure_water_polygons() {
 
 cmd_map() {
   local code=$1 water=$2
-  local region pbf dir out tmp workdir
+  local region pbf dir out tmp workdir places=""
   region=$(region_json "$code")
-  pbf="$IMPORTS_DIR/$code.osm.pbf"
-  [[ -s "$pbf" ]] || die "$pbf not found: run 'download $code' first"
   dir="$MAPS_DIR/$(map_dir "$region")"
-  mkdir -p "$dir"
   out="$dir/$code.pmtiles"
   tmp="$dir/.$code.building.pmtiles"
-  workdir=$(mktemp -d "$IMPORTS_DIR/.tilegen-$code-XXXXXX")
-  local args=(--osm_path="$pbf" --output="$tmp" --name="$(field "$region" name)" --tmpdir="$workdir")
-  if [[ "$water" == true ]]; then
-    args+=(--water_polygons="$(ensure_water_polygons)")
+  local args=(--name="$(field "$region" name)")
+  if is_natural_earth "$region"; then
+    [[ -s "$IMPORTS_DIR/naturalearth/ne_10m_ocean.zip" ]] || die "Natural Earth not found: run 'download $code' first"
+    places="$dir/$code.places.json"
+    args+=(--natural_earth="$IMPORTS_DIR/naturalearth" --gazetteer="$places.tmp" --maxzoom="$WORLD_MAX_ZOOM")
+  else
+    pbf="$IMPORTS_DIR/$code.osm.pbf"
+    [[ -s "$pbf" ]] || die "$pbf not found: run 'download $code' first"
+    args+=(--osm_path="$pbf")
+    if [[ "$water" == true ]]; then
+      args+=(--water_polygons="$(ensure_water_polygons)")
+    fi
   fi
+  mkdir -p "$dir"
+  # Planetiler's scratch files live on the container filesystem: random I/O on
+  # bind mounts from Windows/macOS hosts is very slow.
+  mkdir -p "$TILEGEN_TMPDIR"
+  workdir=$(mktemp -d "$TILEGEN_TMPDIR/tilegen-$code-XXXXXX")
+  args+=(--output="$tmp" --tmpdir="$workdir")
   log "Building map tiles for $code"
   if ! java -Xmx"$TILEGEN_MEMORY" -jar "$TILEGEN_HOME/tilegen.jar" "${args[@]}" ${TILEGEN_ARGS:-}; then
-    rm -rf "$workdir" "$tmp"
+    rm -rf "$workdir" "$tmp" ${places:+"$places.tmp"}
     die "tile generation failed for $code"
   fi
   rm -rf "$workdir"
   mv -f "$tmp" "$out"
   chmod 644 "$out"
   match_owner "$out" "$MAPS_DIR"
+  if [[ -n "$places" ]]; then
+    mv -f "$places.tmp" "$places"
+    chmod 644 "$places"
+    match_owner "$places" "$MAPS_DIR"
+    log "Place index ready: $places ($(jq '.places | length' "$places") places)"
+  fi
   match_owner "$dir" "$MAPS_DIR"
   log "Map ready: $out ($(du -h "$out" | cut -f1))"
 }
 
 cmd_routing() {
-  local code=$1
-  region_json "$code" >/dev/null
+  local code=$1 region
+  region=$(region_json "$code")
+  if is_natural_earth "$region"; then
+    die "$code is a base map: it has no routing graph"
+  fi
   build-routing.sh "$code"
   match_owner "$ROUTING_DIR/$code" "$ROUTING_DIR"
 }
@@ -257,7 +352,8 @@ cmd_manifest() {
       mapFile: $mapFile, mapChecksum: $mapChecksum,
       routingFile: (if $routingFile == "" then null else $routingFile end),
       routingChecksum: (if $routingChecksum == "" then null else $routingChecksum end),
-      source: ($region.source.url // ("clipped from " + $region.source.parent)),
+      source: ($region.source.url // (if $region.source.parent then "clipped from " + $region.source.parent
+               else "Natural Earth" end)),
       dataTimestamp: (if $dataTimestamp == "" then null else $dataTimestamp end),
       generatedAt: $generatedAt
     } | with_entries(select(.value != null))' >"$manifest.tmp"
@@ -270,10 +366,11 @@ cmd_manifest() {
 
 cmd_prepare() {
   local code=$1 force=$2 skip_routing=$3 water=$4
-  local started=$SECONDS
+  local started=$SECONDS region
+  region=$(region_json "$code")
   cmd_download "$code" "$force"
   cmd_map "$code" "$water"
-  if [[ "$skip_routing" != true ]]; then
+  if [[ "$skip_routing" != true ]] && ! is_natural_earth "$region"; then
     cmd_routing "$code"
   fi
   cmd_manifest "$code" >/dev/null
@@ -283,14 +380,18 @@ cmd_prepare() {
 
 cmd_list() {
   printf '%-12s %-24s %-8s %-8s %-8s %s\n' CODE NAME EXTRACT MAP ROUTING SOURCE
-  jq -r '.regions[] | [.code, .name, (.mapDir // .code), (.source.url // ("clip of " + .source.parent))] | @tsv' "$CATALOG" |
+  jq -r '.regions[] | [.code, .name, (.mapDir // .code),
+      (.source.url // (if .source.parent then "clip of " + .source.parent else "Natural Earth" end))] | @tsv' "$CATALOG" |
     while IFS=$'\t' read -r code name dir source; do
       local extract=no map=no routing=no
       [[ -s "$IMPORTS_DIR/$code.osm.pbf" ]] && extract=yes
+      [[ "$source" == "Natural Earth" && -s "$IMPORTS_DIR/naturalearth/ne_10m_ocean.zip" ]] && extract=yes
       [[ -s "$MAPS_DIR/$dir/$code.pmtiles" ]] && map=yes
       [[ -s "$ROUTING_DIR/$code/valhalla.json" ]] && routing=yes
       printf '%-12s %-24s %-8s %-8s %-8s %s\n' "$code" "$name" "$extract" "$map" "$routing" "$source"
     done
+  echo
+  echo "Any Geofabrik extract id also works (peru, colombia, spain, ...): https://download.geofabrik.de"
 }
 
 # ------------------------------------------------------------------ main

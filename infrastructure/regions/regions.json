@@ -1,6 +1,15 @@
 {
-  "description": "Catalog of offline regions. A region is either downloaded from a legitimate OpenStreetMap extract provider (source.url) or clipped from its parent extract with a bounding box (source.parent + bbox, [minLng, minLat, maxLng, maxLat]). mapDir is the folder under storage/maps.",
+  "description": "Catalog of offline regions. A region is either downloaded from a legitimate OpenStreetMap extract provider (source.url) or clipped from its parent extract with a bounding box (source.parent + bbox, [minLng, minLat, maxLng, maxLat]). \"world\" is the world base map built from Natural Earth (source.naturalEarth, low zooms, no routing). Any Geofabrik extract id not listed here (peru, colombia, spain, ...) can be prepared too. mapDir is the folder under storage/maps.",
   "regions": [
+    {
+      "code": "world",
+      "name": "Mundo",
+      "country": "ZZ",
+      "mapDir": "world",
+      "source": {
+        "naturalEarth": true
+      }
+    },
     {
       "code": "ecuador",
       "name": "Ecuador",
@@ -16,7 +25,12 @@
       "country": "EC",
       "province": "Guayas",
       "mapDir": "ecuador",
-      "bbox": [-80.65, -3.05, -79.2, -1.35],
+      "bbox": [
+        -80.65,
+        -3.05,
+        -79.2,
+        -1.35
+      ],
       "source": {
         "parent": "ecuador"
       }
@@ -28,7 +42,12 @@
       "province": "Guayas",
       "city": "Guayaquil",
       "mapDir": "ecuador",
-      "bbox": [-80.1, -2.33, -79.78, -2.0],
+      "bbox": [
+        -80.1,
+        -2.33,
+        -79.78,
+        -2
+      ],
       "source": {
         "parent": "ecuador"
       }
@@ -39,7 +58,12 @@
       "country": "EC",
       "province": "Pichincha",
       "mapDir": "ecuador",
-      "bbox": [-79.3, -0.85, -77.9, 0.35],
+      "bbox": [
+        -79.3,
+        -0.85,
+        -77.9,
+        0.35
+      ],
       "source": {
         "parent": "ecuador"
       }
@@ -51,7 +75,12 @@
       "province": "Pichincha",
       "city": "Quito",
       "mapDir": "ecuador",
-      "bbox": [-78.62, -0.42, -78.3, 0.05],
+      "bbox": [
+        -78.62,
+        -0.42,
+        -78.3,
+        0.05
+      ],
       "source": {
         "parent": "ecuador"
       }
