@@ -45,6 +45,10 @@ class EnvironmentVariables {
   @IsOptional()
   @IsIn(['nominatim', 'none'])
   GEOCODING_PROVIDER?: string;
+
+  @IsOptional()
+  @IsString()
+  GEOCODING_PLACES_FILE?: string;
 }
 
 /** Validates the environment at bootstrap so misconfiguration fails fast. */

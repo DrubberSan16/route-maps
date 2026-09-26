@@ -209,6 +209,25 @@ docker compose up -d backend             # para que tome GEOCODING_PROVIDER
 - Requisitos orientativos: 2 GB de RAM para una ciudad; 8 GB o más para
   Ecuador completo (límite en producción: `NOMINATIM_MEMORY_LIMIT`). Los
   parámetros de PostgreSQL de Nominatim se ajustan con `NOMINATIM_PG_*`.
-- `GEOCODING_COUNTRY_CODES=ec` limita los resultados a Ecuador; las búsquedas
-  se sesgan hacia la posición del usuario cuando la app la conoce.
+- `GEOCODING_COUNTRY_CODES=ec` limita los resultados de Nominatim a Ecuador;
+  las búsquedas se sesgan hacia la posición del usuario cuando la app la conoce.
 - Los resultados se guardan en Redis 24 h.
+- Importar Ecuador completo (`NOMINATIM_REGION=ecuador`, extracto de 120 MB)
+  tarda del orden de una hora con `NOMINATIM_THREADS=8`.
+
+### Países y ciudades de todo el mundo
+
+Con el mapa base mundial preparado (`make prepare-region REGION=world`), la
+búsqueda también consulta `storage/maps/world/world.places.json` (países y
+~7.600 ciudades de Natural Earth, en memoria; `GEOCODING_PLACES_FILE` cambia la
+ruta). Así "Lima", "Madrid" o "Lima, Perú" dan resultado aunque Nominatim solo
+tenga importado Ecuador, e incluso con `GEOCODING_PROVIDER=none`:
+
+- los países, capitales y ciudades de más de un millón de habitantes cuyo
+  nombre empieza por la búsqueda van primero, después los resultados de
+  Nominatim y al final otras ciudades del mundo (sin duplicar el mismo lugar);
+- se ignoran mayúsculas y acentos ("sao paulo" encuentra São Paulo) y lo que va
+  tras una coma filtra por país o provincia ("Lima, Ohio");
+- la búsqueda inversa sigue siendo solo de Nominatim;
+- sin el archivo y sin Nominatim, la API responde
+  `GEOCODING_PROVIDER_UNAVAILABLE` como antes.

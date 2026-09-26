@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+
 export type RoutingProviderName = 'valhalla' | 'osrm';
 export type GeocodingProviderName = 'nominatim' | 'none';
 
@@ -40,6 +42,8 @@ export interface AppConfig {
     timeoutMs: number;
     cacheTtlSeconds: number;
     defaultCountryCodes?: string;
+    /** Countries and cities of the world base map (world.places.json), searched with Nominatim. */
+    placesFile: string;
   };
   maps: {
     storagePath: string;
@@ -123,6 +127,9 @@ export const loadConfiguration = (): AppConfig => {
       timeoutMs: int(env.GEOCODING_TIMEOUT_MS, 8000),
       cacheTtlSeconds: int(env.GEOCODING_CACHE_TTL_SECONDS, 86400),
       defaultCountryCodes: optional(env.GEOCODING_COUNTRY_CODES),
+      placesFile:
+        optional(env.GEOCODING_PLACES_FILE) ??
+        join(env.MAP_STORAGE_PATH ?? '/data/maps', 'world', 'world.places.json'),
     },
     maps: {
       storagePath: env.MAP_STORAGE_PATH ?? '/data/maps',
