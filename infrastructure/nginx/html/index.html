@@ -3,38 +3,123 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Visor de mapas · Maps Platform</title>
+  <title>Maps Platform</title>
+  <link rel="preload" href="vendor/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="vendor/maplibre-gl.css">
   <link rel="stylesheet" href="viewer.css">
 </head>
 <body>
-  <aside class="panel" aria-label="Controles">
-    <h1>Visor de mapas</h1>
-    <p class="hint">Herramienta de desarrollo: muestra las regiones preparadas con el estilo propio y
-      calcula rutas con la API. La app para usuarios es la aplicación Flutter.</p>
+  <a class="skip-link" href="#map">Saltar al mapa</a>
 
-    <label for="region">Región</label>
-    <select id="region" disabled><option>Cargando…</option></select>
-    <p id="region-info" class="muted"></p>
+  <aside class="panel" aria-label="Búsqueda y rutas">
+    <header class="panel__header">
+      <h1 class="brand">Maps Platform</h1>
+    </header>
+    <p class="status status--error" id="app-status" role="alert" hidden></p>
 
-    <label for="profile">Perfil de ruta</label>
-    <select id="profile">
-      <option value="CAR">Auto</option>
-      <option value="TRUCK">Camión</option>
-      <option value="MOTORCYCLE">Moto</option>
-      <option value="BICYCLE">Bicicleta</option>
-      <option value="PEDESTRIAN">Peatón</option>
-    </select>
+    <section class="search" aria-label="Buscar">
+      <div class="combobox">
+        <label class="sr-only" for="search-input">Buscar un lugar, una dirección o un país</label>
+        <svg class="icon combobox__icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-search"/></svg>
+        <input id="search-input" class="input input--search" type="search" autocomplete="off" spellcheck="false"
+          placeholder="Busca un lugar o dirección" role="combobox" aria-autocomplete="list"
+          aria-expanded="false" aria-controls="search-results">
+        <ul class="listbox" id="search-results" role="listbox" aria-label="Sugerencias de búsqueda" hidden></ul>
+      </div>
+      <button class="icon-button icon-button--filled" type="button" id="open-directions" aria-label="Cómo llegar"
+        title="Cómo llegar">
+        <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-route"/></svg>
+      </button>
+    </section>
 
-    <p class="hint">Haz clic en el mapa para marcar el <strong>origen</strong> y luego el
-      <strong>destino</strong>.</p>
-    <button id="clear" type="button">Limpiar ruta</button>
+    <section class="card place-card" id="place-card" aria-labelledby="place-name" hidden>
+      <div class="place-card__header">
+        <h2 class="place-card__title" id="place-name"></h2>
+        <button class="icon-button" type="button" id="place-close" aria-label="Cerrar lugar">
+          <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-x"/></svg>
+        </button>
+      </div>
+      <p class="place-card__detail" id="place-detail"></p>
+      <div class="actions">
+        <button class="btn btn--primary" type="button" id="place-to">
+          <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-route"/></svg>Cómo llegar
+        </button>
+        <button class="btn btn--secondary" type="button" id="place-from">Salir desde aquí</button>
+        <button class="btn btn--secondary" type="button" id="place-stop" hidden>Añadir como parada</button>
+      </div>
+    </section>
 
-    <div id="status" role="status" aria-live="polite"></div>
-    <ol id="routes"></ol>
-    <ol id="steps"></ol>
+    <section class="directions" id="directions" aria-labelledby="directions-title" hidden>
+      <div class="directions__header">
+        <h2 class="section-title" id="directions-title">Cómo llegar</h2>
+        <button class="icon-button" type="button" id="close-directions" aria-label="Cerrar indicaciones">
+          <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-x"/></svg>
+        </button>
+      </div>
+
+      <fieldset class="profiles" id="profiles">
+        <legend class="sr-only">Medio de transporte</legend>
+      </fieldset>
+
+      <ol class="stops" id="stops" aria-label="Puntos de la ruta"></ol>
+
+      <div class="stops__toolbar">
+        <button class="btn btn--ghost" type="button" id="add-stop">
+          <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-plus"/></svg>Añadir parada
+        </button>
+        <button class="btn btn--ghost" type="button" id="swap-stops">
+          <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-swap"/></svg>Invertir
+        </button>
+      </div>
+      <p class="hint" id="directions-hint">Escribe un lugar o haz clic en el mapa para completar el campo resaltado.
+        Puedes arrastrar los marcadores para ajustar la ruta.</p>
+
+      <div class="status" id="route-status" role="status" aria-live="polite"></div>
+      <fieldset class="routes" id="routes" hidden>
+        <legend class="sr-only">Rutas encontradas</legend>
+        <div class="routes__list" id="routes-list"></div>
+      </fieldset>
+      <details class="steps" id="steps-details" hidden>
+        <summary>Indicaciones paso a paso</summary>
+        <ol class="steps__list" id="steps"></ol>
+      </details>
+    </section>
+
+    <details class="coverage" id="coverage">
+      <summary>Mapas disponibles</summary>
+      <ul class="coverage__list" id="coverage-list"></ul>
+      <p class="hint">El mapa base mundial muestra países, ciudades y carreteras principales hasta el zoom 7.
+        Las regiones preparadas añaden calles, rutas y direcciones.</p>
+    </details>
+
+    <footer class="panel__footer">
+      <a href="/api/docs" target="_blank" rel="noopener">API (Swagger)</a>
+    </footer>
   </aside>
-  <main id="map" aria-label="Mapa"></main>
+
+  <main class="map" id="map" aria-label="Mapa" tabindex="-1"></main>
+  <div class="map-notice" id="map-notice" role="status" hidden></div>
+
+  <!-- Icons (stroke icons in the style of Lucide, 24x24). -->
+  <svg class="sr-only" aria-hidden="true" focusable="false">
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></symbol>
+    <symbol id="i-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3"/><path d="M12 19v3"/><path d="M2 12h3"/><path d="M19 12h3"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M20 10c0 5-5.5 10.2-7.4 11.8a1 1 0 0 1-1.2 0C9.5 20.2 4 15 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+    <symbol id="i-city" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01M12 6h.01M16 6h.01M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01"/></symbol>
+    <symbol id="i-car" viewBox="0 0 24 24"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><path d="M9 17h6"/><circle cx="17" cy="17" r="2"/></symbol>
+    <symbol id="i-truck" viewBox="0 0 24 24"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></symbol>
+    <symbol id="i-moto" viewBox="0 0 24 24"><circle cx="5" cy="17" r="3"/><circle cx="19" cy="17" r="3"/><path d="M8 17h6l3-6h-5"/><path d="M12 11 9.5 7H7"/><path d="m17 11 2 6"/></symbol>
+    <symbol id="i-bike" viewBox="0 0 24 24"><circle cx="18.5" cy="17.5" r="3.5"/><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="15" cy="5" r="1"/><path d="M12 17.5V14l-3-3 4-3 2 3h2"/></symbol>
+    <symbol id="i-walk" viewBox="0 0 24 24"><circle cx="13" cy="4" r="2"/><path d="m9 21 2.5-5.5L14 18v3"/><path d="M11.5 15.5 12 10l-3 2v3"/><path d="m12 10 3 2.5 2.5 1"/></symbol>
+  </svg>
+
   <script src="vendor/pmtiles.js"></script>
   <script type="module" src="viewer.js"></script>
 </body>

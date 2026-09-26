@@ -101,7 +101,8 @@ if [[ "${count:-0}" -lt 1 ]]; then
   printf '\n%d passed, %d failed\n' "$PASSED" "$FAILED"
   exit 1
 fi
-REGION="${REGION:-$(json '.data[0].id')}"
+# The world base map has no routing package: test a prepared region.
+REGION="${REGION:-$(json '([.data[] | select(.id != "world")][0].id) // .data[0].id')}"
 pass "$count region(s) available, testing '$REGION'"
 status=$(http GET "/maps/regions/$REGION")
 expect "GET /maps/regions/$REGION -> 200" test "$status" = 200
@@ -231,8 +232,15 @@ expect "sync pull returns the saved routes" test "$status:$(json '.data.routes |
 
 # ------------------------------------------------------------------ geocoding, docs, viewer
 section "Geocoding, Swagger and viewer"
+# Nominatim (addresses, reverse geocoding) is optional; the world base map adds a
+# search of countries and cities that works without it.
+geocoding_state=$(curl -fsS "$BASE/health" | jq -r '.services.geocoding' 2>/dev/null)
 status=$(http GET "/geocoding/search?q=hospital")
-if [[ "$status" == 200 ]]; then
+if [[ "$geocoding_state" != up && "$status" == 200 ]]; then
+  pass "place search without Nominatim (world base map) -> 200"
+  status=$(http GET "/geocoding/search?q=Quito")
+  expect "world place search finds Quito" test "$status:$(json '[.data[].name] | index("Quito") != null')" = "200:true"
+elif [[ "$status" == 200 ]]; then
   pass "geocoding search -> 200 ($(json '.data | length') results)"
   if [[ -s "$WORK/route.json" ]]; then
     # The first point of the calculated route lies on a street.
@@ -251,6 +259,8 @@ status=$(http GET "$BASE/")
 expect "web viewer -> 200" test "$status" = 200
 status=$(http GET "$BASE/vendor/maplibre-gl.mjs")
 expect "viewer bundles MapLibre GL JS locally" test "$status" = 200
+status=$(http GET "$BASE/vendor/fonts/inter-latin-wght-normal.woff2")
+expect "viewer bundles its font locally" test "$status" = 200
 
 status=$(http POST /auth/logout "{\"refreshToken\":\"$REFRESH\"}")
 expect "logout -> 200" test "$status" = 200

@@ -106,13 +106,15 @@ cd route-maps
 make init                             # crea .env con secretos aleatorios
 make up                               # construye y levanta el stack
 make prepare-region REGION=guayaquil  # descarga, mapa, routing y registro
+make prepare-region REGION=world      # mapa base mundial + búsqueda de países y ciudades
 ```
 
 Guayaquil se recorta del extracto de Ecuador, así que la primera vez se descarga
 Ecuador completo desde Geofabrik; las regiones siguientes reutilizan ese
 extracto.
 
-- Visor web de desarrollo: <http://localhost:8080>
+- Visor web: <http://localhost:8080> (búsqueda de lugares con sugerencias,
+  "Cómo llegar" con paradas, mapa mundial y regiones detalladas)
 - API: <http://localhost:8080/api/v1>
 - Swagger: <http://localhost:8080/api/docs>
 - Salud: <http://localhost:8080/health>
@@ -151,7 +153,7 @@ arrancar si faltan (`DATABASE_PASSWORD`, `REDIS_PASSWORD`, `JWT_SECRET`,
 | `ROUTING_REGION` | Región cuyo grafo sirve el contenedor `routing` |
 | `ROUTING_LANGUAGE` | Idioma de las indicaciones (`es-ES`) |
 | `ROUTING_MAX_ALTERNATIVES` | Rutas alternativas como máximo (2 por defecto, hasta 3) |
-| `GEOCODING_PROVIDER` | `none` o `nominatim` |
+| `GEOCODING_PROVIDER` | `none` o `nominatim` (la búsqueda de países y ciudades del mapa mundial funciona con ambos) |
 | `NOMINATIM_REGION`, `NOMINATIM_PASSWORD` | Extracto importado por Nominatim |
 | `STORAGE_PATH` | Carpeta con `imports/`, `maps/` y `routing/` |
 | `TILEGEN_MEMORY`, `VALHALLA_BUILD_THREADS` | Recursos para preparar regiones |
@@ -204,20 +206,36 @@ tipos PostGIS con índices GiST.
 Las regiones se definen en
 [infrastructure/regions/regions.json](infrastructure/regions/regions.json):
 cada una se descarga de Geofabrik (`source.url`) o se recorta de su región
-padre con un `bbox` (`source.parent`). El catálogo incluye Ecuador, Guayas,
-Guayaquil, Pichincha, Quito y Mónaco (región pequeña para pruebas).
+padre con un `bbox` (`source.parent`). El catálogo incluye el mapa base
+mundial (`world`), Ecuador, Guayas, Guayaquil, Pichincha, Quito y Mónaco
+(región pequeña para pruebas). Además, **cualquier extracto de Geofabrik** se
+prepara por su id sin tocar el catálogo: `peru`, `colombia`, `spain`,
+`south-america`… (<https://download.geofabrik.de>).
 
 ```bash
 make regions                           # catálogo y lo ya generado
 make download-region REGION=guayaquil  # solo el extracto .osm.pbf
 make build-map REGION=guayaquil        # solo el mapa PMTiles
 make prepare-region REGION=guayaquil   # todo: extracto, mapa, routing, manifiesto, registro
+make prepare-region REGION=peru        # un país fuera del catálogo (índice de Geofabrik)
 ```
 
 - Los extractos se guardan en `storage/imports/`, se verifican con el MD5
   publicado por Geofabrik y con `osmium`, y se reanudan si la descarga se corta.
-- Para agregar una región, añade una entrada al catálogo (código en minúsculas,
-  `bbox` como `[oeste, sur, este, norte]`) y ejecuta `make prepare-region`.
+- Para una región a medida (una ciudad), añade una entrada al catálogo (código
+  en minúsculas, `bbox` como `[oeste, sur, este, norte]`) y ejecuta
+  `make prepare-region`.
+- **Mapa base mundial** (`REGION=world`): se genera con Natural Earth (dominio
+  público, ~45 MB de descarga, ~11 MB de mapa) y cubre todos los países hasta el
+  zoom 7: océanos, fronteras, ciudades, carreteras principales y ríos. Escribe
+  también `storage/maps/world/world.places.json` (unos 7.600 países y ciudades),
+  que la búsqueda usa junto a Nominatim. No tiene routing: las rutas y el
+  detalle de calles salen de las regiones preparadas. Todos los países con
+  detalle a la vez requieren el planeta de OSM (~85 GB y un servidor de 64 GB+
+  de RAM), así que se preparan los países que se necesiten.
+- Planetiler y Valhalla escriben sus temporales dentro del contenedor
+  (`TILEGEN_TMPDIR`, `ROUTING_BUILD_TMPDIR`): en Windows/macOS escribir miles de
+  archivos en `./storage` es muy lento.
 - Los archivos GIS (`.osm.pbf`, `.pmtiles`, grafos) nunca se versionan en Git.
 - `WATER=1` dibuja los océanos con los polígonos de OSMCoastline (descarga
   única de ~1 GB); sin ellos, las zonas de mar se ven con el color de fondo.
