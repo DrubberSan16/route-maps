@@ -42,12 +42,18 @@ class InMemoryRefreshTokens {
     return Promise.resolve(this.tokens.get(id) ?? null);
   }
 
-  revoke(id: string, replacedById?: string) {
+  rotate(previousId: string, next: Omit<StoredToken, 'revokedAt' | 'replacedById'>) {
+    const previous = this.tokens.get(previousId);
+    if (!previous || previous.revokedAt) return Promise.resolve(false);
+    previous.revokedAt = new Date();
+    previous.replacedById = next.id;
+    this.tokens.set(next.id, { ...next, revokedAt: null, replacedById: null });
+    return Promise.resolve(true);
+  }
+
+  revoke(id: string) {
     const token = this.tokens.get(id);
-    if (token && !token.revokedAt) {
-      token.revokedAt = new Date();
-      token.replacedById = replacedById ?? null;
-    }
+    if (token && !token.revokedAt) token.revokedAt = new Date();
     return Promise.resolve({ count: token ? 1 : 0 });
   }
 
@@ -261,6 +267,44 @@ describe('AuthService', () => {
         HttpStatus.UNAUTHORIZED,
       );
       expect([...tokens.tokens.values()].every((token) => token.revokedAt !== null)).toBe(true);
+      expect(warn).toHaveBeenCalledWith(
+        { userId: first.user.id },
+        'Refresh token reuse detected; revoking sessions',
+      );
+    });
+
+    it('lets only one of two simultaneous refreshes with the same token through', async () => {
+      const first = await register();
+      // Both requests read the stored token before either rotates it (two API replicas).
+      const read = tokens.findById.bind(tokens);
+      let reads = 0;
+      let bothRead!: () => void;
+      const barrier = new Promise<void>((resolve) => (bothRead = resolve));
+      jest.spyOn(tokens, 'findById').mockImplementation(async (id: string) => {
+        const snapshot = await read(id).then((token) => token && { ...token });
+        if (++reads === 2) bothRead();
+        await barrier;
+        return snapshot;
+      });
+
+      const results = await Promise.allSettled([
+        service.refresh(first.refreshToken),
+        service.refresh(first.refreshToken),
+      ]);
+
+      const winners = results.filter((result) => result.status === 'fulfilled');
+      const losers = results.filter((result) => result.status === 'rejected');
+      expect(winners).toHaveLength(1);
+      expect(losers).toHaveLength(1);
+      expect(losers[0].reason).toMatchObject({ code: ErrorCode.INVALID_REFRESH_TOKEN });
+      // The loser's token was never stored, and the re-use revoked the winner's one too.
+      expect(tokens.tokens.size).toBe(2);
+      expect([...tokens.tokens.values()].every((token) => token.revokedAt !== null)).toBe(true);
+      await expectAppError(
+        service.refresh(winners[0].value.refreshToken),
+        ErrorCode.INVALID_REFRESH_TOKEN,
+        HttpStatus.UNAUTHORIZED,
+      );
       expect(warn).toHaveBeenCalledWith(
         { userId: first.user.id },
         'Refresh token reuse detected; revoking sessions',

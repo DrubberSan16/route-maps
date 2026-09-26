@@ -135,6 +135,7 @@ class InMemorySavedRouteRepository implements SavedRouteRepository {
 
   @override
   Future<void> applyRemote({
+    required String accountId,
     required List<OfflineRoute> routes,
     required List<String> deletedIds,
   }) async {}

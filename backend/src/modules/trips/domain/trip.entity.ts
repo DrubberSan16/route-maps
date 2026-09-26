@@ -1,6 +1,9 @@
 import { LineStringGeometry } from '../../../common/geo/geojson';
 import { RoutingProfile, TripStatus } from '../../../generated/prisma/enums';
 
+/** Most points `GET /trips/:id/path` returns; longer tracks are sampled evenly. */
+export const MAX_PATH_POINTS = 10_000;
+
 export interface Trip {
   id: string;
   userId: string;
@@ -19,9 +22,12 @@ export interface Trip {
 
 export interface TripPath {
   tripId: string;
-  /** Null until the trip has at least two points. */
+  /** Line through `points`; null until the trip has at least two points. */
   geometry: LineStringGeometry | null;
+  /** Measured over every recorded point. */
   distanceMeters: number;
+  /** Points recorded; `points` holds all of them or an even sample of long tracks. */
+  totalPoints: number;
   points: {
     latitude: number;
     longitude: number;

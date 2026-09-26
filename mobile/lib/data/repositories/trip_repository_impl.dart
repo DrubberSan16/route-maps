@@ -9,24 +9,32 @@ import '../../domain/entities/trip.dart';
 import '../../domain/geo.dart';
 import '../../domain/repositories/trip_repository.dart';
 import '../local/app_database.dart';
+import '../local/current_account.dart';
 import '../local/sync_queue_store.dart';
 
+/// Trips of the current account (see [AppDatabase]). The trip being recorded
+/// is the device's: its points and its end are queued for the account that
+/// started it, whoever is logged in when they happen.
 class TripRepositoryImpl implements TripRepository {
   TripRepositoryImpl({
     required this._db,
     required this._queue,
+    required this._account,
     this._uuid = const Uuid(),
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now;
 
   final AppDatabase _db;
   final SyncQueueStore _queue;
+  final CurrentAccount _account;
   final Uuid _uuid;
   final DateTime Function() _clock;
 
   @override
   Stream<List<Trip>> watchTrips({int limit = 50}) {
+    final account = _account();
     final query = _db.select(_db.trips)
+      ..where((t) => account == null ? t.accountId.isNull() : t.accountId.equals(account))
       ..orderBy([(t) => OrderingTerm.desc(t.startedAt)])
       ..limit(limit);
     return query.watch().map((rows) => rows.map(_toTrip).toList());
@@ -58,6 +66,7 @@ class TripRepositoryImpl implements TripRepository {
       status: TripStatus.active,
       startedAt: utcMillis(_clock()),
     );
+    final account = _account();
     await _db.transaction(() async {
       await _db
           .into(_db.trips)
@@ -69,9 +78,11 @@ class TripRepositoryImpl implements TripRepository {
               routeId: Value(routeId),
               status: trip.status.value,
               startedAt: trip.startedAt,
+              accountId: Value(account),
             ),
           );
       await _queue.add(
+        accountId: account,
         entity: SyncEntities.trip,
         operation: SyncOperations.create,
         payload: {
@@ -146,6 +157,7 @@ class TripRepositoryImpl implements TripRepository {
       TripsCompanion(status: Value(status.value), endedAt: Value(endedAt)),
     );
     await _queue.add(
+      accountId: row.accountId,
       entity: SyncEntities.trip,
       operation: status == TripStatus.completed ? SyncOperations.finish : SyncOperations.cancel,
       payload: {'id': tripId, if (status == TripStatus.completed) 'endedAt': isoUtc(endedAt)},
@@ -165,10 +177,15 @@ class TripRepositoryImpl implements TripRepository {
     for (final row in rows) {
       byTrip.putIfAbsent(row.tripId, () => []).add(row);
     }
-    for (final points in byTrip.values) {
+    final owners = {
+      for (final trip in await (_db.select(_db.trips)..where((t) => t.id.isIn(byTrip.keys))).get())
+        trip.id: trip.accountId,
+    };
+    for (final MapEntry(key: trip, value: points) in byTrip.entries) {
       for (var start = 0; start < points.length; start += batchSize) {
         final chunk = points.sublist(start, (start + batchSize).clamp(0, points.length));
         await _queue.add(
+          accountId: owners[trip],
           entity: SyncEntities.trackingPoint,
           operation: SyncOperations.create,
           payload: {

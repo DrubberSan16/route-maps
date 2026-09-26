@@ -2,7 +2,12 @@ import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query } fr
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user';
-import { FinishTripDto, ListTripsQueryDto, StartTripDto } from '../application/dto/trip.dto';
+import {
+  FinishTripDto,
+  ListTripsQueryDto,
+  StartTripDto,
+  TripPathQueryDto,
+} from '../application/dto/trip.dto';
 import { TripsService } from '../application/trips.service';
 
 @ApiTags('trips')
@@ -33,9 +38,18 @@ export class TripsController {
   }
 
   @Get(':id/path')
-  @ApiOperation({ summary: 'Recorded track as GeoJSON LineString plus the raw points' })
-  path(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.trips.path(user.id, id);
+  @ApiOperation({
+    summary: 'Recorded track as a GeoJSON LineString through the returned points',
+    description:
+      'Tracks longer than maxPoints are sampled evenly; distanceMeters and totalPoints ' +
+      'always cover every recorded point.',
+  })
+  path(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: TripPathQueryDto,
+  ) {
+    return this.trips.path(user.id, id, query.maxPoints);
   }
 
   @Post(':id/finish')

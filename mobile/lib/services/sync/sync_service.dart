@@ -36,6 +36,10 @@ import '../../domain/services/synchronization_service.dart';
 ///
 /// Rounds start when the connection comes back, after login, shortly after
 /// new operations are queued, every [periodicInterval] and on demand.
+///
+/// A round belongs to the account of the session that started it: it only
+/// sends that account's operations, stores the pulled routes for it and stops
+/// if another account logs in meanwhile.
 class SyncService implements SynchronizationService {
   SyncService({
     required this._api,
@@ -84,6 +88,8 @@ class SyncService implements SynchronizationService {
 
   final _states = StreamController<SyncState>.broadcast();
   final _subscriptions = <StreamSubscription<Object?>>[];
+  StreamSubscription<({int pending, int failed})>? _counts;
+  String? _countsAccount;
   SyncState _state = const SyncState();
   Future<SyncReport>? _round;
   bool _runAgain = false;
@@ -110,8 +116,8 @@ class SyncService implements SynchronizationService {
         isAuthenticated: _auth.currentSession != null,
       ),
     );
+    _watchCounts(_account);
     _subscriptions
-      ..add(_queue.watchCounts().listen(_onCounts))
       ..add(
         _connectivity.watchStatus().listen((status) {
           if (status == ConnectivityStatus.online) _trigger();
@@ -127,12 +133,12 @@ class SyncService implements SynchronizationService {
     required String operation,
     required Map<String, Object?> payload,
   }) async {
-    await _queue.add(entity: entity, operation: operation, payload: payload);
+    await _queue.add(accountId: _account, entity: entity, operation: operation, payload: payload);
   }
 
   @override
   Future<void> retryFailed() async {
-    await _queue.retryFailed();
+    await _queue.retryFailed(accountId: _account);
     _trigger();
   }
 
@@ -159,13 +165,25 @@ class SyncService implements SynchronizationService {
     _periodic?.cancel();
     _debounce?.cancel();
     _retry?.cancel();
+    await _counts?.cancel();
     for (final subscription in _subscriptions) {
       await subscription.cancel();
     }
     await _states.close();
   }
 
+  String? get _account => _auth.currentSession?.user.id;
+
   void _trigger() => unawaited(synchronize());
+
+  /// Pending and failed counts shown to the user: those of the session's account.
+  void _watchCounts(String? accountId) {
+    if (_counts != null && accountId == _countsAccount) return;
+    unawaited(_counts?.cancel());
+    _countsAccount = accountId;
+    _lastPending = 0;
+    _counts = _queue.watchCounts(accountId: accountId).listen(_onCounts);
+  }
 
   void _onCounts(({int pending, int failed}) counts) {
     final grew = counts.pending > _lastPending;
@@ -179,13 +197,14 @@ class SyncService implements SynchronizationService {
 
   void _onSession(AuthSession? session) {
     final wasAuthenticated = _state.isAuthenticated;
+    _watchCounts(session?.user.id);
     _emit(_state.copyWith(isAuthenticated: session != null));
     if (session != null && !wasAuthenticated) _trigger();
   }
 
   Future<SyncReport> _run() async {
-    final session = _auth.currentSession;
-    if (session == null) {
+    final accountId = _account;
+    if (accountId == null) {
       return const SyncReport(skipped: SyncSkipReason.notAuthenticated);
     }
     if (_connectivity.status == ConnectivityStatus.offline) {
@@ -198,11 +217,11 @@ class SyncService implements SynchronizationService {
     try {
       await _queue.recoverInterrupted();
       await _trips.queuePendingPoints();
-      final push = await _push();
+      final push = await _push(accountId);
       report = push.report;
       error = push.error;
       if (error == null) {
-        final pulled = await _pull(session.user.id);
+        final pulled = await _pull(accountId);
         report = SyncReport(
           completed: report.completed,
           failed: report.failed,
@@ -249,21 +268,26 @@ class SyncService implements SynchronizationService {
 
   /// Wakes up when the operation at the head of the queue may be retried.
   Future<void> _scheduleRetry() async {
-    final next = await _queue.nextAttemptAt();
+    final accountId = _account;
+    if (accountId == null) return;
+    final next = await _queue.nextAttemptAt(accountId: accountId);
     if (next == null) return;
     final delay = next.difference(_clock().toUtc()) + const Duration(seconds: 1);
     _retry?.cancel();
     _retry = Timer(delay.isNegative ? Duration.zero : delay, _trigger);
   }
 
-  Future<({SyncReport report, AppException? error})> _push() async {
+  Future<({SyncReport report, AppException? error})> _push(String accountId) async {
     final installationId = await _settings.installationId();
     var completed = 0, failed = 0, retried = 0;
     // After a request rejected as a whole, operations go one by one to find
     // the one the server does not accept.
     var oneByOne = 0;
-    while (true) {
-      final batch = _limitSize(await _queue.nextBatch(limit: oneByOne > 0 ? 1 : batchSize));
+    // Stops if another account logs in: its session must not send these.
+    while (_account == accountId) {
+      final batch = _limitSize(
+        await _queue.nextBatch(accountId: accountId, limit: oneByOne > 0 ? 1 : batchSize),
+      );
       if (batch.isEmpty) break;
       if (oneByOne > 0) oneByOne--;
       await _queue.markSyncing(batch.map((op) => op.id));
@@ -352,24 +376,36 @@ class SyncService implements SynchronizationService {
     return batch;
   }
 
-  Future<({int routes, int deleted})> _pull(String userId) async {
-    final cursorKey = '$_pullCursorPrefix$userId';
-    var since = await _settings.read(cursorKey);
+  /// Follows the change feed of saved routes from the cursor of [accountId].
+  Future<({int routes, int deleted})> _pull(String accountId) async {
+    final cursorKey = '$_pullCursorPrefix$accountId';
+    var cursor = _PullCursor.decode(await _settings.read(cursorKey));
+    DateTime? startedAt;
     var routes = 0, deleted = 0;
     for (var page = 0; page < _maxPullPages; page++) {
-      final changes = await _api.get('sync/pull', _parsePull, query: {'since': ?since});
-      await _savedRoutes.applyRemote(routes: changes.routes, deletedIds: changes.deletedIds);
+      if (_account != accountId) return (routes: routes, deleted: deleted);
+      final changes = await _api.get('sync/pull', _parsePull, query: cursor?.toQuery());
+      await _savedRoutes.applyRemote(
+        accountId: accountId,
+        routes: changes.routes,
+        deletedIds: changes.deletedIds,
+      );
       routes += changes.routes.length;
       deleted += changes.deletedIds.length;
-      if (!changes.hasMore || changes.routes.isEmpty) {
-        await _settings.write(cursorKey, isoUtc(changes.serverTime.subtract(_pullOverlap)));
+      startedAt ??= changes.serverTime;
+      final next = changes.next;
+      if (!changes.hasMore || next == null) {
+        // Up to date. The next pull starts a little before this one did.
+        await _settings.write(
+          cursorKey,
+          _PullCursor(since: startedAt.subtract(_pullOverlap)).encode(),
+        );
         return (routes: routes, deleted: deleted);
       }
-      // Next page: routes changed after the last one received.
-      since = isoUtc(changes.routes.last.updatedAt);
+      cursor = next;
     }
     // Too many pages for one round: continue from here next time.
-    await _settings.write(cursorKey, since!);
+    await _settings.write(cursorKey, cursor!.encode());
     return (routes: routes, deleted: deleted);
   }
 
@@ -385,6 +421,7 @@ class SyncService implements SynchronizationService {
 
   static _PullChanges _parsePull(Object? data) {
     final json = data! as Map<String, Object?>;
+    final next = json['next'] as Map<String, Object?>?;
     return _PullChanges(
       serverTime: DateTime.parse(json['serverTime']! as String),
       routes: [
@@ -395,6 +432,12 @@ class SyncService implements SynchronizationService {
         for (final id in (json['deletedRouteIds'] as List<Object?>?) ?? const []) id! as String,
       ],
       hasMore: json['hasMore'] == true,
+      next: next == null
+          ? null
+          : _PullCursor(
+              since: DateTime.parse(next['since']! as String),
+              afterId: next['afterId']! as String,
+            ),
     );
   }
 
@@ -441,10 +484,38 @@ class _PullChanges {
     required this.routes,
     required this.deletedIds,
     required this.hasMore,
+    required this.next,
   });
 
   final DateTime serverTime;
   final List<OfflineRoute> routes;
   final List<String> deletedIds;
   final bool hasMore;
+
+  /// Where the following page starts.
+  final _PullCursor? next;
+}
+
+/// Position in the change feed of `GET sync/pull`: the changes at or after
+/// [since], or only those after [afterId] at that same instant when
+/// continuing a page (changes of the same millisecond are never skipped).
+class _PullCursor {
+  const _PullCursor({required this.since, this.afterId});
+
+  /// Stored as `<since>` or `<since> <afterId>`.
+  static _PullCursor? decode(String? value) {
+    if (value == null) return null;
+    final parts = value.split(' ');
+    return _PullCursor(
+      since: DateTime.parse(parts.first),
+      afterId: parts.length > 1 ? parts[1] : null,
+    );
+  }
+
+  final DateTime since;
+  final String? afterId;
+
+  String encode() => [isoUtc(since), ?afterId].join(' ');
+
+  Map<String, Object?> toQuery() => {'since': isoUtc(since), 'afterId': ?afterId};
 }

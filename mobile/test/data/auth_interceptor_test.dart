@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:maps_platform/core/errors/app_exception.dart';
 import 'package:maps_platform/data/remote/api_client.dart';
 import 'package:maps_platform/data/remote/auth_interceptor.dart';
+import 'package:maps_platform/domain/entities/user.dart';
 
 import '../helpers/api_stub.dart';
 import '../helpers/fakes.dart';
@@ -14,11 +15,15 @@ void main() {
   late int refreshes;
   late List<String?> authorizations;
 
+  /// Runs while the server handles a request, before it checks the token.
+  Future<void> Function()? whileHandling;
+
   setUp(() {
     sessions = MemorySessionStore(testSession);
     validAccessToken = 'access';
     refreshes = 0;
     authorizations = [];
+    whileHandling = null;
 
     Future<StubResponse> server(RequestOptions request) async {
       if (request.path == 'auth/refresh') {
@@ -31,6 +36,7 @@ void main() {
         validAccessToken = 'access-2';
         return StubResponse.ok({'accessToken': 'access-2', 'refreshToken': 'refresh-2'});
       }
+      await whileHandling?.call();
       final authorization = request.headers['Authorization'] as String?;
       authorizations.add(authorization);
       if (authorization != 'Bearer $validAccessToken') {
@@ -79,6 +85,24 @@ void main() {
       throwsA(isA<AppException>().having((e) => e.statusCode, 'statusCode', 401)),
     );
     expect(sessions.current, isNull);
+  });
+
+  test('a request of one account is never repeated with the tokens of another', () async {
+    const other = AuthSession(
+      accessToken: 'other-access',
+      refreshToken: 'other-refresh',
+      user: UserProfile(id: 'user-2', email: 'otra@maps.local', name: 'Otra', role: 'USER'),
+    );
+    validAccessToken = 'other-access';
+    // The first account logs out and another one logs in while the request travels.
+    whileHandling = () => sessions.save(other);
+
+    await expectLater(
+      me(),
+      throwsA(isA<AppException>().having((e) => e.statusCode, 'statusCode', 401)),
+    );
+    expect(authorizations, ['Bearer access']);
+    expect(refreshes, 0);
   });
 
   test('without a session nothing is refreshed', () async {

@@ -12,7 +12,7 @@ then registered with `make regions-sync`):
 | `route_calculate_monaco.json` | `POST /api/v1/routes/calculate` (car, `alternatives: true`, `language: es-ES`) |
 | `route_error.json` | `POST /api/v1/routes/calculate` with points more than 2,000 km apart |
 | `sync_push_response.json` | `POST /api/v1/sync/push` (trip, points, finish, route and one invalid operation) |
-| `sync_pull_response.json` | `GET /api/v1/sync/pull` |
+| `sync_pull_response.json` | `GET /api/v1/sync/pull` (captured again when the pull became a change feed with `next`, from the API run from source against PostGIS) |
 
 The input was the Monaco extract published by the OSRM project for its own
 tests, copied to `storage/imports/monaco.osm.pbf` (the environment where the

@@ -2,20 +2,24 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsIn,
   IsInt,
+  IsNumber,
   IsObject,
   IsOptional,
   IsString,
   Matches,
   Max,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
 import { CoordinateDto } from '../../../../common/dto/coordinate.dto';
-import { LineStringDto } from '../../../../common/dto/geojson.dto';
+import { IsPosition, LineStringDto } from '../../../../common/dto/geojson.dto';
+import { MANEUVER_TYPES, type ManeuverType } from '../../domain/entities/route-result';
 import { ROUTING_PROFILES, type RoutingProfile } from '../../domain/value-objects/routing-profile';
 
 export class RouteOptionsDto {
@@ -71,6 +75,53 @@ export class CalculateRouteDto {
   @ValidateNested()
   @Type(() => RouteOptionsDto)
   options?: RouteOptionsDto;
+}
+
+/** A turn-by-turn step as the routing engines produce it, checked before it is stored. */
+export class RouteStepDto {
+  @ApiProperty({ example: 'Continúe recto' })
+  @IsString()
+  @MaxLength(500)
+  instruction: string;
+
+  @ApiProperty({ example: 300 })
+  @IsNumber()
+  @Min(0)
+  distanceMeters: number;
+
+  @ApiProperty({ example: 45 })
+  @IsNumber()
+  @Min(0)
+  durationSeconds: number;
+
+  @ApiPropertyOptional({ enum: MANEUVER_TYPES, example: 'CONTINUE' })
+  @IsOptional()
+  @IsIn(MANEUVER_TYPES)
+  maneuver?: ManeuverType;
+
+  @ApiProperty({ example: [-79.9224, -2.1709], description: '[longitude, latitude]' })
+  @IsPosition()
+  location: [number, number];
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @MaxLength(200, { each: true })
+  streetNames?: string[];
+
+  @ApiPropertyOptional({
+    example: [0, 12],
+    description: 'First and last vertex of the route geometry covered by the step',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(2)
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  geometryIndex?: [number, number];
 }
 
 export class RouteStepResponse {
@@ -142,11 +193,13 @@ export class SaveRouteDto {
   @IsObject()
   geometry: LineStringDto;
 
-  @ApiPropertyOptional({ type: RouteStepResponse, isArray: true })
+  @ApiPropertyOptional({ type: RouteStepDto, isArray: true })
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(5000)
-  steps?: unknown[];
+  @ValidateNested({ each: true })
+  @Type(() => RouteStepDto)
+  steps?: RouteStepDto[];
 
   @ApiPropertyOptional({ example: 'guayaquil' })
   @IsOptional()

@@ -4,11 +4,15 @@ import {
   ArrayMaxSize,
   IsArray,
   IsIn,
+  IsInt,
   IsISO8601,
   IsObject,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
+  Max,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import {
@@ -57,8 +61,27 @@ export class SyncPushDto {
 }
 
 export class SyncPullQueryDto {
-  @ApiPropertyOptional({ example: '2026-09-01T00:00:00.000Z' })
+  @ApiPropertyOptional({
+    example: '2026-09-01T00:00:00.000Z',
+    description: 'Changes at or after this time (or after `afterId` at this time)',
+  })
   @IsOptional()
   @IsISO8601({ strict: true })
   since?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'With `since`: continue after this route id (the `next` of the previous page)',
+  })
+  @IsOptional()
+  @IsUUID()
+  afterId?: string;
+
+  @ApiPropertyOptional({ default: 200, minimum: 1, maximum: 200 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  limit = 200;
 }

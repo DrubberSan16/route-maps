@@ -17,12 +17,14 @@ class AuthInterceptor extends QueuedInterceptor {
   final Dio _plainDio;
 
   static const _retriedKey = 'authRetried';
+  static const _userKey = 'authUserId';
 
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
     final session = _sessions.current;
     if (session != null && !options.headers.containsKey('Authorization')) {
       options.headers['Authorization'] = 'Bearer ${session.accessToken}';
+      options.extra[_userKey] = session.user.id;
     }
     handler.next(options);
   }
@@ -35,7 +37,10 @@ class AuthInterceptor extends QueuedInterceptor {
     if (err.response?.statusCode != 401 ||
         session == null ||
         sentAuthorization == null ||
-        options.extra[_retriedKey] == true) {
+        options.extra[_retriedKey] == true ||
+        // Another account logged in meanwhile: the request (e.g. operations
+        // queued by the previous one) must not be repeated with its tokens.
+        options.extra[_userKey] != session.user.id) {
       handler.next(err);
       return;
     }

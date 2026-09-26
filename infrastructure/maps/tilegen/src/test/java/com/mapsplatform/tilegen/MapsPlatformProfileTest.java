@@ -288,6 +288,10 @@ class MapsPlatformProfileTest {
     List<OsmRelationInfo> province = profile.preprocessOsmRelation(new OsmElement.Relation(10,
       Map.of("type", "boundary", "boundary", "administrative", "admin_level", "4"), List.of()));
     assertEquals(List.of(new BoundaryLayer.AdminRelation(10, 4, false, false)), province);
+    List<OsmRelationInfo> territorialSea = profile.preprocessOsmRelation(new OsmElement.Relation(13,
+      Map.of("type", "boundary", "boundary", "administrative", "admin_level", "2", "maritime", "yes"),
+      List.of()));
+    assertEquals(List.of(new BoundaryLayer.AdminRelation(13, 2, false, true)), territorialSea);
     assertNull(profile.preprocessOsmRelation(new OsmElement.Relation(11,
       Map.of("type", "multipolygon", "landuse", "forest"), List.of())));
     assertNull(profile.preprocessOsmRelation(new OsmElement.Relation(12,
@@ -304,6 +308,18 @@ class MapsPlatformProfileTest {
     Map<String, Object> attrs = boundary.getAttrsAtZoom(5);
     assertEquals(2, attrs.get("admin_level"));
     assertEquals(true, attrs.get("disputed"));
+    assertNull(attrs.get("maritime"));
+  }
+
+  @Test
+  void boundaryWaysAreMaritimeWhenTheirRelationIs() {
+    // maritime=yes tagged only on the relation, not repeated on its member ways.
+    List<OsmReader.RelationMember<OsmRelationInfo>> relations = List.of(
+      new OsmReader.RelationMember<>("outer", new BoundaryLayer.AdminRelation(3, 2, false, true)));
+    var boundary = single(process(osm(line(), Map.of(), relations)), "boundary");
+    Map<String, Object> attrs = boundary.getAttrsAtZoom(5);
+    assertEquals(2, attrs.get("admin_level"));
+    assertEquals(true, attrs.get("maritime"));
   }
 
   // ---------------------------------------------------------------- tag parsing

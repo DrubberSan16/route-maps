@@ -2960,6 +2960,17 @@ class $OfflineRoutesTable extends OfflineRoutes
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _accountIdMeta = const VerificationMeta(
+    'accountId',
+  );
+  @override
+  late final GeneratedColumn<String> accountId = GeneratedColumn<String>(
+    'account_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     routeId,
@@ -2977,6 +2988,7 @@ class $OfflineRoutesTable extends OfflineRoutes
     provider,
     createdAt,
     updatedAt,
+    accountId,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -3124,6 +3136,12 @@ class $OfflineRoutesTable extends OfflineRoutes
     } else if (isInserting) {
       context.missing(_updatedAtMeta);
     }
+    if (data.containsKey('account_id')) {
+      context.handle(
+        _accountIdMeta,
+        accountId.isAcceptableOrUnknown(data['account_id']!, _accountIdMeta),
+      );
+    }
     return context;
   }
 
@@ -3193,6 +3211,10 @@ class $OfflineRoutesTable extends OfflineRoutes
         DriftSqlType.dateTime,
         data['${effectivePrefix}updated_at'],
       )!,
+      accountId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}account_id'],
+      ),
     );
   }
 
@@ -3222,6 +3244,9 @@ class OfflineRouteRow extends DataClass implements Insertable<OfflineRouteRow> {
   final String? provider;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  /// Owner account (user id); null for a route saved without an account.
+  final String? accountId;
   const OfflineRouteRow({
     required this.routeId,
     required this.name,
@@ -3238,6 +3263,7 @@ class OfflineRouteRow extends DataClass implements Insertable<OfflineRouteRow> {
     this.provider,
     required this.createdAt,
     required this.updatedAt,
+    this.accountId,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -3261,6 +3287,9 @@ class OfflineRouteRow extends DataClass implements Insertable<OfflineRouteRow> {
     }
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || accountId != null) {
+      map['account_id'] = Variable<String>(accountId);
+    }
     return map;
   }
 
@@ -3285,6 +3314,9 @@ class OfflineRouteRow extends DataClass implements Insertable<OfflineRouteRow> {
           : Value(provider),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
+      accountId: accountId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(accountId),
     );
   }
 
@@ -3313,6 +3345,7 @@ class OfflineRouteRow extends DataClass implements Insertable<OfflineRouteRow> {
       provider: serializer.fromJson<String?>(json['provider']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      accountId: serializer.fromJson<String?>(json['accountId']),
     );
   }
   @override
@@ -3334,6 +3367,7 @@ class OfflineRouteRow extends DataClass implements Insertable<OfflineRouteRow> {
       'provider': serializer.toJson<String?>(provider),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'accountId': serializer.toJson<String?>(accountId),
     };
   }
 
@@ -3353,6 +3387,7 @@ class OfflineRouteRow extends DataClass implements Insertable<OfflineRouteRow> {
     Value<String?> provider = const Value.absent(),
     DateTime? createdAt,
     DateTime? updatedAt,
+    Value<String?> accountId = const Value.absent(),
   }) => OfflineRouteRow(
     routeId: routeId ?? this.routeId,
     name: name ?? this.name,
@@ -3369,6 +3404,7 @@ class OfflineRouteRow extends DataClass implements Insertable<OfflineRouteRow> {
     provider: provider.present ? provider.value : this.provider,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
+    accountId: accountId.present ? accountId.value : this.accountId,
   );
   OfflineRouteRow copyWithCompanion(OfflineRoutesCompanion data) {
     return OfflineRouteRow(
@@ -3399,6 +3435,7 @@ class OfflineRouteRow extends DataClass implements Insertable<OfflineRouteRow> {
       provider: data.provider.present ? data.provider.value : this.provider,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      accountId: data.accountId.present ? data.accountId.value : this.accountId,
     );
   }
 
@@ -3419,7 +3456,8 @@ class OfflineRouteRow extends DataClass implements Insertable<OfflineRouteRow> {
           ..write('regionId: $regionId, ')
           ..write('provider: $provider, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('accountId: $accountId')
           ..write(')'))
         .toString();
   }
@@ -3441,6 +3479,7 @@ class OfflineRouteRow extends DataClass implements Insertable<OfflineRouteRow> {
     provider,
     createdAt,
     updatedAt,
+    accountId,
   );
   @override
   bool operator ==(Object other) =>
@@ -3460,7 +3499,8 @@ class OfflineRouteRow extends DataClass implements Insertable<OfflineRouteRow> {
           other.regionId == this.regionId &&
           other.provider == this.provider &&
           other.createdAt == this.createdAt &&
-          other.updatedAt == this.updatedAt);
+          other.updatedAt == this.updatedAt &&
+          other.accountId == this.accountId);
 }
 
 class OfflineRoutesCompanion extends UpdateCompanion<OfflineRouteRow> {
@@ -3479,6 +3519,7 @@ class OfflineRoutesCompanion extends UpdateCompanion<OfflineRouteRow> {
   final Value<String?> provider;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
+  final Value<String?> accountId;
   final Value<int> rowid;
   const OfflineRoutesCompanion({
     this.routeId = const Value.absent(),
@@ -3496,6 +3537,7 @@ class OfflineRoutesCompanion extends UpdateCompanion<OfflineRouteRow> {
     this.provider = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.accountId = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   OfflineRoutesCompanion.insert({
@@ -3514,6 +3556,7 @@ class OfflineRoutesCompanion extends UpdateCompanion<OfflineRouteRow> {
     this.provider = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
+    this.accountId = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : routeId = Value(routeId),
        name = Value(name),
@@ -3544,6 +3587,7 @@ class OfflineRoutesCompanion extends UpdateCompanion<OfflineRouteRow> {
     Expression<String>? provider,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
+    Expression<String>? accountId,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -3564,6 +3608,7 @@ class OfflineRoutesCompanion extends UpdateCompanion<OfflineRouteRow> {
       if (provider != null) 'provider': provider,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
+      if (accountId != null) 'account_id': accountId,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -3584,6 +3629,7 @@ class OfflineRoutesCompanion extends UpdateCompanion<OfflineRouteRow> {
     Value<String?>? provider,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
+    Value<String?>? accountId,
     Value<int>? rowid,
   }) {
     return OfflineRoutesCompanion(
@@ -3602,6 +3648,7 @@ class OfflineRoutesCompanion extends UpdateCompanion<OfflineRouteRow> {
       provider: provider ?? this.provider,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      accountId: accountId ?? this.accountId,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -3656,6 +3703,9 @@ class OfflineRoutesCompanion extends UpdateCompanion<OfflineRouteRow> {
     if (updatedAt.present) {
       map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
+    if (accountId.present) {
+      map['account_id'] = Variable<String>(accountId.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -3680,6 +3730,7 @@ class OfflineRoutesCompanion extends UpdateCompanion<OfflineRouteRow> {
           ..write('provider: $provider, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
+          ..write('accountId: $accountId, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -3798,6 +3849,17 @@ class $SyncQueueTable extends SyncQueue
     type: DriftSqlType.dateTime,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _accountIdMeta = const VerificationMeta(
+    'accountId',
+  );
+  @override
+  late final GeneratedColumn<String> accountId = GeneratedColumn<String>(
+    'account_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -3810,6 +3872,7 @@ class $SyncQueueTable extends SyncQueue
     lastError,
     nextAttemptAt,
     completedAt,
+    accountId,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -3890,6 +3953,12 @@ class $SyncQueueTable extends SyncQueue
         ),
       );
     }
+    if (data.containsKey('account_id')) {
+      context.handle(
+        _accountIdMeta,
+        accountId.isAcceptableOrUnknown(data['account_id']!, _accountIdMeta),
+      );
+    }
     return context;
   }
 
@@ -3941,6 +4010,10 @@ class $SyncQueueTable extends SyncQueue
         DriftSqlType.dateTime,
         data['${effectivePrefix}completed_at'],
       ),
+      accountId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}account_id'],
+      ),
     );
   }
 
@@ -3969,6 +4042,10 @@ class SyncQueueRow extends DataClass implements Insertable<SyncQueueRow> {
   /// Earliest time of the next attempt (exponential backoff).
   final DateTime? nextAttemptAt;
   final DateTime? completedAt;
+
+  /// Account whose session sends the operation; null for a change made
+  /// without an account.
+  final String? accountId;
   const SyncQueueRow({
     required this.id,
     required this.operation,
@@ -3980,6 +4057,7 @@ class SyncQueueRow extends DataClass implements Insertable<SyncQueueRow> {
     this.lastError,
     this.nextAttemptAt,
     this.completedAt,
+    this.accountId,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -4004,6 +4082,9 @@ class SyncQueueRow extends DataClass implements Insertable<SyncQueueRow> {
     if (!nullToAbsent || completedAt != null) {
       map['completed_at'] = Variable<DateTime>(completedAt);
     }
+    if (!nullToAbsent || accountId != null) {
+      map['account_id'] = Variable<String>(accountId);
+    }
     return map;
   }
 
@@ -4025,6 +4106,9 @@ class SyncQueueRow extends DataClass implements Insertable<SyncQueueRow> {
       completedAt: completedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(completedAt),
+      accountId: accountId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(accountId),
     );
   }
 
@@ -4044,6 +4128,7 @@ class SyncQueueRow extends DataClass implements Insertable<SyncQueueRow> {
       lastError: serializer.fromJson<String?>(json['lastError']),
       nextAttemptAt: serializer.fromJson<DateTime?>(json['nextAttemptAt']),
       completedAt: serializer.fromJson<DateTime?>(json['completedAt']),
+      accountId: serializer.fromJson<String?>(json['accountId']),
     );
   }
   @override
@@ -4060,6 +4145,7 @@ class SyncQueueRow extends DataClass implements Insertable<SyncQueueRow> {
       'lastError': serializer.toJson<String?>(lastError),
       'nextAttemptAt': serializer.toJson<DateTime?>(nextAttemptAt),
       'completedAt': serializer.toJson<DateTime?>(completedAt),
+      'accountId': serializer.toJson<String?>(accountId),
     };
   }
 
@@ -4074,6 +4160,7 @@ class SyncQueueRow extends DataClass implements Insertable<SyncQueueRow> {
     Value<String?> lastError = const Value.absent(),
     Value<DateTime?> nextAttemptAt = const Value.absent(),
     Value<DateTime?> completedAt = const Value.absent(),
+    Value<String?> accountId = const Value.absent(),
   }) => SyncQueueRow(
     id: id ?? this.id,
     operation: operation ?? this.operation,
@@ -4087,6 +4174,7 @@ class SyncQueueRow extends DataClass implements Insertable<SyncQueueRow> {
         ? nextAttemptAt.value
         : this.nextAttemptAt,
     completedAt: completedAt.present ? completedAt.value : this.completedAt,
+    accountId: accountId.present ? accountId.value : this.accountId,
   );
   SyncQueueRow copyWithCompanion(SyncQueueCompanion data) {
     return SyncQueueRow(
@@ -4106,6 +4194,7 @@ class SyncQueueRow extends DataClass implements Insertable<SyncQueueRow> {
       completedAt: data.completedAt.present
           ? data.completedAt.value
           : this.completedAt,
+      accountId: data.accountId.present ? data.accountId.value : this.accountId,
     );
   }
 
@@ -4121,7 +4210,8 @@ class SyncQueueRow extends DataClass implements Insertable<SyncQueueRow> {
           ..write('status: $status, ')
           ..write('lastError: $lastError, ')
           ..write('nextAttemptAt: $nextAttemptAt, ')
-          ..write('completedAt: $completedAt')
+          ..write('completedAt: $completedAt, ')
+          ..write('accountId: $accountId')
           ..write(')'))
         .toString();
   }
@@ -4138,6 +4228,7 @@ class SyncQueueRow extends DataClass implements Insertable<SyncQueueRow> {
     lastError,
     nextAttemptAt,
     completedAt,
+    accountId,
   );
   @override
   bool operator ==(Object other) =>
@@ -4152,7 +4243,8 @@ class SyncQueueRow extends DataClass implements Insertable<SyncQueueRow> {
           other.status == this.status &&
           other.lastError == this.lastError &&
           other.nextAttemptAt == this.nextAttemptAt &&
-          other.completedAt == this.completedAt);
+          other.completedAt == this.completedAt &&
+          other.accountId == this.accountId);
 }
 
 class SyncQueueCompanion extends UpdateCompanion<SyncQueueRow> {
@@ -4166,6 +4258,7 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueRow> {
   final Value<String?> lastError;
   final Value<DateTime?> nextAttemptAt;
   final Value<DateTime?> completedAt;
+  final Value<String?> accountId;
   final Value<int> rowid;
   const SyncQueueCompanion({
     this.id = const Value.absent(),
@@ -4178,6 +4271,7 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueRow> {
     this.lastError = const Value.absent(),
     this.nextAttemptAt = const Value.absent(),
     this.completedAt = const Value.absent(),
+    this.accountId = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   SyncQueueCompanion.insert({
@@ -4191,6 +4285,7 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueRow> {
     this.lastError = const Value.absent(),
     this.nextAttemptAt = const Value.absent(),
     this.completedAt = const Value.absent(),
+    this.accountId = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        operation = Value(operation),
@@ -4209,6 +4304,7 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueRow> {
     Expression<String>? lastError,
     Expression<DateTime>? nextAttemptAt,
     Expression<DateTime>? completedAt,
+    Expression<String>? accountId,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -4222,6 +4318,7 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueRow> {
       if (lastError != null) 'last_error': lastError,
       if (nextAttemptAt != null) 'next_attempt_at': nextAttemptAt,
       if (completedAt != null) 'completed_at': completedAt,
+      if (accountId != null) 'account_id': accountId,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -4237,6 +4334,7 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueRow> {
     Value<String?>? lastError,
     Value<DateTime?>? nextAttemptAt,
     Value<DateTime?>? completedAt,
+    Value<String?>? accountId,
     Value<int>? rowid,
   }) {
     return SyncQueueCompanion(
@@ -4250,6 +4348,7 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueRow> {
       lastError: lastError ?? this.lastError,
       nextAttemptAt: nextAttemptAt ?? this.nextAttemptAt,
       completedAt: completedAt ?? this.completedAt,
+      accountId: accountId ?? this.accountId,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -4289,6 +4388,9 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueRow> {
     if (completedAt.present) {
       map['completed_at'] = Variable<DateTime>(completedAt.value);
     }
+    if (accountId.present) {
+      map['account_id'] = Variable<String>(accountId.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -4308,6 +4410,7 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueRow> {
           ..write('lastError: $lastError, ')
           ..write('nextAttemptAt: $nextAttemptAt, ')
           ..write('completedAt: $completedAt, ')
+          ..write('accountId: $accountId, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -4414,6 +4517,17 @@ class $TripsTable extends Trips with TableInfo<$TripsTable, TripRow> {
     requiredDuringInsert: false,
     defaultValue: const Constant(0),
   );
+  static const VerificationMeta _accountIdMeta = const VerificationMeta(
+    'accountId',
+  );
+  @override
+  late final GeneratedColumn<String> accountId = GeneratedColumn<String>(
+    'account_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -4425,6 +4539,7 @@ class $TripsTable extends Trips with TableInfo<$TripsTable, TripRow> {
     endedAt,
     distanceMeters,
     pointCount,
+    accountId,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -4500,6 +4615,12 @@ class $TripsTable extends Trips with TableInfo<$TripsTable, TripRow> {
         pointCount.isAcceptableOrUnknown(data['point_count']!, _pointCountMeta),
       );
     }
+    if (data.containsKey('account_id')) {
+      context.handle(
+        _accountIdMeta,
+        accountId.isAcceptableOrUnknown(data['account_id']!, _accountIdMeta),
+      );
+    }
     return context;
   }
 
@@ -4545,6 +4666,10 @@ class $TripsTable extends Trips with TableInfo<$TripsTable, TripRow> {
         DriftSqlType.int,
         data['${effectivePrefix}point_count'],
       )!,
+      accountId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}account_id'],
+      ),
     );
   }
 
@@ -4566,6 +4691,9 @@ class TripRow extends DataClass implements Insertable<TripRow> {
   final DateTime? endedAt;
   final double distanceMeters;
   final int pointCount;
+
+  /// Owner account (user id); null for a trip recorded without an account.
+  final String? accountId;
   const TripRow({
     required this.id,
     this.name,
@@ -4576,6 +4704,7 @@ class TripRow extends DataClass implements Insertable<TripRow> {
     this.endedAt,
     required this.distanceMeters,
     required this.pointCount,
+    this.accountId,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -4595,6 +4724,9 @@ class TripRow extends DataClass implements Insertable<TripRow> {
     }
     map['distance_meters'] = Variable<double>(distanceMeters);
     map['point_count'] = Variable<int>(pointCount);
+    if (!nullToAbsent || accountId != null) {
+      map['account_id'] = Variable<String>(accountId);
+    }
     return map;
   }
 
@@ -4613,6 +4745,9 @@ class TripRow extends DataClass implements Insertable<TripRow> {
           : Value(endedAt),
       distanceMeters: Value(distanceMeters),
       pointCount: Value(pointCount),
+      accountId: accountId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(accountId),
     );
   }
 
@@ -4631,6 +4766,7 @@ class TripRow extends DataClass implements Insertable<TripRow> {
       endedAt: serializer.fromJson<DateTime?>(json['endedAt']),
       distanceMeters: serializer.fromJson<double>(json['distanceMeters']),
       pointCount: serializer.fromJson<int>(json['pointCount']),
+      accountId: serializer.fromJson<String?>(json['accountId']),
     );
   }
   @override
@@ -4646,6 +4782,7 @@ class TripRow extends DataClass implements Insertable<TripRow> {
       'endedAt': serializer.toJson<DateTime?>(endedAt),
       'distanceMeters': serializer.toJson<double>(distanceMeters),
       'pointCount': serializer.toJson<int>(pointCount),
+      'accountId': serializer.toJson<String?>(accountId),
     };
   }
 
@@ -4659,6 +4796,7 @@ class TripRow extends DataClass implements Insertable<TripRow> {
     Value<DateTime?> endedAt = const Value.absent(),
     double? distanceMeters,
     int? pointCount,
+    Value<String?> accountId = const Value.absent(),
   }) => TripRow(
     id: id ?? this.id,
     name: name.present ? name.value : this.name,
@@ -4669,6 +4807,7 @@ class TripRow extends DataClass implements Insertable<TripRow> {
     endedAt: endedAt.present ? endedAt.value : this.endedAt,
     distanceMeters: distanceMeters ?? this.distanceMeters,
     pointCount: pointCount ?? this.pointCount,
+    accountId: accountId.present ? accountId.value : this.accountId,
   );
   TripRow copyWithCompanion(TripsCompanion data) {
     return TripRow(
@@ -4685,6 +4824,7 @@ class TripRow extends DataClass implements Insertable<TripRow> {
       pointCount: data.pointCount.present
           ? data.pointCount.value
           : this.pointCount,
+      accountId: data.accountId.present ? data.accountId.value : this.accountId,
     );
   }
 
@@ -4699,7 +4839,8 @@ class TripRow extends DataClass implements Insertable<TripRow> {
           ..write('startedAt: $startedAt, ')
           ..write('endedAt: $endedAt, ')
           ..write('distanceMeters: $distanceMeters, ')
-          ..write('pointCount: $pointCount')
+          ..write('pointCount: $pointCount, ')
+          ..write('accountId: $accountId')
           ..write(')'))
         .toString();
   }
@@ -4715,6 +4856,7 @@ class TripRow extends DataClass implements Insertable<TripRow> {
     endedAt,
     distanceMeters,
     pointCount,
+    accountId,
   );
   @override
   bool operator ==(Object other) =>
@@ -4728,7 +4870,8 @@ class TripRow extends DataClass implements Insertable<TripRow> {
           other.startedAt == this.startedAt &&
           other.endedAt == this.endedAt &&
           other.distanceMeters == this.distanceMeters &&
-          other.pointCount == this.pointCount);
+          other.pointCount == this.pointCount &&
+          other.accountId == this.accountId);
 }
 
 class TripsCompanion extends UpdateCompanion<TripRow> {
@@ -4741,6 +4884,7 @@ class TripsCompanion extends UpdateCompanion<TripRow> {
   final Value<DateTime?> endedAt;
   final Value<double> distanceMeters;
   final Value<int> pointCount;
+  final Value<String?> accountId;
   final Value<int> rowid;
   const TripsCompanion({
     this.id = const Value.absent(),
@@ -4752,6 +4896,7 @@ class TripsCompanion extends UpdateCompanion<TripRow> {
     this.endedAt = const Value.absent(),
     this.distanceMeters = const Value.absent(),
     this.pointCount = const Value.absent(),
+    this.accountId = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   TripsCompanion.insert({
@@ -4764,6 +4909,7 @@ class TripsCompanion extends UpdateCompanion<TripRow> {
     this.endedAt = const Value.absent(),
     this.distanceMeters = const Value.absent(),
     this.pointCount = const Value.absent(),
+    this.accountId = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        profile = Value(profile),
@@ -4779,6 +4925,7 @@ class TripsCompanion extends UpdateCompanion<TripRow> {
     Expression<DateTime>? endedAt,
     Expression<double>? distanceMeters,
     Expression<int>? pointCount,
+    Expression<String>? accountId,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -4791,6 +4938,7 @@ class TripsCompanion extends UpdateCompanion<TripRow> {
       if (endedAt != null) 'ended_at': endedAt,
       if (distanceMeters != null) 'distance_meters': distanceMeters,
       if (pointCount != null) 'point_count': pointCount,
+      if (accountId != null) 'account_id': accountId,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -4805,6 +4953,7 @@ class TripsCompanion extends UpdateCompanion<TripRow> {
     Value<DateTime?>? endedAt,
     Value<double>? distanceMeters,
     Value<int>? pointCount,
+    Value<String?>? accountId,
     Value<int>? rowid,
   }) {
     return TripsCompanion(
@@ -4817,6 +4966,7 @@ class TripsCompanion extends UpdateCompanion<TripRow> {
       endedAt: endedAt ?? this.endedAt,
       distanceMeters: distanceMeters ?? this.distanceMeters,
       pointCount: pointCount ?? this.pointCount,
+      accountId: accountId ?? this.accountId,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -4851,6 +5001,9 @@ class TripsCompanion extends UpdateCompanion<TripRow> {
     if (pointCount.present) {
       map['point_count'] = Variable<int>(pointCount.value);
     }
+    if (accountId.present) {
+      map['account_id'] = Variable<String>(accountId.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -4869,6 +5022,7 @@ class TripsCompanion extends UpdateCompanion<TripRow> {
           ..write('endedAt: $endedAt, ')
           ..write('distanceMeters: $distanceMeters, ')
           ..write('pointCount: $pointCount, ')
+          ..write('accountId: $accountId, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();

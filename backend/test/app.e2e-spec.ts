@@ -8,6 +8,7 @@ import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/bootstrap';
 import { haversineMeters, Position, toPosition } from '../src/common/geo/geojson';
+import { PrismaService } from '../src/infrastructure/prisma/prisma.service';
 import { MapRegionService } from '../src/modules/regions/application/map-region.service';
 import {
   bboxOf,
@@ -211,6 +212,23 @@ describe('Maps Platform API (e2e)', () => {
       refreshToken = login.body.data.refreshToken;
     });
 
+    it('lets only one of two simultaneous refreshes with the same token through', async () => {
+      const responses = await Promise.all([
+        api('post', '/auth/refresh').send({ refreshToken }),
+        api('post', '/auth/refresh').send({ refreshToken }),
+      ]);
+      expect(responses.map((res) => res.status).sort()).toEqual([200, 401]);
+      const winner = responses.find((res) => res.status === 200)!;
+      // The same token presented twice is a re-use: the winner's successor is revoked too.
+      await api('post', '/auth/refresh')
+        .send({ refreshToken: winner.body.data.refreshToken })
+        .expect(401);
+
+      const login = await api('post', '/auth/login').send({ email, password }).expect(200);
+      accessToken = login.body.data.accessToken;
+      refreshToken = login.body.data.refreshToken;
+    });
+
     it('validates the payload', async () => {
       const res = await request(http)
         .post('/api/v1/auth/register')
@@ -357,6 +375,28 @@ describe('Maps Platform API (e2e)', () => {
       const list = await api('get', '/routes').expect(200);
       expect(JSON.stringify(list.body.data)).toContain(id);
     });
+
+    it('rejects steps that the app could not read back', async () => {
+      const res = await api('post', '/routes')
+        .send({
+          name: 'Pasos inválidos',
+          profile: 'CAR',
+          origin: ORIGIN,
+          destination: DESTINATION,
+          distanceMeters: 1500,
+          durationSeconds: 150,
+          geometry: calculated.geometry,
+          steps: [{ instruction: 42, distanceMeters: 10, durationSeconds: 1, location: [-79.88] }],
+        })
+        .expect(400);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+      expect(res.body.error.details).toEqual(
+        expect.arrayContaining([
+          'steps.0.instruction must be a string',
+          'steps.0.location must be a [longitude, latitude] position',
+        ]),
+      );
+    });
   });
 
   describe('geofences', () => {
@@ -389,6 +429,47 @@ describe('Maps Platform API (e2e)', () => {
       await api('post', '/tracking/location')
         .send({ tripId: trip.body.data.id, ...ORIGIN, accuracy: 8.4, timestamp: ago(5) })
         .expect(201);
+    });
+
+    it('draws long tracks through an even sample of their points', async () => {
+      const trip = await api('post', '/trips').send({ profile: 'CAR' }).expect(201);
+      const tripId = trip.body.data.id as string;
+      const locations = Array.from({ length: 25 }, (_, index) => ({
+        tripId,
+        latitude: ORIGIN.latitude,
+        longitude: ORIGIN.longitude - index * 0.0005,
+        accuracy: 5,
+        timestamp: ago(600 - index * 10),
+      }));
+      await api('post', '/tracking/locations/batch').send({ locations }).expect(201);
+
+      type Path = {
+        geometry: { type: string; coordinates: Position[] } | null;
+        distanceMeters: number;
+        totalPoints: number;
+        points: { longitude: number; latitude: number; recordedAt: string }[];
+      };
+      const full = (await api('get', `/trips/${tripId}/path`).expect(200)).body.data as Path;
+      const sampled = (await api('get', `/trips/${tripId}/path?maxPoints=10`).expect(200)).body
+        .data as Path;
+
+      expect(full.points).toHaveLength(25);
+      expect(full.geometry?.coordinates).toHaveLength(25);
+      expect(sampled.totalPoints).toBe(25);
+      expect(sampled.points).toHaveLength(10);
+      expect(sampled.points[0]).toEqual(full.points[0]);
+      expect(sampled.points[9]).toEqual(full.points[24]);
+      // The line goes through exactly the returned points...
+      expect(sampled.geometry).toEqual({
+        type: 'LineString',
+        coordinates: sampled.points.map((point) => [point.longitude, point.latitude]),
+      });
+      // ...while the distance still covers every recorded point (24 steps of ~55.6 m).
+      expect(sampled.distanceMeters).toBe(full.distanceMeters);
+      expect(full.distanceMeters).toBeGreaterThan(1300);
+      expect(full.distanceMeters).toBeLessThan(1370);
+
+      await api('get', `/trips/${tripId}/path?maxPoints=1`).expect(400);
     });
 
     it('applies a session recorded offline once, even when the push is retried', async () => {
@@ -442,6 +523,94 @@ describe('Maps Platform API (e2e)', () => {
       const res = await api('get', '/sync/pull?since=2000-01-01T00:00:00.000Z').expect(200);
       expect(res.body.data.routes.length).toBeGreaterThanOrEqual(1);
       expect(res.body.data).toHaveProperty('serverTime');
+    });
+
+    const saveRoute = async (name: string) => {
+      const id = randomUUID();
+      await api('post', '/routes')
+        .send({
+          id,
+          name,
+          profile: 'CAR',
+          origin: ORIGIN,
+          destination: DESTINATION,
+          distanceMeters: 1500,
+          durationSeconds: 150,
+          geometry: {
+            type: 'LineString',
+            coordinates: [toPosition(ORIGIN), toPosition(DESTINATION)],
+          },
+        })
+        .expect(201);
+      return id;
+    };
+    const pull = async (query: string) => {
+      const res = await api('get', `/sync/pull?${query}`).expect(200);
+      return res.body.data as {
+        routes: { id: string }[];
+        deletedRouteIds: string[];
+        hasMore: boolean;
+        next: { since: string; afterId: string } | null;
+      };
+    };
+
+    it('tells other devices about REST deletions, until the route is saved again', async () => {
+      const since = `since=${ago(60)}`;
+      const id = await saveRoute('E2E tombstone');
+      await api('delete', `/routes/${id}`).expect(200);
+
+      const deleted = await pull(since);
+      expect(deleted.deletedRouteIds).toContain(id);
+      expect(deleted.routes.map((route) => route.id)).not.toContain(id);
+
+      // Same id saved again (undo on another device): the old tombstone must not win.
+      await api('post', '/routes')
+        .send({
+          id,
+          name: 'E2E tombstone (restored)',
+          profile: 'CAR',
+          origin: ORIGIN,
+          destination: DESTINATION,
+          distanceMeters: 1500,
+          durationSeconds: 150,
+          geometry: {
+            type: 'LineString',
+            coordinates: [toPosition(ORIGIN), toPosition(DESTINATION)],
+          },
+        })
+        .expect(201);
+      const restored = await pull(since);
+      expect(restored.routes.map((route) => route.id)).toContain(id);
+      expect(restored.deletedRouteIds).not.toContain(id);
+    });
+
+    it('pages through changes of the same millisecond without skipping any', async () => {
+      const ids = [];
+      for (let i = 0; i < 5; i++) ids.push(await saveRoute(`E2E tie ${i}`));
+      await api('delete', `/routes/${ids[4]}`).expect(200);
+      // Five changes in one millisecond, as concurrent writes can produce.
+      const tie = '2031-01-01T00:00:00.000Z';
+      const prisma = app.get(PrismaService);
+      await prisma.$executeRaw`
+        UPDATE routes SET updated_at = ${tie}::timestamptz WHERE id = ANY(${ids}::uuid[])`;
+      await prisma.$executeRaw`
+        UPDATE route_tombstones SET deleted_at = ${tie}::timestamptz
+        WHERE route_id = ANY(${ids}::uuid[])`;
+
+      const routes: string[] = [];
+      const deletedRouteIds: string[] = [];
+      let query = `since=${tie}&limit=2`;
+      for (let page = 0; page < 5; page++) {
+        const changes = await pull(query);
+        routes.push(...changes.routes.map((route) => route.id));
+        deletedRouteIds.push(...changes.deletedRouteIds);
+        if (!changes.hasMore) break;
+        expect(changes.next?.since).toBe(tie);
+        query = `since=${changes.next!.since}&afterId=${changes.next!.afterId}&limit=2`;
+      }
+
+      expect(routes.sort()).toEqual(ids.slice(0, 4).sort());
+      expect(deletedRouteIds).toEqual([ids[4]]);
     });
   });
 

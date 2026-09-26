@@ -186,9 +186,9 @@ SERVICE=routing`, `make down`, `make config`. `make help` lista todos.
 El esquema está en [backend/prisma/schema.prisma](backend/prisma/schema.prisma)
 y las migraciones en `backend/prisma/migrations/`. Tablas: `users`,
 `refresh_tokens`, `devices`, `map_regions`, `downloaded_regions`, `places`,
-`favorite_places`, `routes`, `route_points`, `trips`, `trip_points`,
-`geofences` y `synchronization_events`; las geometrías usan tipos PostGIS con
-índices GiST.
+`favorite_places`, `routes`, `route_points`, `route_tombstones`, `trips`,
+`trip_points`, `geofences` y `synchronization_events`; las geometrías usan
+tipos PostGIS con índices GiST.
 
 - El backend aplica las migraciones pendientes al arrancar (`RUN_MIGRATIONS=true`).
 - A mano: `make migrate`.
@@ -283,12 +283,12 @@ o `{ "success": false, "error": { "code", "message", "details", "requestId" } }`
 | Usuarios | 🔑 `PATCH /users/me` · 🔑 `POST /users/me/devices` · 🔑 `GET /users/me/devices` |
 | Regiones | 🔓 `GET /maps/regions` · 🔓 `GET /maps/regions/locate?lat=&lng=` · 🔓 `GET /maps/regions/{id}` · 🔓 `GET /maps/regions/{id}/version` · 🔓 `POST /maps/regions/updates` · 🔓 `GET /maps/regions/{id}/download` · 🔓 `GET /maps/regions/{id}/routing/download` · 🔑 `GET /maps/regions/downloaded` · 🛡️ `POST /maps/regions/sync` · 🛡️ `PATCH /maps/regions/{id}` |
 | Rutas | 🔓 `POST /routes/calculate` · 🔑 `POST /routes` · 🔑 `GET /routes` · 🔑 `GET /routes/{id}` · 🔑 `DELETE /routes/{id}` |
-| Recorridos | 🔑 `POST /trips` · 🔑 `GET /trips` · 🔑 `GET /trips/{id}` · 🔑 `GET /trips/{id}/path` · 🔑 `POST /trips/{id}/finish` · 🔑 `POST /trips/{id}/cancel` |
+| Recorridos | 🔑 `POST /trips` · 🔑 `GET /trips` · 🔑 `GET /trips/{id}` · 🔑 `GET /trips/{id}/path?maxPoints=` · 🔑 `POST /trips/{id}/finish` · 🔑 `POST /trips/{id}/cancel` |
 | Tracking | 🔑 `POST /tracking/location` · 🔑 `POST /tracking/locations/batch` · 🔑 `GET /tracking/trips/{tripId}/last` |
 | Lugares | 🔑 `POST /places` · 🔑 `GET /places` · 🔑 `GET /places/{id}` · 🔑 `PATCH /places/{id}` · 🔑 `DELETE /places/{id}` · 🔑 `PUT /places/{id}/favorite` · 🔑 `DELETE /places/{id}/favorite` |
 | Geocercas | 🔑 `POST /geofences` · 🔑 `GET /geofences` · 🔑 `GET /geofences/check?lat=&lng=` · 🔑 `GET /geofences/{id}` · 🔑 `PATCH /geofences/{id}` · 🔑 `DELETE /geofences/{id}` |
 | Geocoding | 🔓 `GET /geocoding/search?q=` · 🔓 `GET /geocoding/reverse?lat=&lng=` |
-| Sincronización | 🔑 `POST /sync/push` · 🔑 `GET /sync/pull?since=` |
+| Sincronización | 🔑 `POST /sync/push` · 🔑 `GET /sync/pull?since=&afterId=` |
 
 Nginx además sirve `/maps/<carpeta>/<región>.pmtiles`, `/maps/style/style.json`
 y `/maps/fonts/{fontstack}/{range}.pbf`.

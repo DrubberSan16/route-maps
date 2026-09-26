@@ -55,7 +55,7 @@ describe('SynchronizationService', () => {
   };
   let trips: { start: jest.Mock; finish: jest.Mock; cancel: jest.Mock };
   let tracking: { recordBatch: jest.Mock };
-  let routes: { save: jest.Mock; delete: jest.Mock; list: jest.Mock };
+  let routes: { save: jest.Mock; delete: jest.Mock; changes: jest.Mock };
   let downloadedRegions: { record: jest.Mock };
   let service: SynchronizationService;
 
@@ -87,7 +87,7 @@ describe('SynchronizationService', () => {
     routes = {
       save: jest.fn().mockResolvedValue({ id: ROUTE }),
       delete: jest.fn().mockResolvedValue({ deleted: true }),
-      list: jest.fn(),
+      changes: jest.fn(),
     };
     downloadedRegions = { record: jest.fn().mockResolvedValue({}) };
     const users = { registerDevice: jest.fn().mockResolvedValue({ id: 'device-1' }) };
@@ -188,6 +188,41 @@ describe('SynchronizationService', () => {
     expect(routes.save).not.toHaveBeenCalled();
   });
 
+  it('checks every step of a route, so the app can always read it back', async () => {
+    const step = {
+      instruction: 'Conduzca hacia el noroeste',
+      distanceMeters: 1850,
+      durationSeconds: 300,
+      maneuver: 'DEPART',
+      location: [-79.8862, -2.1962],
+      streetNames: ['Malecón Simón Bolívar'],
+      geometryIndex: [0, 1],
+    };
+
+    const { results } = await service.push(USER, undefined, [
+      op('op-1', 'route', 'UPSERT', { ...routePayload, steps: [step] }),
+      op('op-2', 'route', 'UPSERT', {
+        ...routePayload,
+        steps: [step, { ...step, instruction: 42, location: [-79.88], geometryIndex: [0, -1] }],
+      }),
+      op('op-3', 'route', 'UPSERT', { ...routePayload, steps: [null] }),
+    ]);
+
+    expect(results.map((result) => result.status)).toEqual(['APPLIED', 'FAILED', 'FAILED']);
+    expect(routes.save).toHaveBeenCalledTimes(1);
+    expect(routes.save).toHaveBeenCalledWith(USER, expect.objectContaining({ steps: [step] }));
+    expect(results[1]).toMatchObject({ retryable: false, error: { code: 'VALIDATION_ERROR' } });
+    expect(results[1].error?.details).toEqual([
+      'steps.1.instruction must be shorter than or equal to 500 characters',
+      'steps.1.instruction must be a string',
+      'steps.1.location must be a [longitude, latitude] position',
+      'steps.1.each value in geometryIndex must not be less than 0',
+    ]);
+    expect(results[2].error?.details).toEqual([
+      'steps.each value in nested property steps must be either object or array',
+    ]);
+  });
+
   it('rejects a tracking batch with an invalid point', async () => {
     const { results } = await service.push(USER, undefined, [
       op('op-1', 'tracking_point', 'CREATE', {
@@ -245,6 +280,43 @@ describe('SynchronizationService', () => {
       error: { code: ErrorCode.INTERNAL_ERROR, message: 'Temporary server error' },
     });
     expect(recorded()).toEqual([]);
+  });
+
+  describe('pull', () => {
+    const changedAt = new Date('2026-09-25T18:30:00.123Z');
+
+    it('starts at the beginning of the feed and returns the cursor of the last change', async () => {
+      routes.changes.mockResolvedValue({
+        routes: [{ id: ROUTE }],
+        deletedIds: [TRIP],
+        next: { changedAt, id: TRIP },
+        hasMore: true,
+      });
+
+      const result = await service.pull(USER);
+
+      expect(routes.changes).toHaveBeenCalledWith(
+        USER,
+        { changedAt: new Date(0), id: '00000000-0000-0000-0000-000000000000' },
+        200,
+      );
+      expect(result).toEqual({
+        serverTime: expect.any(Date),
+        routes: [{ id: ROUTE }],
+        deletedRouteIds: [TRIP],
+        hasMore: true,
+        next: { since: changedAt, afterId: TRIP },
+      });
+    });
+
+    it('continues after the given (since, afterId) cursor', async () => {
+      routes.changes.mockResolvedValue({ routes: [], deletedIds: [], next: null, hasMore: false });
+
+      const result = await service.pull(USER, { since: changedAt, afterId: ROUTE }, 50);
+
+      expect(routes.changes).toHaveBeenCalledWith(USER, { changedAt, id: ROUTE }, 50);
+      expect(result).toMatchObject({ routes: [], deletedRouteIds: [], hasMore: false, next: null });
+    });
   });
 
   it('requires an installation id to record downloaded regions', async () => {

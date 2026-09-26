@@ -30,7 +30,7 @@ void main() {
   setUp(() {
     db = memoryDatabase();
     queue = SyncQueueStore(db);
-    trips = TripRepositoryImpl(db: db, queue: queue);
+    trips = TripRepositoryImpl(db: db, queue: queue, account: () => 'user-1');
     settings = SettingsRepositoryImpl(db);
     location = FakeLocationService(position: fix(-2.17, -79.90));
     recorder = createRecorder();
@@ -68,7 +68,7 @@ void main() {
     expect(finished!.pointCount, 1);
     expect(recorder.state.isRecording, isFalse);
     expect(location.background, isFalse);
-    final ops = await queue.nextBatch(limit: 10);
+    final ops = await queue.nextBatch(accountId: 'user-1', limit: 10);
     expect(ops.map((op) => '${op.entity}:${op.operation}'), [
       'trip:CREATE',
       'tracking_point:CREATE',
@@ -82,7 +82,10 @@ void main() {
     await recorder.start(profile: RoutingProfile.car);
     location.positions.add(fix(-2.17, -79.90, at: second(0)));
     await eventually(
-      () async => (await queue.nextBatch(limit: 10)).any((op) => op.entity == 'tracking_point'),
+      () async => (await queue.nextBatch(
+        accountId: 'user-1',
+        limit: 10,
+      )).any((op) => op.entity == 'tracking_point'),
     );
     expect(recorder.state.isRecording, isTrue);
   });

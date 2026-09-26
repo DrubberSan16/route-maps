@@ -177,13 +177,22 @@ misma transacción**: no hay cambio sin operación ni operación sin cambio.
 - Sin conexión o con la sesión vencida, el lote vuelve a pendiente sin contar
   un intento.
 
-### Recepción (`GET /api/v1/sync/pull?since=`)
+### Recepción (`GET /api/v1/sync/pull`)
 
 - Trae las rutas guardadas creadas, modificadas o borradas en otros
-  dispositivos, en páginas de 200 (hasta 50 páginas por ronda).
-- El cursor se guarda por usuario y retrocede 5 s respecto de la hora del
-  servidor para no perder cambios concurrentes; aplicar dos veces el mismo
-  cambio no tiene efecto.
+  dispositivos, incluidas las borradas con `DELETE /routes/{id}`. Es un único
+  feed de cambios ordenado por fecha del cambio e id, en páginas de hasta 200
+  (`limit`).
+- Cada ruta aparece una sola vez, con su último estado: guardada (`routes`) o
+  borrada (`deletedRouteIds`, de la tabla `route_tombstones`). Una ruta borrada
+  que se vuelve a guardar con el mismo id deja de figurar como borrada.
+- Mientras `hasMore` es verdadero, la página siguiente se pide con el cursor
+  `next` (`since` y `afterId`), así los cambios de un mismo milisegundo se
+  reparten entre páginas sin saltarse ninguno. Una ronda lee hasta 50 páginas;
+  si quedan más, la siguiente continúa desde ese cursor.
+- Al terminar, el cursor se guarda por cuenta con la hora del servidor de la
+  primera página menos 5 s, para no perder cambios concurrentes; aplicar dos
+  veces el mismo cambio no tiene efecto.
 - Conflictos: un borrado local todavía no enviado gana sobre la copia del
   servidor; en lo demás, la última versión del servidor reemplaza la local.
 
@@ -199,8 +208,16 @@ funciona igual en local.
 - Los tokens se guardan en el Keystore (Android) y el Keychain (iOS). El token
   de acceso se renueva solo con el refresh token; si el refresh vence, la
   sincronización se detiene hasta volver a iniciar sesión, sin perder la cola.
-- Cerrar sesión borra los tokens del dispositivo (y los revoca en el servidor si
-  hay conexión). Los mapas descargados, las rutas y los recorridos quedan en el
+- Las rutas guardadas, los recorridos y la cola de sincronización de la base
+  local llevan la cuenta a la que pertenecen: la app muestra y sincroniza solo
+  los de la sesión abierta. Si otra persona inicia sesión en el mismo teléfono,
+  no ve los datos de la cuenta anterior ni los envía a la suya.
+- Lo que se guarda o se graba sin cuenta pasa a la cuenta que inicia sesión en
+  el dispositivo y se sincroniza con ella.
+- Cerrar sesión termina el recorrido que se esté grabando, borra los tokens del
+  dispositivo y los revoca en el servidor si hay conexión. Las rutas, los
+  recorridos y las operaciones pendientes de esa cuenta quedan guardados y se
+  envían cuando vuelve a iniciar sesión; los mapas descargados son de todo el
   dispositivo.
 
 ## Pendiente

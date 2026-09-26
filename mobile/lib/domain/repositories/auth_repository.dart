@@ -1,7 +1,9 @@
 import '../entities/user.dart';
 
 /// Optional account: the map, downloads and routing work without it; it is
-/// needed to synchronize trips and saved routes.
+/// needed to synchronize trips and saved routes. The saved routes and trips
+/// created without an account go to the first account that logs in; those of
+/// an account are only visible while it is logged in.
 abstract class AuthRepository {
   AuthSession? get currentSession;
 
@@ -18,5 +20,6 @@ abstract class AuthRepository {
     required String name,
   });
 
+  /// Ends the session; its data stays on the device for its next login.
   Future<void> logout();
 }

@@ -75,12 +75,17 @@ class MapViewState {
 final mapControllerProvider = NotifierProvider<MapController, MapViewState>(MapController.new);
 
 class MapController extends Notifier<MapViewState> {
+  /// Changes whenever the origin, destination or profile change or another calculation
+  /// starts, so that an answer to an earlier request is dropped instead of shown.
+  int _request = 0;
+
   @override
   MapViewState build() => const MapViewState();
 
   /// Sets the destination and clears the previous route. Without a label the
   /// address is looked up when there is connection.
   void setDestination(Coordinate destination, {String? label}) {
+    _request++;
     state = MapViewState(
       origin: state.origin,
       originLabel: state.originLabel,
@@ -93,16 +98,24 @@ class MapController extends Notifier<MapViewState> {
 
   /// Uses [origin] instead of the current position (null goes back to it).
   void setOrigin(Coordinate? origin, {String? label}) {
+    _request++;
     state = origin == null
-        ? state.copyWith(clearOrigin: true, clearRoute: true)
-        : state.copyWith(origin: origin, originLabel: label ?? origin.toString(), clearRoute: true);
+        ? state.copyWith(clearOrigin: true, clearRoute: true, isRouting: false)
+        : state.copyWith(
+            origin: origin,
+            originLabel: label ?? origin.toString(),
+            clearRoute: true,
+            isRouting: false,
+          );
   }
 
+  /// Changes the profile; a route shown or being calculated is calculated again for it.
   void setProfile(RoutingProfile profile) {
     if (profile == state.profile) return;
-    final hadRoute = state.route != null;
-    state = state.copyWith(profile: profile, clearRoute: true);
-    if (hadRoute) unawaited(calculateRoute());
+    _request++;
+    final recalculate = state.route != null || state.isRouting;
+    state = state.copyWith(profile: profile, clearRoute: true, isRouting: false);
+    if (recalculate) unawaited(calculateRoute());
   }
 
   void selectRoute(int index) {
@@ -119,23 +132,30 @@ class MapController extends Notifier<MapViewState> {
       state = state.copyWith(message: 'Elige un destino: búscalo o mantén presionado el mapa.');
       return;
     }
+    final request = ++_request;
+    final profile = state.profile;
     state = state.copyWith(isRouting: true, clearMessage: true);
     try {
       final origin =
           state.origin ?? (await ref.read(locationServiceProvider).getCurrentPosition()).coordinate;
+      if (!_isCurrent(request)) return;
       final result = await ref
           .read(routingServiceProvider)
-          .calculateRoute(origin: origin, destination: destination, profile: state.profile);
-      if (!ref.mounted) return;
+          .calculateRoute(origin: origin, destination: destination, profile: profile);
+      if (!_isCurrent(request)) return;
       state = state.copyWith(route: result, selectedRoute: 0, isRouting: false);
     } on AppException catch (error) {
-      if (!ref.mounted) return;
+      if (!_isCurrent(request)) return;
       state = state.copyWith(isRouting: false, clearRoute: true, message: error.message);
     }
   }
 
+  /// Whether [request] is still the latest calculation for what is on screen.
+  bool _isCurrent(int request) => ref.mounted && request == _request;
+
   /// Shows a stored route as it was saved.
   void showSavedRoute(OfflineRoute route) {
+    _request++;
     state = MapViewState(
       origin: route.origin,
       originLabel: 'Inicio de «${route.name}»',
@@ -149,6 +169,7 @@ class MapController extends Notifier<MapViewState> {
   /// Stores the selected route for offline use and synchronization.
   Future<OfflineRoute?> saveSelectedRoute(String name) async {
     final result = state.route;
+    final index = state.selectedRoute;
     final option = state.selectedOption;
     if (result == null || option == null) return null;
     final region = await ref.read(regionRepositoryProvider).detectRegion(result.origin);
@@ -156,9 +177,15 @@ class MapController extends Notifier<MapViewState> {
         .read(savedRouteRepositoryProvider)
         .save(result: result, option: option, name: name, regionId: region?.code);
     if (!ref.mounted) return saved;
+    final message = 'Ruta «${saved.name}» guardada. Estará disponible sin conexión.';
+    if (!identical(state.route, result)) {
+      // Another route is on screen by now: only confirm the save.
+      state = state.copyWith(message: message);
+      return saved;
+    }
     // The displayed option now refers to the stored copy.
     final options = [...result.routes];
-    options[state.selectedRoute] = saved.toRouteOption().withType(option.type);
+    options[index] = saved.toRouteOption().withType(option.type);
     state = state.copyWith(
       route: RouteResult(
         profile: result.profile,
@@ -168,12 +195,13 @@ class MapController extends Notifier<MapViewState> {
         origin: result.origin,
         destination: result.destination,
       ),
-      message: 'Ruta «${saved.name}» guardada. Estará disponible sin conexión.',
+      message: message,
     );
     return saved;
   }
 
   void clearRoute() {
+    _request++;
     state = MapViewState(profile: state.profile);
   }
 

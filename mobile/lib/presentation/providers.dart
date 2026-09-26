@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/config/app_config.dart';
 import '../data/local/app_database.dart';
+import '../data/local/current_account.dart';
 import '../data/local/region_download_store.dart';
 import '../data/local/sync_queue_store.dart';
 import '../data/remote/api_client.dart';
@@ -118,8 +119,15 @@ final authRepositoryProvider = Provider<AuthRepository>(
   (ref) => AuthRepositoryImpl(
     api: ref.watch(apiClientProvider),
     sessions: ref.watch(sessionStoreProvider),
+    adoptGuestData: ref.watch(databaseProvider).adoptGuestData,
   ),
 );
+
+/// Account whose saved routes, trips and queued operations are in use.
+final currentAccountProvider = Provider<CurrentAccount>((ref) {
+  final auth = ref.watch(authRepositoryProvider);
+  return () => auth.currentSession?.user.id;
+});
 
 final regionRepositoryProvider = Provider<RegionRepository>(
   (ref) => RegionRepositoryImpl(
@@ -141,12 +149,16 @@ final savedRouteRepositoryProvider = Provider<SavedRouteRepository>(
   (ref) => SavedRouteRepositoryImpl(
     db: ref.watch(databaseProvider),
     queue: ref.watch(syncQueueStoreProvider),
+    account: ref.watch(currentAccountProvider),
   ),
 );
 
 final tripRepositoryProvider = Provider<TripRepository>(
-  (ref) =>
-      TripRepositoryImpl(db: ref.watch(databaseProvider), queue: ref.watch(syncQueueStoreProvider)),
+  (ref) => TripRepositoryImpl(
+    db: ref.watch(databaseProvider),
+    queue: ref.watch(syncQueueStoreProvider),
+    account: ref.watch(currentAccountProvider),
+  ),
 );
 
 final geocodingRepositoryProvider = Provider<GeocodingRepository>(
@@ -239,6 +251,11 @@ final sessionProvider = StreamProvider<AuthSession?>(
   (ref) => ref.watch(authRepositoryProvider).watchSession(),
 );
 
+/// User id of the session; lists of account data are read again when it changes.
+final sessionAccountProvider = Provider<String?>(
+  (ref) => ref.watch(sessionProvider.select((session) => session.value?.user.id)),
+);
+
 final syncStateProvider = StreamProvider<SyncState>(
   (ref) => ref.watch(synchronizationServiceProvider).watchState(),
 );
@@ -255,13 +272,15 @@ final downloadTasksProvider = StreamProvider<Map<String, RegionDownloadTask>>(
   (ref) => ref.watch(regionDownloadServiceProvider).watchTasks(),
 );
 
-final savedRoutesProvider = StreamProvider<List<OfflineRoute>>(
-  (ref) => ref.watch(savedRouteRepositoryProvider).watchAll(),
-);
+final savedRoutesProvider = StreamProvider<List<OfflineRoute>>((ref) {
+  ref.watch(sessionAccountProvider);
+  return ref.watch(savedRouteRepositoryProvider).watchAll();
+});
 
-final tripsProvider = StreamProvider<List<Trip>>(
-  (ref) => ref.watch(tripRepositoryProvider).watchTrips(),
-);
+final tripsProvider = StreamProvider<List<Trip>>((ref) {
+  ref.watch(sessionAccountProvider);
+  return ref.watch(tripRepositoryProvider).watchTrips();
+});
 
 final recordingProvider = StreamProvider<RecordingState>(
   (ref) => ref.watch(tripRecorderProvider).watch(),

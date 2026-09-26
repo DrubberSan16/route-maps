@@ -2,7 +2,8 @@ import '../entities/offline_route.dart';
 import '../entities/route.dart';
 import '../entities/routing_profile.dart';
 
-/// Routes stored on the device (Drift). Changes are queued for synchronization.
+/// Routes of the current account stored on the device (Drift). Changes are
+/// queued for synchronization.
 abstract class SavedRouteRepository {
   Stream<List<OfflineRoute>> watchAll();
 
@@ -23,6 +24,11 @@ abstract class SavedRouteRepository {
   /// Stored routes of [profile], candidates for offline routing.
   Future<List<OfflineRoute>> byProfile(RoutingProfile profile);
 
-  /// Applies routes pulled from the server (no sync operation is queued).
-  Future<void> applyRemote({required List<OfflineRoute> routes, required List<String> deletedIds});
+  /// Applies routes pulled from the server for [accountId] (no sync
+  /// operation is queued).
+  Future<void> applyRemote({
+    required String accountId,
+    required List<OfflineRoute> routes,
+    required List<String> deletedIds,
+  });
 }

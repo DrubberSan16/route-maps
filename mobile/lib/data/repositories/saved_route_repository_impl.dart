@@ -11,18 +11,22 @@ import '../../domain/entities/routing_profile.dart';
 import '../../domain/entities/sync.dart';
 import '../../domain/repositories/saved_route_repository.dart';
 import '../local/app_database.dart';
+import '../local/current_account.dart';
 import '../local/sync_queue_store.dart';
 
+/// Saved routes of the current account (see [AppDatabase]).
 class SavedRouteRepositoryImpl implements SavedRouteRepository {
   SavedRouteRepositoryImpl({
     required this._db,
     required this._queue,
+    required this._account,
     this._uuid = const Uuid(),
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now;
 
   final AppDatabase _db;
   final SyncQueueStore _queue;
+  final CurrentAccount _account;
   final Uuid _uuid;
   final DateTime Function() _clock;
 
@@ -35,9 +39,10 @@ class SavedRouteRepositoryImpl implements SavedRouteRepository {
 
   @override
   Future<OfflineRoute?> getById(String routeId) async {
+    final account = _account();
     final row = await (_db.select(
       _db.offlineRoutes,
-    )..where((t) => t.routeId.equals(routeId))).getSingleOrNull();
+    )..where((t) => t.routeId.equals(routeId) & _ownedBy(t, account))).getSingleOrNull();
     return row == null ? null : _toRoute(row);
   }
 
@@ -64,9 +69,11 @@ class SavedRouteRepositoryImpl implements SavedRouteRepository {
       createdAt: now,
       updatedAt: now,
     );
+    final account = _account();
     await _db.transaction(() async {
-      await _db.into(_db.offlineRoutes).insert(_toRow(route));
+      await _db.into(_db.offlineRoutes).insert(_toRow(route, account));
       await _queue.add(
+        accountId: account,
         entity: SyncEntities.route,
         operation: SyncOperations.upsert,
         payload: route.toSyncPayload(),
@@ -76,62 +83,79 @@ class SavedRouteRepositoryImpl implements SavedRouteRepository {
   }
 
   @override
-  Future<void> delete(String routeId) => _db.transaction(() async {
-    final deleted = await (_db.delete(
-      _db.offlineRoutes,
-    )..where((t) => t.routeId.equals(routeId))).go();
-    if (deleted > 0) {
-      await _queue.add(
-        entity: SyncEntities.route,
-        operation: SyncOperations.delete,
-        payload: {'id': routeId},
-      );
-    }
-  });
+  Future<void> delete(String routeId) {
+    final account = _account();
+    return _db.transaction(() async {
+      final deleted = await (_db.delete(
+        _db.offlineRoutes,
+      )..where((t) => t.routeId.equals(routeId) & _ownedBy(t, account))).go();
+      if (deleted > 0) {
+        await _queue.add(
+          accountId: account,
+          entity: SyncEntities.route,
+          operation: SyncOperations.delete,
+          payload: {'id': routeId},
+        );
+      }
+    });
+  }
 
   @override
   Future<List<OfflineRoute>> byProfile(RoutingProfile profile) async {
+    final account = _account();
     final rows = await (_db.select(
       _db.offlineRoutes,
-    )..where((t) => t.profile.equals(profile.apiValue))).get();
+    )..where((t) => t.profile.equals(profile.apiValue) & _ownedBy(t, account))).get();
     return rows.map(_toRoute).toList();
   }
 
   @override
   Future<void> applyRemote({
+    required String accountId,
     required List<OfflineRoute> routes,
     required List<String> deletedIds,
   }) => _db.transaction(() async {
     for (final route in routes) {
       // A delete made on this device and not sent yet wins over the server copy.
       if (await _queue.hasUnsentRouteDelete(route.routeId)) continue;
-      await _db.into(_db.offlineRoutes).insertOnConflictUpdate(_toRow(route));
+      await _db.into(_db.offlineRoutes).insertOnConflictUpdate(_toRow(route, accountId));
     }
     if (deletedIds.isNotEmpty) {
-      await (_db.delete(_db.offlineRoutes)..where((t) => t.routeId.isIn(deletedIds))).go();
+      await (_db.delete(
+        _db.offlineRoutes,
+      )..where((t) => t.routeId.isIn(deletedIds) & t.accountId.equals(accountId))).go();
     }
   });
 
-  SimpleSelectStatement<$OfflineRoutesTable, OfflineRouteRow> _allQuery() =>
-      _db.select(_db.offlineRoutes)..orderBy([(t) => OrderingTerm.desc(t.updatedAt)]);
+  SimpleSelectStatement<$OfflineRoutesTable, OfflineRouteRow> _allQuery() {
+    final account = _account();
+    return _db.select(_db.offlineRoutes)
+      ..where((t) => _ownedBy(t, account))
+      ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)]);
+  }
 
-  OfflineRoutesCompanion _toRow(OfflineRoute route) => OfflineRoutesCompanion.insert(
-    routeId: route.routeId,
-    name: route.name,
-    profile: route.profile.apiValue,
-    originLatitude: route.origin.latitude,
-    originLongitude: route.origin.longitude,
-    destinationLatitude: route.destination.latitude,
-    destinationLongitude: route.destination.longitude,
-    distanceMeters: route.distanceMeters,
-    durationSeconds: route.durationSeconds,
-    geometry: jsonEncode([for (final point in route.geometry) point.toLngLat()]),
-    steps: jsonEncode([for (final step in route.steps) step.toJson()]),
-    regionId: Value(route.regionId),
-    provider: Value(route.provider),
-    createdAt: utcMillis(route.createdAt),
-    updatedAt: utcMillis(route.updatedAt),
-  );
+  static Expression<bool> _ownedBy($OfflineRoutesTable t, String? account) =>
+      account == null ? t.accountId.isNull() : t.accountId.equals(account);
+
+  OfflineRoutesCompanion _toRow(OfflineRoute route, String? account) =>
+      OfflineRoutesCompanion.insert(
+        routeId: route.routeId,
+        name: route.name,
+        profile: route.profile.apiValue,
+        originLatitude: route.origin.latitude,
+        originLongitude: route.origin.longitude,
+        destinationLatitude: route.destination.latitude,
+        destinationLongitude: route.destination.longitude,
+        distanceMeters: route.distanceMeters,
+        durationSeconds: route.durationSeconds,
+        geometry: jsonEncode([for (final point in route.geometry) point.toLngLat()]),
+        steps: jsonEncode([for (final step in route.steps) step.toJson()]),
+        regionId: Value(route.regionId),
+        provider: Value(route.provider),
+        createdAt: utcMillis(route.createdAt),
+        updatedAt: utcMillis(route.updatedAt),
+        accountId: Value(account),
+      );
 
   static OfflineRoute _toRoute(OfflineRouteRow row) => OfflineRoute(
     routeId: row.routeId,

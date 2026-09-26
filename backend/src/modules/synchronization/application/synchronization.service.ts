@@ -10,7 +10,6 @@ import { PlacesService } from '../../places/application/places.service';
 import { DownloadedRegionsService } from '../../regions/application/downloaded-regions.service';
 import { SaveRouteDto } from '../../routing/application/dto/calculate-route.dto';
 import { SavedRoutesService } from '../../routing/application/use-cases/saved-routes.service';
-import { SavedRoute } from '../../routing/domain/entities/saved-route';
 import { TrackLocationDto, toLocationPoint } from '../../tracking/application/dto/tracking.dto';
 import { TrackingService } from '../../tracking/application/tracking.service';
 import { FinishTripDto, StartTripDto } from '../../trips/application/dto/trip.dto';
@@ -18,6 +17,9 @@ import { TripsService } from '../../trips/application/trips.service';
 import { UsersService } from '../../users/application/users.service';
 import { SyncOperation, SyncOperationResult, SyncValidationError } from '../domain/sync-operation';
 import { parsePayload } from './sync-handlers';
+
+/** Lowest UUID: a cursor with only a time starts at that instant, inclusive. */
+const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 
 class EntityIdPayload {
   @IsUUID()
@@ -108,33 +110,25 @@ export class SynchronizationService {
   }
 
   /**
-   * Changes made on other devices since `since` (saved routes + deletions).
-   * Returns at most 200 routes, oldest change first; `hasMore` tells the
-   * client to pull again using the last route's updatedAt as `since`.
+   * Saved routes created, updated or deleted since the cursor, on any device or through
+   * the REST API, oldest change first. Changes form one feed ordered by (time, id): while
+   * `hasMore`, the client asks again with `next` and no change is skipped, even when
+   * many share the same millisecond. `since` alone includes changes at that instant.
    */
-  async pull(userId: string, since?: Date) {
+  async pull(userId: string, cursor: { since?: Date; afterId?: string } = {}, limit = 200) {
     const serverTime = new Date();
-    const updated = await this.routes.list(userId, {
-      limit: 200,
-      offset: 0,
-      includeGeometry: true,
-      updatedSince: since ?? new Date(0),
-    });
-    const routes: SavedRoute[] = updated.items;
-    const deletions = await this.prisma.synchronizationEvent.findMany({
-      where: {
-        userId,
-        entity: 'route',
-        operation: 'DELETE',
-        status: SyncEventStatus.APPLIED,
-        ...(since ? { processedAt: { gt: since } } : {}),
-      },
-      select: { payload: true },
-    });
-    const deletedRouteIds = deletions
-      .map((event) => (event.payload as { id?: unknown }).id)
-      .filter((id): id is string => typeof id === 'string');
-    return { serverTime, routes, deletedRouteIds, hasMore: updated.total > routes.length };
+    const changes = await this.routes.changes(
+      userId,
+      { changedAt: cursor.since ?? new Date(0), id: cursor.afterId ?? NIL_UUID },
+      limit,
+    );
+    return {
+      serverTime,
+      routes: changes.routes,
+      deletedRouteIds: changes.deletedIds,
+      hasMore: changes.hasMore,
+      next: changes.next && { since: changes.next.changedAt, afterId: changes.next.id },
+    };
   }
 
   private async applyOne(context: PushContext, op: SyncOperation): Promise<SyncOperationResult> {
