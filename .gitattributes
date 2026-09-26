@@ -1,0 +1,15 @@
+# Everything is built and run in Linux containers (shell scripts, Dockerfiles,
+# Nginx, SQL and Prisma migrations), so text files are always checked out with
+# LF, also on Windows with core.autocrlf=true: a CRLF shebang (#!/bin/sh\r)
+# makes the containers fail with exit code 127.
+* text=auto eol=lf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.pbf binary
+*.jar binary
+*.pmtiles binary
+*.mbtiles binary
+*.tar binary
+*.zip binary
