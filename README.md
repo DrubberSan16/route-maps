@@ -283,10 +283,12 @@ flutter pub get
 flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080   # emulador Android
 ```
 
-Pantallas: mapa principal (búsqueda, Mi ubicación, Trazar ruta, Mapas
-offline), búsqueda, mapas offline, rutas guardadas, recorridos y cuenta con el
-estado de la sincronización. Configuración, permisos y compilación de release
-en [mobile/README.md](mobile/README.md).
+Pantallas: mapa principal (búsqueda, Mi ubicación, Trazar ruta con paradas,
+Mapas offline), búsqueda, mapas offline, rutas guardadas, recorridos y cuenta
+con el estado de la sincronización. Configuración, permisos y compilación de
+release en [mobile/README.md](mobile/README.md). El CI publica en cada ejecución
+el APK de release apuntando a producción (artefacto `maps-platform-apk`; la
+URL sale de la variable del repositorio `API_BASE_URL`).
 
 ## Endpoints
 

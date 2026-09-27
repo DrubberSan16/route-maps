@@ -29,6 +29,7 @@ import '../helpers/regions.dart';
 const _emptyStyle = '{"version":8,"sources":{},"layers":[]}';
 const _casino = Coordinate(43.7311, 7.4197);
 const _home = Coordinate(43.7384, 7.4246);
+const _port = Coordinate(43.7350, 7.4210);
 
 void main() {
   late FakeConnectivityService connectivity;
@@ -153,6 +154,29 @@ void main() {
     await tester.pumpAndSettle();
     expect(mapView.props!.selectedRoute, 0);
     expect(find.text('3 min · 2,5 km'), findsOneWidget);
+  });
+
+  testWidgets('stops are added on the map, drawn in order and sent with the route', (tester) async {
+    await pumpMap(tester);
+    await chooseDestination(tester, _casino);
+
+    mapView.props!.onLongPress(_port);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'Añadir parada'));
+    await tester.pumpAndSettle();
+    expect(mapView.props!.stops, [_port]);
+    expect(find.byTooltip('Quitar parada 1'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('route-button')));
+    await tester.pumpAndSettle();
+    expect(routing.requests.single.waypoints, [_port]);
+
+    // Removing the stop from the route panel calculates the route again.
+    await tester.tap(find.byTooltip('Quitar parada 1'));
+    await tester.pumpAndSettle();
+    expect(mapView.props!.stops, isEmpty);
+    expect(routing.requests, hasLength(2));
+    expect(routing.requests.last.waypoints, isEmpty);
   });
 
   testWidgets('a calculated route can be saved for offline use', (tester) async {

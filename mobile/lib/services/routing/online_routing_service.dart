@@ -20,9 +20,10 @@ class OnlineRoutingService implements RoutingService {
     required Coordinate origin,
     required Coordinate destination,
     required RoutingProfile profile,
+    List<Coordinate> waypoints = const [],
     bool alternatives = true,
   }) async {
-    if (!origin.isValid || !destination.isValid) {
+    if (!origin.isValid || !destination.isValid || !waypoints.every((stop) => stop.isValid)) {
       throw AppException.of(ErrorCodes.invalidCoordinates);
     }
     return _api.post(
@@ -35,8 +36,10 @@ class OnlineRoutingService implements RoutingService {
       body: {
         'origin': origin.toJson(),
         'destination': destination.toJson(),
+        if (waypoints.isNotEmpty) 'waypoints': [for (final stop in waypoints) stop.toJson()],
         'profile': profile.apiValue,
-        'alternatives': alternatives,
+        // The engine does not offer alternatives for routes with stops.
+        'alternatives': alternatives && waypoints.isEmpty,
         'language': language,
       },
     );

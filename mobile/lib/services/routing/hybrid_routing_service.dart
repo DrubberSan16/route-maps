@@ -27,16 +27,23 @@ class HybridRoutingService implements RoutingService {
     required Coordinate origin,
     required Coordinate destination,
     required RoutingProfile profile,
+    List<Coordinate> waypoints = const [],
     bool alternatives = true,
   }) async {
     if (_connectivity.status == ConnectivityStatus.offline) {
-      return _offline.calculateRoute(origin: origin, destination: destination, profile: profile);
+      return _offline.calculateRoute(
+        origin: origin,
+        destination: destination,
+        profile: profile,
+        waypoints: waypoints,
+      );
     }
     try {
       return await _online.calculateRoute(
         origin: origin,
         destination: destination,
         profile: profile,
+        waypoints: waypoints,
         alternatives: alternatives,
       );
     } on AppException catch (serverError) {
@@ -46,6 +53,7 @@ class HybridRoutingService implements RoutingService {
           origin: origin,
           destination: destination,
           profile: profile,
+          waypoints: waypoints,
         );
       } on AppException catch (offlineError) {
         // Nothing stored either: explain the server problem when there is

@@ -115,6 +115,11 @@ Se devuelve el tramo entre ambos puntos con sus pasos, distancia y tiempo
 proporcionales; hasta 2 rutas guardadas más se ofrecen como alternativas. Las
 mejores son las que requieren menos desvío para entrar y salir de la ruta.
 
+Con paradas, además, cada parada debe estar a menos de 150 m de la ruta, en
+orden y entre el origen y el destino: una ruta con paradas guardada con
+conexión vuelve a servir sin ella. Si ninguna ruta guardada pasa por las
+paradas, la app explica que una ruta con paradas necesita Internet.
+
 ### Modo 2: motor de rutas en el dispositivo (pendiente)
 
 Calcular una ruta nueva sin conexión requiere el grafo vial de la región y un

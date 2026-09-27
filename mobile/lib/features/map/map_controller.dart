@@ -12,12 +12,29 @@ import '../../domain/entities/routing_profile.dart';
 import '../../domain/repositories/map_repository.dart';
 import '../../presentation/providers.dart';
 
-/// Origin, destination and route shown on the map.
+/// Intermediate stop of the route, visited in order before the destination.
+@immutable
+class RouteStop {
+  const RouteStop(this.coordinate, this.label);
+
+  final Coordinate coordinate;
+  final String label;
+
+  @override
+  bool operator ==(Object other) =>
+      other is RouteStop && other.coordinate == coordinate && other.label == label;
+
+  @override
+  int get hashCode => Object.hash(coordinate, label);
+}
+
+/// Origin, stops, destination and route shown on the map.
 @immutable
 class MapViewState {
   const MapViewState({
     this.origin,
     this.originLabel,
+    this.stops = const [],
     this.destination,
     this.destinationLabel,
     this.profile = RoutingProfile.car,
@@ -30,6 +47,9 @@ class MapViewState {
   /// Explicit origin; null means "my location".
   final Coordinate? origin;
   final String? originLabel;
+
+  /// Stops between the origin and the destination, in order.
+  final List<RouteStop> stops;
   final Coordinate? destination;
   final String? destinationLabel;
   final RoutingProfile profile;
@@ -50,6 +70,7 @@ class MapViewState {
     Coordinate? origin,
     String? originLabel,
     bool clearOrigin = false,
+    List<RouteStop>? stops,
     Coordinate? destination,
     String? destinationLabel,
     RoutingProfile? profile,
@@ -62,6 +83,7 @@ class MapViewState {
   }) => MapViewState(
     origin: clearOrigin ? null : origin ?? this.origin,
     originLabel: clearOrigin ? null : originLabel ?? this.originLabel,
+    stops: stops ?? this.stops,
     destination: destination ?? this.destination,
     destinationLabel: destinationLabel ?? this.destinationLabel,
     profile: profile ?? this.profile,
@@ -75,25 +97,53 @@ class MapViewState {
 final mapControllerProvider = NotifierProvider<MapController, MapViewState>(MapController.new);
 
 class MapController extends Notifier<MapViewState> {
-  /// Changes whenever the origin, destination or profile change or another calculation
-  /// starts, so that an answer to an earlier request is dropped instead of shown.
+  /// Stops a route may have (the limit of `POST /routes/calculate`).
+  static const maxStops = 23;
+
+  /// Changes whenever the origin, stops, destination or profile change or another
+  /// calculation starts, so that an answer to an earlier request is dropped instead of shown.
   int _request = 0;
 
   @override
   MapViewState build() => const MapViewState();
 
-  /// Sets the destination and clears the previous route. Without a label the
-  /// address is looked up when there is connection.
+  /// Sets the destination and clears the previous route; the stops stay. Without
+  /// a label the address is looked up when there is connection.
   void setDestination(Coordinate destination, {String? label}) {
     _request++;
     state = MapViewState(
       origin: state.origin,
       originLabel: state.originLabel,
+      stops: state.stops,
       destination: destination,
       destinationLabel: label ?? destination.toString(),
       profile: state.profile,
     );
     if (label == null) unawaited(_lookUpLabel(destination));
+  }
+
+  /// Adds a stop after the others (before the destination). A route on screen
+  /// is calculated again through it.
+  void addStop(Coordinate stop, {String? label}) {
+    if (state.stops.length >= maxStops) {
+      state = state.copyWith(message: 'Una ruta admite hasta $maxStops paradas.');
+      return;
+    }
+    _changeStops([...state.stops, RouteStop(stop, label ?? stop.toString())]);
+    if (label == null) unawaited(_lookUpLabel(stop));
+  }
+
+  /// Removes the stop at [index]; a route on screen is calculated again without it.
+  void removeStop(int index) {
+    if (index < 0 || index >= state.stops.length) return;
+    _changeStops([...state.stops]..removeAt(index));
+  }
+
+  void _changeStops(List<RouteStop> stops) {
+    _request++;
+    final recalculate = state.route != null || state.isRouting;
+    state = state.copyWith(stops: stops, clearRoute: true, isRouting: false);
+    if (recalculate) unawaited(calculateRoute());
   }
 
   /// Uses [origin] instead of the current position (null goes back to it).
@@ -124,8 +174,8 @@ class MapController extends Notifier<MapViewState> {
     state = state.copyWith(selectedRoute: index);
   }
 
-  /// Calculates the route from the origin (or the current position) to the
-  /// destination: on the server when online, from stored routes otherwise.
+  /// Calculates the route from the origin (or the current position) through the
+  /// stops to the destination: on the server when online, from stored routes otherwise.
   Future<void> calculateRoute() async {
     final destination = state.destination;
     if (destination == null) {
@@ -134,6 +184,7 @@ class MapController extends Notifier<MapViewState> {
     }
     final request = ++_request;
     final profile = state.profile;
+    final waypoints = [for (final stop in state.stops) stop.coordinate];
     state = state.copyWith(isRouting: true, clearMessage: true);
     try {
       final origin =
@@ -141,7 +192,12 @@ class MapController extends Notifier<MapViewState> {
       if (!_isCurrent(request)) return;
       final result = await ref
           .read(routingServiceProvider)
-          .calculateRoute(origin: origin, destination: destination, profile: profile);
+          .calculateRoute(
+            origin: origin,
+            destination: destination,
+            profile: profile,
+            waypoints: waypoints,
+          );
       if (!_isCurrent(request)) return;
       state = state.copyWith(route: result, selectedRoute: 0, isRouting: false);
     } on AppException catch (error) {
@@ -209,12 +265,25 @@ class MapController extends Notifier<MapViewState> {
 
   void consumeMessage() => state = state.copyWith(clearMessage: true);
 
-  Future<void> _lookUpLabel(Coordinate destination) async {
+  /// Replaces the coordinates shown for the destination or a stop at [point]
+  /// with its address.
+  Future<void> _lookUpLabel(Coordinate point) async {
     if (!ref.read(isOnlineProvider)) return;
     try {
-      final place = await ref.read(geocodingRepositoryProvider).reverse(destination);
-      if (!ref.mounted || place == null || state.destination != destination) return;
-      state = state.copyWith(destinationLabel: place.label);
+      final place = await ref.read(geocodingRepositoryProvider).reverse(point);
+      if (!ref.mounted || place == null) return;
+      if (state.destination == point) state = state.copyWith(destinationLabel: place.label);
+      final unnamed = point.toString();
+      if (state.stops.any((stop) => stop.coordinate == point && stop.label == unnamed)) {
+        state = state.copyWith(
+          stops: [
+            for (final stop in state.stops)
+              stop.coordinate == point && stop.label == unnamed
+                  ? RouteStop(point, place.label)
+                  : stop,
+          ],
+        );
+      }
     } on AppException catch (error) {
       // The coordinates stay as the label: the address is only a convenience.
       debugPrint('Reverse geocoding unavailable: ${error.code}');

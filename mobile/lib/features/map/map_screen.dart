@@ -180,6 +180,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         routes: route == null ? const [] : [for (final option in route.routes) option.geometry],
         selectedRoute: state.selectedRoute,
         origin: state.origin,
+        stops: [for (final stop in state.stops) stop.coordinate],
         destination: state.destination,
       ),
     );
@@ -195,6 +196,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         onSave: _saveRoute,
         onStartTrip: _startTrip,
         onClose: _controller.clearRoute,
+        onAddStop: _addStopFromSearch,
+        onRemoveStop: _controller.removeStop,
       );
     }
     if (state.destination != null) {
@@ -203,6 +206,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         onRoute: _controller.calculateRoute,
         onClear: _controller.clearRoute,
         onResetOrigin: () => _controller.setOrigin(null),
+        onAddStop: _addStopFromSearch,
+        onRemoveStop: _controller.removeStop,
       );
     }
     final suggestion = ref.watch(regionSuggestionProvider).value;
@@ -226,6 +231,15 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         _camera.add(CenterOn(coordinate, zoom: 15));
       case SavedRouteSelection(:final route):
         _showSavedRoute(route);
+    }
+  }
+
+  /// Searches a place and adds it as the next stop of the route.
+  Future<void> _addStopFromSearch() async {
+    final selection = await Navigator.of(context)
+        .push<SearchSelection>(MaterialPageRoute(builder: (_) => const SearchScreen()));
+    if (selection is PlaceSelection && mounted) {
+      _controller.addStop(selection.coordinate, label: selection.label);
     }
   }
 
@@ -281,6 +295,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   }
 
   Future<void> _onLongPress(Coordinate point) async {
+    final canAddStop = ref.read(mapControllerProvider).destination != null;
     final choice = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -299,6 +314,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               title: const Text('Salir desde aquí'),
               onTap: () => Navigator.pop(context, 'origin'),
             ),
+            if (canAddStop)
+              ListTile(
+                leading: const Icon(Icons.add_location_alt_outlined),
+                title: const Text('Añadir parada'),
+                onTap: () => Navigator.pop(context, 'stop'),
+              ),
           ],
         ),
       ),
@@ -306,6 +327,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     if (!mounted) return;
     if (choice == 'destination') _controller.setDestination(point);
     if (choice == 'origin') _controller.setOrigin(point);
+    if (choice == 'stop') _controller.addStop(point);
   }
 
   Future<void> _centerOnUser() async {

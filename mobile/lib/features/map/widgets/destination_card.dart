@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../map_controller.dart';
+import 'stops_list.dart';
 
-/// Chosen destination (and origin, when it is not the current position)
-/// before the route is calculated.
+/// Chosen destination (and origin, when it is not the current position) and
+/// the stops before the route is calculated.
 class DestinationCard extends StatelessWidget {
   const DestinationCard({
     super.key,
@@ -11,12 +12,16 @@ class DestinationCard extends StatelessWidget {
     required this.onRoute,
     required this.onClear,
     required this.onResetOrigin,
+    required this.onAddStop,
+    required this.onRemoveStop,
   });
 
   final MapViewState state;
   final VoidCallback onRoute;
   final VoidCallback onClear;
   final VoidCallback onResetOrigin;
+  final VoidCallback onAddStop;
+  final ValueChanged<int> onRemoveStop;
 
   @override
   Widget build(BuildContext context) {
@@ -62,7 +67,12 @@ class DestinationCard extends StatelessWidget {
                   TextButton(onPressed: onResetOrigin, child: const Text('Usar mi ubicación')),
               ],
             ),
-            const SizedBox(height: 4),
+            StopsList(
+              stops: state.stops,
+              onAdd: onAddStop,
+              onRemove: onRemoveStop,
+              enabled: !state.isRouting,
+            ),
             Align(
               alignment: Alignment.centerRight,
               child: FilledButton.icon(

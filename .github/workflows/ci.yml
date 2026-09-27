@@ -116,7 +116,16 @@ jobs:
           git diff --exit-code -- lib
       - run: flutter test
       - name: APK de release (firmado con la clave de depuración si no hay key.properties)
-        run: flutter build apk --release
+        # Apunta al servidor de producción (variable del repositorio API_BASE_URL).
+        run: >-
+          flutter build apk --release
+          --dart-define=API_BASE_URL=${{ vars.API_BASE_URL || 'https://route-map.softwareeasydev.com' }}
+      - name: Publicar el APK como artefacto
+        uses: actions/upload-artifact@v7
+        with:
+          name: maps-platform-apk
+          path: mobile/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14
 
   ios:
     name: App iOS (compilación sin firma)

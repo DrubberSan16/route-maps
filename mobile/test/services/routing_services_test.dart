@@ -38,15 +38,18 @@ class _ScriptedRouting implements RoutingService {
 
   Future<RouteResult> Function() answer;
   int calls = 0;
+  List<Coordinate>? waypoints;
 
   @override
   Future<RouteResult> calculateRoute({
     required Coordinate origin,
     required Coordinate destination,
     required RoutingProfile profile,
+    List<Coordinate> waypoints = const [],
     bool alternatives = true,
   }) {
     calls++;
+    this.waypoints = waypoints;
     return answer();
   }
 }
@@ -73,6 +76,41 @@ void main() {
       });
       expect(result.routes, hasLength(2));
       expect(result.source, RouteSource.server);
+    });
+
+    test('sends the stops in order and asks for no alternatives', () async {
+      final stub = stubApi((_) => StubResponse.ok(fixtureData('route_calculate_monaco')));
+      await OnlineRoutingService(stub.api).calculateRoute(
+        origin: _origin,
+        destination: _destination,
+        profile: RoutingProfile.pedestrian,
+        waypoints: const [Coordinate(43.7350, 7.4210), Coordinate(43.7330, 7.4200)],
+      );
+      expect(stub.adapter.requests.single.data, {
+        'origin': {'latitude': 43.7383, 'longitude': 7.4245},
+        'destination': {'latitude': 43.7314, 'longitude': 7.4196},
+        'waypoints': [
+          {'latitude': 43.735, 'longitude': 7.421},
+          {'latitude': 43.733, 'longitude': 7.42},
+        ],
+        'profile': 'PEDESTRIAN',
+        'alternatives': false,
+        'language': 'es-ES',
+      });
+    });
+
+    test('rejects an invalid stop before calling the API', () async {
+      final stub = stubApi((_) => StubResponse.ok(null));
+      await expectLater(
+        OnlineRoutingService(stub.api).calculateRoute(
+          origin: _origin,
+          destination: _destination,
+          profile: RoutingProfile.car,
+          waypoints: const [Coordinate(0, 200)],
+        ),
+        throwsA(isA<AppException>().having((e) => e.code, 'code', ErrorCodes.invalidCoordinates)),
+      );
+      expect(stub.adapter.requests, isEmpty);
     });
 
     test('rejects invalid coordinates before calling the API', () async {
@@ -117,6 +155,25 @@ void main() {
       connectivity.status = ConnectivityStatus.offline;
       expect((await route()).source, RouteSource.savedRoute);
       expect(online.calls, 0);
+    });
+
+    test('stops reach the server and, without connection, the device', () async {
+      const stop = Coordinate(43.7350, 7.4210);
+      await hybrid.calculateRoute(
+        origin: _origin,
+        destination: _destination,
+        profile: RoutingProfile.car,
+        waypoints: const [stop],
+      );
+      expect(online.waypoints, [stop]);
+      connectivity.status = ConnectivityStatus.offline;
+      await hybrid.calculateRoute(
+        origin: _origin,
+        destination: _destination,
+        profile: RoutingProfile.car,
+        waypoints: const [stop],
+      );
+      expect(offline.waypoints, [stop]);
     });
 
     test('connection lost during the request: falls back to the device', () async {

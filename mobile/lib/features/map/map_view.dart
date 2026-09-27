@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' show Point;
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
@@ -42,6 +43,7 @@ class MapViewProps {
     this.routes = const [],
     this.selectedRoute = 0,
     this.origin,
+    this.stops = const [],
     this.destination,
   });
 
@@ -60,6 +62,9 @@ class MapViewProps {
   final List<List<Coordinate>> routes;
   final int selectedRoute;
   final Coordinate? origin;
+
+  /// Stops between the origin and the destination, drawn numbered in order.
+  final List<Coordinate> stops;
   final Coordinate? destination;
 }
 
@@ -90,6 +95,8 @@ class _MapLibreViewState extends State<MapLibreView> {
   static const _selectedLayer = 'app-route-selected';
   static const _originLayer = 'app-origin';
   static const _destinationLayer = 'app-destination';
+  static const _stopLayer = 'app-stop';
+  static const _stopLabelLayer = 'app-stop-label';
 
   MapLibreMapController? _controller;
   StreamSubscription<CameraCommand>? _commands;
@@ -118,7 +125,9 @@ class _MapLibreViewState extends State<MapLibreView> {
     if (!identical(old.routes, props.routes) || old.selectedRoute != props.selectedRoute) {
       unawaited(_controller?.setGeoJsonSource(_routesSource, _routesGeoJson()));
     }
-    if (old.origin != props.origin || old.destination != props.destination) {
+    if (old.origin != props.origin ||
+        old.destination != props.destination ||
+        !listEquals(old.stops, props.stops)) {
       unawaited(_controller?.setGeoJsonSource(_markersSource, _markersGeoJson()));
     }
     if (old.userPosition != props.userPosition) _pushLocation();
@@ -223,6 +232,32 @@ class _MapLibreViewState extends State<MapLibreView> {
       filter: ['==', 'kind', 'destination'],
       enableInteraction: false,
     );
+    await controller.addCircleLayer(
+      _markersSource,
+      _stopLayer,
+      const CircleLayerProperties(
+        circleRadius: 10,
+        circleColor: '#1A73E8',
+        circleStrokeColor: '#FFFFFF',
+        circleStrokeWidth: 2,
+      ),
+      filter: ['==', 'kind', 'stop'],
+      enableInteraction: false,
+    );
+    await controller.addSymbolLayer(
+      _markersSource,
+      _stopLabelLayer,
+      const SymbolLayerProperties(
+        textField: [Expressions.get, 'label'],
+        textFont: ['Noto Sans Medium'],
+        textSize: 12,
+        textColor: '#FFFFFF',
+        textAllowOverlap: true,
+        textIgnorePlacement: true,
+      ),
+      filter: ['==', 'kind', 'stop'],
+      enableInteraction: false,
+    );
     _styleReady = true;
     _pushLocation();
   }
@@ -310,16 +345,18 @@ class _MapLibreViewState extends State<MapLibreView> {
 
   Map<String, dynamic> _markersGeoJson() {
     final props = widget.props;
-    Map<String, dynamic> marker(String kind, Coordinate point) => {
+    Map<String, dynamic> marker(String kind, Coordinate point, {String id = '', String? label}) => {
       'type': 'Feature',
-      'id': kind,
-      'properties': {'kind': kind},
+      'id': id.isEmpty ? kind : id,
+      'properties': {'kind': kind, 'label': ?label},
       'geometry': {'type': 'Point', 'coordinates': point.toLngLat()},
     };
     return {
       'type': 'FeatureCollection',
       'features': [
         if (props.origin != null) marker('origin', props.origin!),
+        for (var i = 0; i < props.stops.length; i++)
+          marker('stop', props.stops[i], id: 'stop-${i + 1}', label: '${i + 1}'),
         if (props.destination != null) marker('destination', props.destination!),
       ],
     };

@@ -175,16 +175,30 @@ class ScriptedRoutingService implements RoutingService {
 
   RouteResult? result;
   AppException? error;
-  final requests = <({Coordinate origin, Coordinate destination, RoutingProfile profile})>[];
+  final requests =
+      <
+        ({
+          Coordinate origin,
+          Coordinate destination,
+          List<Coordinate> waypoints,
+          RoutingProfile profile,
+        })
+      >[];
 
   @override
   Future<RouteResult> calculateRoute({
     required Coordinate origin,
     required Coordinate destination,
     required RoutingProfile profile,
+    List<Coordinate> waypoints = const [],
     bool alternatives = true,
   }) async {
-    requests.add((origin: origin, destination: destination, profile: profile));
+    requests.add((
+      origin: origin,
+      destination: destination,
+      waypoints: waypoints,
+      profile: profile,
+    ));
     if (error case final error?) throw error;
     return result!;
   }

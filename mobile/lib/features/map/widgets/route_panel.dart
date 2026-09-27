@@ -4,9 +4,10 @@ import '../../../core/utils/formatters.dart';
 import '../../../domain/entities/route.dart';
 import '../../../domain/entities/routing_profile.dart';
 import '../map_controller.dart';
+import 'stops_list.dart';
 
-/// Route summary: time, distance, arrival, origin of the data, alternatives
-/// and the actions on the selected route.
+/// Route summary: time, distance, arrival, origin of the data, alternatives,
+/// stops and the actions on the selected route.
 class RoutePanel extends StatelessWidget {
   const RoutePanel({
     super.key,
@@ -17,6 +18,8 @@ class RoutePanel extends StatelessWidget {
     required this.onSave,
     required this.onStartTrip,
     required this.onClose,
+    required this.onAddStop,
+    required this.onRemoveStop,
     this.now,
   });
 
@@ -27,6 +30,8 @@ class RoutePanel extends StatelessWidget {
   final VoidCallback onSave;
   final VoidCallback onStartTrip;
   final VoidCallback onClose;
+  final VoidCallback onAddStop;
+  final ValueChanged<int> onRemoveStop;
 
   /// Clock used for the arrival time (tests pass a fixed one).
   final DateTime? now;
@@ -100,7 +105,12 @@ class RoutePanel extends StatelessWidget {
                 ),
               ),
             ],
-            const SizedBox(height: 4),
+            StopsList(
+              stops: state.stops,
+              onAdd: onAddStop,
+              onRemove: onRemoveStop,
+              enabled: !state.isRouting,
+            ),
             Wrap(
               spacing: 8,
               children: [
