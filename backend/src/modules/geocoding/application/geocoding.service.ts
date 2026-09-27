@@ -48,7 +48,10 @@ export class GeocodingService {
     if (hit !== undefined) return hit;
     try {
       const value = await load();
-      await this.cache.set(cacheKey, value, this.config.get('geocoding').cacheTtlSeconds);
+      // Partial answers (a source is down) would hide the complete ones for a day.
+      if (!this.provider.degraded) {
+        await this.cache.set(cacheKey, value, this.config.get('geocoding').cacheTtlSeconds);
+      }
       return value;
     } catch (error) {
       if (error instanceof GeocodingUnavailableError) {

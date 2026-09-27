@@ -42,9 +42,15 @@ export const mergeResults = (
  * a world index the detailed provider answers alone (503 while it is disabled).
  */
 export class CompositeGeocodingProvider implements GeocodingProvider {
+  /** After a failure of the detailed provider, answers are partial for this long. */
+  static readonly DEGRADED_MS = 60_000;
+
+  private degradedUntil = 0;
+
   constructor(
     private readonly detailed: GeocodingProvider,
     private readonly world: WorldPlaceIndex,
+    private readonly now: () => number = Date.now,
   ) {}
 
   get name(): string {
@@ -53,6 +59,11 @@ export class CompositeGeocodingProvider implements GeocodingProvider {
 
   get enabled(): boolean {
     return this.detailed.enabled;
+  }
+
+  /** True while the detailed provider failed recently: world-only answers must not be cached. */
+  get degraded(): boolean {
+    return this.now() < this.degradedUntil;
   }
 
   async search(query: GeocodingSearchQuery): Promise<GeocodingResult[]> {
@@ -66,6 +77,7 @@ export class CompositeGeocodingProvider implements GeocodingProvider {
       detailed = await this.detailed.search(query);
     } catch (error) {
       if (!(error instanceof GeocodingUnavailableError) || world.length === 0) throw error;
+      this.degradedUntil = this.now() + CompositeGeocodingProvider.DEGRADED_MS;
     }
     return mergeResults(world, detailed, query.limit);
   }

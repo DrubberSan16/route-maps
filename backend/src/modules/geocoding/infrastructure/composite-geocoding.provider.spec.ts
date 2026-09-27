@@ -95,6 +95,20 @@ describe('CompositeGeocodingProvider', () => {
     ).rejects.toBeInstanceOf(GeocodingUnavailableError);
   });
 
+  it('is degraded for a while after the detailed provider fails', async () => {
+    let now = 1_000;
+    const detailed = detailedProvider({
+      search: jest.fn().mockRejectedValue(new GeocodingUnavailableError('down')),
+    });
+    const provider = new CompositeGeocodingProvider(detailed, world([lima]), () => now);
+    expect(provider.degraded).toBe(false);
+
+    await provider.search(query);
+    expect(provider.degraded).toBe(true);
+    now += CompositeGeocodingProvider.DEGRADED_MS;
+    expect(provider.degraded).toBe(false);
+  });
+
   it('delegates reverse geocoding, name and health to the detailed provider', async () => {
     const detailed = detailedProvider({ reverse: jest.fn().mockResolvedValue(street()) });
     const provider = new CompositeGeocodingProvider(detailed, world([]));
