@@ -363,6 +363,16 @@ make prod-up    # docker compose -f docker-compose.yml -f docker-compose.prod.ym
 - TLS en Nginx: `NGINX_SERVER_CONF=./infrastructure/nginx/tls/https.conf` y
   certificados `fullchain.pem`/`privkey.pem` en `TLS_CERTS_PATH` (nunca en Git).
   Detrás de un balanceador que termina TLS, basta el puerto HTTP.
+- **Detrás del Nginx del servidor** (varios sitios en la misma máquina): publica
+  el contenedor solo en local, `NGINX_HTTP_PORT=127.0.0.1:8090` y
+  `NGINX_HTTPS_PORT=127.0.0.1:8453`, y en el sitio del host
+  `proxy_pass http://127.0.0.1:8090;` con `X-Forwarded-For` y
+  `X-Forwarded-Proto` (el Nginx del contenedor toma la IP real del cliente de
+  `X-Forwarded-For` cuando la conexión viene de la red de Docker).
+- **Base de datos en otro servidor**: añade `-f docker-compose.external-db.yml`
+  y define `DATABASE_HOST`, `DATABASE_NAME`, `DATABASE_USER`,
+  `DATABASE_PASSWORD` y `DATABASE_SSLMODE` (`require` por defecto). El
+  contenedor `postgres` no se levanta; la base necesita la extensión `postgis`.
 - `CORS_ORIGINS` es obligatorio; todos los servicios tienen reinicio automático
   y límites de memoria ajustables (`BACKEND_MEMORY_LIMIT`, `ROUTING_MEMORY_LIMIT`, …).
 - Respaldos: `docker compose exec -T postgres pg_dump -U maps maps > respaldo.sql`
