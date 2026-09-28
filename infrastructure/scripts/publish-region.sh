@@ -57,6 +57,7 @@ for item in catalog["regions"]:
     print(item["code"], directory, checksum)
 PY
 )"
+PLAN="$(tr -d '\r' <<<"$PLAN")"  # Python on Windows ends its lines with CRLF
 NATIVE="$(head -n 1 <<<"$PLAN")"
 NATIVE_DIR="$STORAGE/imports/native/$NATIVE"
 RUNTIME_FILES=(graph.bin graph.json search.ndjson build.json manifest.json climate-precipitation-regions.geojson)
