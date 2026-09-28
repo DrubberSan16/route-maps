@@ -57,8 +57,13 @@ if (( FREE_KB < REQUIRED_KB )); then
 fi
 
 BACKUP_DIR="$(mktemp -d "$BACKUP_ROOT/$REGION.XXXXXX")"
+NATIVE_DIR="$STORAGE_PATH/imports/native/$REGION"
 MANIFEST="$(find "$STORAGE_PATH/maps" -type f -name "$REGION.region.json" -print -quit)"
 MAP_REL=""
+if [[ -d "$NATIVE_DIR" ]]; then
+  mkdir -p "$BACKUP_DIR/native"
+  cp -a "$NATIVE_DIR" "$BACKUP_DIR/native/$REGION"
+fi
 if [[ -n "$MANIFEST" ]]; then
   MAP_REL="$(jq -r '.mapFile // empty' "$MANIFEST")"
   [[ "$MAP_REL" != /* && "$MAP_REL" != *".."* ]] || {
@@ -77,6 +82,11 @@ restore() {
     rm -f -- "$STORAGE_PATH/maps/$MAP_REL"
     cp -a "$BACKUP_DIR/maps/$MAP_REL" "$STORAGE_PATH/maps/$MAP_REL"
     cp -a "$BACKUP_DIR/maps/$(dirname "$MAP_REL")/$REGION.region.json" "$MANIFEST"
+  fi
+  if [[ -d "$BACKUP_DIR/native/$REGION" ]]; then
+    rm -rf -- "$NATIVE_DIR"
+    mkdir -p "$(dirname "$NATIVE_DIR")"
+    cp -a "$BACKUP_DIR/native/$REGION" "$NATIVE_DIR"
   fi
   docker compose exec -T backend node dist/src/cli/sync-regions.js >/dev/null 2>&1 || true
   rm -rf -- "$BACKUP_DIR"
