@@ -38,6 +38,22 @@
   --color-route-casing: #ffffff;
   --color-notice: #0f172a;
   --color-on-notice: #ffffff;
+  /* Map layers: same values as the overlays of maps/style/style.json (build-style.py). */
+  --color-traffic-free: #1e8e3e;
+  --color-traffic-moderate: #f9ab00;
+  --color-traffic-slow: #e8710a;
+  --color-traffic-jammed: #b31412;
+  --color-rain-1: #fff4d6;
+  --color-rain-3: #c2e3c4;
+  --color-rain-5: #5aaed8;
+  --color-rain-6: #2c4f9e;
+  --color-temp-1: #dcd6f7;
+  --color-temp-3: #cdeee0;
+  --color-temp-4: #f6f2c2;
+  --color-temp-6: #f7a88c;
+  --color-heat-low: #67a9cf;
+  --color-heat-mid: #fddbc7;
+  --color-heat-high: #b2182b;
 
   --space-xs: 4px;
   --space-sm: 8px;
@@ -370,6 +386,7 @@ body { display: flex; }
 .route-option__time { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .route-option__distance { align-self: center; font-variant-numeric: tabular-nums; color: var(--color-muted-foreground); }
 .route-option__label { grid-column: 1 / -1; font-size: 13px; color: var(--color-muted-foreground); }
+.route-option__condition { grid-column: 1 / -1; font-size: 12px; color: var(--color-muted-foreground); }
 
 .steps summary { cursor: pointer; font-weight: 600; font-size: 14px; padding: var(--space-xs) 0; }
 .steps__list { margin: var(--space-sm) 0 0; padding-left: 20px; font-size: 13px; color: var(--color-muted-foreground); }
@@ -435,6 +452,60 @@ body { display: flex; }
 .marker--destination { background: var(--color-marker-destination); }
 .marker--place { background: var(--color-marker-place); cursor: default; }
 
+/* ---------------------------------------------------------------- map layers control */
+
+.layers-control { position: relative; }
+.layers-control__button {
+  display: grid;
+  place-items: center;
+  width: 29px;
+  height: 29px;
+  padding: 0;
+  color: var(--color-foreground);
+  background: var(--color-card);
+  border: 0;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+.layers-control__button:hover { background: var(--color-muted); }
+.layers-control__button[aria-expanded="true"] { color: var(--color-primary); }
+.layers-control__button .icon { width: 18px; height: 18px; }
+.layers-panel {
+  position: absolute;
+  top: 0;
+  right: calc(100% + var(--space-sm));
+  width: 280px;
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+  padding: var(--space-sm) var(--space-md) var(--space-md);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+.layers-panel__title { margin: var(--space-xs) 0 var(--space-sm); font-weight: 700; }
+.layers-panel__status { margin: var(--space-sm) 0 0; font-size: 12px; color: var(--color-muted-foreground); }
+.layers-panel__status:empty { display: none; }
+.layers-option {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: start;
+  gap: var(--space-sm);
+  padding: var(--space-sm) 0;
+  border-top: 1px solid var(--color-border);
+  cursor: pointer;
+}
+.layers-option input { margin-top: 3px; width: 16px; height: 16px; accent-color: var(--color-primary); cursor: pointer; }
+.layers-option .icon { width: 18px; height: 18px; color: var(--color-muted-foreground); }
+.layers-option__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.layers-option__name { font-weight: 600; }
+.layers-option__note { font-size: 12px; color: var(--color-muted-foreground); }
+.layers-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 2px; font-size: 11px; color: var(--color-muted-foreground); }
+.layers-legend__item { display: inline-flex; align-items: center; gap: 4px; }
+.layers-legend__swatch { width: 12px; height: 8px; border-radius: 2px; border: 1px solid var(--color-border); }
+
 /* ---------------------------------------------------------------- small screens */
 
 @media (max-width: 767px) {
@@ -449,5 +520,6 @@ body { display: flex; }
   }
   .map { height: 50%; flex: none; }
   .map-notice { left: 50%; top: var(--space-md); bottom: auto; }
+  .layers-panel { width: min(280px, calc(100vw - 80px)); max-height: 45vh; }
   .profile { font-size: 11px; }
 }

@@ -121,7 +121,7 @@ export class CalculateRouteUseCase {
   }
 
   private async calculateWithCache(input: CalculateRouteInput): Promise<RouteCalculation> {
-    const key = this.cacheKey(input);
+    const key = this.cacheKey(input, (await this.provider.dataVersion?.()) ?? '');
     const cached = await this.cache.get<RouteCalculation>(key);
     if (cached) return cached;
 
@@ -169,13 +169,14 @@ export class CalculateRouteUseCase {
     }
   }
 
-  private cacheKey(input: CalculateRouteInput): string {
+  private cacheKey(input: CalculateRouteInput, dataVersion: string): string {
     const round = (c: { latitude: number; longitude: number }) => [
       Number(c.latitude.toFixed(5)),
       Number(c.longitude.toFixed(5)),
     ];
     const normalized = JSON.stringify({
       p: this.provider.name,
+      v: dataVersion,
       f: input.profile,
       o: round(input.origin),
       d: round(input.destination),

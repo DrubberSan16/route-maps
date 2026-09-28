@@ -24,7 +24,15 @@ rutas todavía no se distribuye para ejecutarse dentro del teléfono.
 ## Actualización segura
 
 `infrastructure/scripts/refresh-region.sh` bloquea ejecuciones paralelas,
-comprueba espacio, conserva los artefactos anteriores y valida salud, cabeceras
-Range, magic bytes y checksum antes de aceptar una publicación. Las unidades
+exige 6 GiB de RAM y 10 GiB libres para el pico de conversión nacional, compara la
+huella de las fuentes, conserva los artefactos de ejecución anteriores y valida salud,
+cabeceras Range, magic bytes y checksum antes de aceptar una publicación. Las unidades
 `infrastructure/systemd/maps-platform-refresh@.*` permiten programar la revisión
-mensual de una región.
+mensual de una región en un equipo con esos recursos.
+
+Un servidor más pequeño (como el de producción, 4 GB compartidos) no regenera
+datos: la región se genera en una estación de trabajo y se publica con
+`infrastructure/scripts/publish-region.sh <región> <host-ssh>`, que copia mapas,
+manifiestos, grafo, índice de búsqueda y capa de clima, verifica cada SHA-256 en el
+servidor, los sustituye (datos primero, manifiestos al final), reinicia el backend y
+registra las regiones. Los archivos reemplazados quedan en `storage/.publish-backup`.

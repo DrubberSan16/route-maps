@@ -1,156 +1,214 @@
-import { readFile, stat } from 'node:fs/promises';
-import { join } from 'node:path';
-import { Coordinate, haversineMeters } from '../../../common/geo/geojson';
+import { NativeGraph, CLASS } from '../../../infrastructure/native/native-graph';
+import { NativeGraphStore } from '../../../infrastructure/native/native-graph.store';
+import { NativeSearchStore } from '../../../infrastructure/native/native-search.store';
+import {
+  NativeSearchIndex,
+  SearchHit,
+  fold,
+  intersections,
+} from '../../../infrastructure/native/native-search';
 import {
   GeocodingProvider,
   GeocodingResult,
   GeocodingSearchQuery,
+  GeocodingUnavailableError,
 } from '../domain/geocoding-provider';
-import { normalizeText } from './world-place-index';
 
-interface NativePlace {
-  result: GeocodingResult;
-  searchable: string;
-}
+/** "Av. 9 de Octubre y Boyacá", "Amazonas & Naciones Unidas", "10 de Agosto esquina Colón". */
+const INTERSECTION = /^(.+?)\s+(?:y|e|&|esq\.?|esquina|con|interseccion|intersección)\s+(.+)$/i;
+/** A tap farther than this from any street keeps its coordinates as the name. */
+const REVERSE_STREET_METERS = 60;
+const REVERSE_POI_METERS = 25;
 
-interface PointFeature {
-  properties?: Record<string, unknown>;
-  geometry?: { type?: string; coordinates?: unknown };
-}
-
-const LAYERS = [
-  { file: 'places.geojson', category: 'place', type: 'locality', names: ['n_loc'] },
-  { file: 'poi-health.geojson', category: 'health', type: 'hospital', names: ['uni_nombre'] },
-  { file: 'poi-education.geojson', category: 'education', type: 'school', names: ['nom_instit'] },
-  {
-    file: 'poi-tourism.geojson',
-    category: 'tourism',
-    type: 'attraction',
-    names: ['nombre', 'na2'],
-  },
-] as const;
-
-/** In-memory geocoder built only from locally cached official point datasets. */
+/**
+ * Geocoding built only from the platform's own data: the national search index (places, streets,
+ * points of interest) and the road graph (street intersections and reverse geocoding).
+ */
 export class NativeGeocodingProvider implements GeocodingProvider {
   readonly name = 'native';
   readonly enabled = true;
-  private places: NativePlace[] | null = null;
-  private loading: Promise<NativePlace[]> | null = null;
 
-  constructor(private readonly dataPath: string) {}
+  constructor(
+    private readonly index: NativeSearchStore,
+    private readonly graph: NativeGraphStore,
+  ) {}
 
   async health(): Promise<'up' | 'down'> {
-    try {
-      return (await stat(join(this.dataPath, 'places.geojson'))).isFile() ? 'up' : 'down';
-    } catch {
-      return 'down';
-    }
+    return (await this.index.available()) ? 'up' : 'down';
+  }
+
+  async dataVersion(): Promise<string> {
+    return `${await this.index.fingerprint()}|${await this.graph.fingerprint()}`;
   }
 
   async search(query: GeocodingSearchQuery): Promise<GeocodingResult[]> {
-    const text = normalizeText(query.text);
-    if (text.length < 2) return [];
-    const near = query.near;
-    return (await this.load())
-      .map((place) => {
-        const at = place.searchable.indexOf(text);
-        const tier = at === 0 ? 0 : at > 0 ? 1 : 2;
-        const matches = at >= 0 || text.split(' ').every((word) => place.searchable.includes(word));
-        const distance = near
-          ? haversineMeters(near, {
-              latitude: place.result.latitude,
-              longitude: place.result.longitude,
-            })
-          : 0;
-        return { place, matches, tier, distance };
-      })
-      .filter((item) => item.matches)
-      .sort(
-        (a, b) =>
-          a.tier - b.tier ||
-          a.distance - b.distance ||
-          a.place.result.name!.localeCompare(b.place.result.name!),
-      )
-      .slice(0, query.limit)
-      .map((item) => item.place.result);
+    const index = await this.load();
+    const text = query.text.trim();
+    const results: GeocodingResult[] = [];
+    const crossing = INTERSECTION.exec(text);
+    if (crossing && (await this.graph.available())) {
+      results.push(...(await this.intersections(index, crossing[1], crossing[2], query)));
+    }
+    for (const hit of index.search(text, { limit: query.limit, near: query.near })) {
+      if (results.length >= query.limit) break;
+      results.push(toResult(hit));
+    }
+    return results.slice(0, query.limit);
   }
 
   async reverse(latitude: number, longitude: number): Promise<GeocodingResult | null> {
-    const target: Coordinate = { latitude, longitude };
-    let nearest: { place: NativePlace; meters: number } | null = null;
-    for (const place of await this.load()) {
-      const meters = haversineMeters(target, {
-        latitude: place.result.latitude,
-        longitude: place.result.longitude,
-      });
-      if (!nearest || meters < nearest.meters) nearest = { place, meters };
+    const index = await this.load();
+    let graph: NativeGraph | null = null;
+    try {
+      graph = await this.graph.get();
+    } catch {
+      graph = null;
     }
-    // A distant point should keep its coordinates instead of receiving an unrelated POI name.
-    return nearest && nearest.meters <= 25_000 ? nearest.place.result : null;
+    const poi = index.nearest(longitude, latitude, REVERSE_POI_METERS, (hit) => hit.kind === 'poi');
+    const street = graph
+      ?.nearestEdges(
+        longitude,
+        latitude,
+        REVERSE_STREET_METERS,
+        (edge) => graph.edgeName[edge] >= 0 && graph.edgeClass[edge] !== CLASS.connector,
+        1,
+      )
+      .at(0);
+    if (!poi && !street) {
+      const place = index.nearest(longitude, latitude, 3000, (hit) => hit.kind === 'place');
+      if (!place) return null;
+      const result = toResult(place);
+      return { ...result, latitude, longitude, bbox: null };
+    }
+    const road = street && graph ? graph.nameOf(street.edge) : null;
+    const parish = street && graph ? graph.parishOf(street.edge) : null;
+    const city = parish?.canton ?? undefined;
+    const context = [
+      parish?.parish !== parish?.canton ? parish?.parish : null,
+      city,
+      parish?.province,
+    ].filter((value): value is string => Boolean(value));
+    const name = poi?.name ?? road ?? null;
+    const displayName = [name, poi && road ? road : null, ...context, 'Ecuador']
+      .filter((value): value is string => Boolean(value))
+      .filter(
+        (value, position, all) =>
+          all.findIndex((other) => fold(other) === fold(value)) === position,
+      )
+      .join(', ');
+    return {
+      displayName,
+      name,
+      latitude,
+      longitude,
+      category: poi ? (poi.category ?? 'poi') : 'highway',
+      type: poi ? poi.type : 'street',
+      address: {
+        road: road ?? undefined,
+        suburb: parish?.parish && parish.parish !== parish.canton ? parish.parish : undefined,
+        city,
+        state: parish?.province,
+        country: 'Ecuador',
+        countryCode: 'EC',
+      },
+      bbox: null,
+      sourceId: poi ? `native:poi:${poi.index}` : street ? `native:edge:${street.edge}` : null,
+    };
   }
 
-  private load(): Promise<NativePlace[]> {
-    if (this.places) return Promise.resolve(this.places);
-    this.loading ??= this.readAll().finally(() => {
-      this.loading = null;
-    });
-    return this.loading;
+  private async load(): Promise<NativeSearchIndex> {
+    try {
+      return await this.index.get();
+    } catch (error) {
+      throw new GeocodingUnavailableError('The native search index is not available', {
+        cause: error,
+      });
+    }
   }
 
-  private async readAll(): Promise<NativePlace[]> {
-    const places: NativePlace[] = [];
-    for (const layer of LAYERS) {
-      try {
-        const collection = JSON.parse(await readFile(join(this.dataPath, layer.file), 'utf8')) as {
-          features?: PointFeature[];
-        };
-        for (const feature of collection.features ?? []) {
-          const coordinates = feature.geometry?.coordinates;
-          if (
-            feature.geometry?.type !== 'Point' ||
-            !Array.isArray(coordinates) ||
-            !Number.isFinite(coordinates[0]) ||
-            !Number.isFinite(coordinates[1])
-          )
-            continue;
-          const properties = feature.properties ?? {};
-          const name = layer.names
-            .map((key) => properties[key])
-            .find((value) => typeof value === 'string' && value.trim());
-          if (typeof name !== 'string') continue;
-          const state = string(
-            properties.dpa_despro ?? properties.provincia ?? properties.nom_provin,
-          );
-          const city = string(properties.dpa_descan ?? properties.canton ?? properties.nom_canton);
-          const context = [city, state, 'Ecuador'].filter(Boolean);
-          const rawId = properties.objectid ?? properties.objectid_1 ?? properties.fid;
-          const id = scalarString(rawId) ?? `${coordinates[0]},${coordinates[1]}`;
-          const result: GeocodingResult = {
-            displayName: [name, ...context].join(', '),
-            name,
-            latitude: Number(coordinates[1]),
-            longitude: Number(coordinates[0]),
-            category: layer.category,
-            type: layer.type,
-            address: { city, state, country: 'Ecuador', countryCode: 'EC' },
-            bbox: null,
-            sourceId: `native:${layer.file.replace('.geojson', '')}:${id}`,
-          };
-          places.push({ result, searchable: normalizeText([name, ...context].join(' ')) });
+  private async intersections(
+    index: NativeSearchIndex,
+    first: string,
+    second: string,
+    query: GeocodingSearchQuery,
+  ): Promise<GeocodingResult[]> {
+    const graph = await this.graph.get();
+    const a = index.streets(first, { limit: 25, near: query.near });
+    const b = index.streets(second, { limit: 25, near: query.near });
+    const found: { score: number; result: GeocodingResult }[] = [];
+    const seen = new Set<string>();
+    for (const left of a) {
+      for (const right of b) {
+        if (left.name === right.name) continue;
+        for (const point of intersections(graph, left.name, right.name)) {
+          const key = `${point.lon.toFixed(4)},${point.lat.toFixed(4)}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const parish = graph.parishOf(point.edge);
+          const context = [parish?.canton, parish?.province].filter(Boolean).join(', ');
+          const name = `${left.name} y ${right.name}`;
+          let score = left.score + right.score;
+          if (query.near) {
+            const km =
+              Math.hypot(
+                (point.lon - query.near.longitude) * Math.cos((point.lat * Math.PI) / 180),
+                point.lat - query.near.latitude,
+              ) * 111.2;
+            score += 60 * Math.exp(-km / 10);
+          }
+          found.push({
+            score,
+            result: {
+              displayName: context ? `${name}, ${context}` : name,
+              name,
+              latitude: point.lat,
+              longitude: point.lon,
+              category: 'highway',
+              type: 'intersection',
+              address: {
+                road: left.name,
+                city: parish?.canton,
+                state: parish?.province,
+                country: 'Ecuador',
+                countryCode: 'EC',
+              },
+              bbox: null,
+              sourceId: `native:intersection:${key}`,
+            },
+          });
         }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
     }
-    this.places = places;
-    return places;
+    return found
+      .sort((x, y) => y.score - x.score)
+      .slice(0, 3)
+      .map((item) => item.result);
   }
 }
 
-const string = (value: unknown): string | undefined =>
-  typeof value === 'string' && value.trim() ? value.trim() : undefined;
-
-const scalarString = (value: unknown): string | undefined =>
-  typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
-    ? String(value)
-    : undefined;
+function toResult(hit: SearchHit): GeocodingResult {
+  const context = hit.detail;
+  const parts = context.split(' · ');
+  const place = parts[parts.length - 1] ?? '';
+  const [first, second, third] = place.split(', ');
+  const city = third ? second : first;
+  const state = third ?? second;
+  return {
+    displayName: context ? `${hit.name}, ${context}` : hit.name,
+    name: hit.name,
+    latitude: hit.lat,
+    longitude: hit.lon,
+    category:
+      hit.kind === 'street' ? 'highway' : hit.kind === 'poi' ? (hit.category ?? 'poi') : 'place',
+    type: hit.kind === 'street' ? 'street' : hit.type,
+    address: {
+      road: hit.kind === 'street' ? hit.name : undefined,
+      city: hit.kind === 'place' ? undefined : city,
+      state: state || undefined,
+      country: 'Ecuador',
+      countryCode: 'EC',
+    },
+    bbox: hit.bbox,
+    sourceId: `native:${hit.kind}:${hit.index}`,
+  };
+}

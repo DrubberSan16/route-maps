@@ -2,6 +2,7 @@
 // (PMTiles, own style), place search (GET /geocoding/search) and routes with stops
 // (POST /routes/calculate). No build step: MapLibre GL JS and PMTiles are vendored by the image.
 import * as maplibregl from './vendor/maplibre-gl.mjs';
+import { registerPoiIcons } from './sdk/map-icons.js';
 
 const API = '/api/v1';
 const ORIGIN = window.location.origin;
@@ -15,9 +16,10 @@ const SEARCH_DEBOUNCE_MS = 300;
 const SEARCH_LIMIT = 7;
 const MAP_POINT_LABEL = 'Punto en el mapa';
 const SVG_NS = 'http://www.w3.org/2000/svg';
-// Natural Earth is public-domain data and does not require visible credit. The
-// detailed regional data keeps its legally required ODbL attribution.
 const WORLD_ATTRIBUTION = '';
+/** Mainland Ecuador: the first view when the address bar has no position. */
+const HOME_BOUNDS = [-81.1, -5.05, -75.2, 1.5];
+const LAYERS_KEY = 'route-maps:layers';
 
 const PROFILES = [
   { id: 'CAR', label: 'Auto', icon: 'i-car' },
@@ -29,7 +31,7 @@ const PROFILES = [
 
 const ERROR_MESSAGES = {
   ROUTE_NOT_FOUND:
-    'No hay una ruta entre esos puntos. Deben estar en una zona con mapa detallado y cerca de una calle.',
+    'No hay una ruta por vías registradas entre esos puntos. Prueba con otro medio de transporte o acerca los puntos a una calle.',
   INVALID_COORDINATES: 'Revisa los puntos: no pueden coincidir ni estar a más de 2.000 km entre sí.',
   ROUTING_PROVIDER_UNAVAILABLE: 'El cálculo de rutas no está disponible ahora. Inténtalo en unos minutos.',
   ROUTING_PROFILE_NOT_SUPPORTED: 'Ese medio de transporte no está disponible.',
@@ -51,6 +53,7 @@ const canLocate = window.isSecureContext && 'geolocation' in navigator;
 // ---------------------------------------------------------------- state
 
 let map;
+let mapReady = false;
 let regions = [];
 let styleTemplate = '';
 let profile = 'CAR';
@@ -196,7 +199,8 @@ function buildStyle() {
 
 function initMap() {
   const { world, drawn } = tilesets();
-  const home = drawn[0]?.bbox ?? world?.bbox;
+  const ecuador = drawn.find((region) => containsBox(region.bbox, HOME_BOUNDS));
+  const home = ecuador ? HOME_BOUNDS : drawn[0]?.bbox ?? world?.bbox;
   map = new maplibregl.Map({
     container: 'map',
     style: buildStyle(),
@@ -208,14 +212,22 @@ function initMap() {
     pitchWithRotate: false,
   });
   map.touchZoomRotate.disableRotation();
+  registerPoiIcons(map, JSON.parse(styleTemplate).metadata?.['maps-platform:poi-colors'] ?? {});
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+  map.addControl(new LayersControl(), 'top-right');
   map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
   map.on('load', () => {
+    mapReady = true;
+    addOverlaySources();
     addRouteLayers();
     drawRoutes();
     updateNotice();
+    applyLayers();
   });
-  map.on('moveend', updateNotice);
+  map.on('moveend', () => {
+    updateNotice();
+    refreshLiveLayers();
+  });
   map.on('click', onMapClick);
   window.__viewer = { map };
 }
@@ -227,10 +239,186 @@ function updateNotice() {
   const show = map.getZoom() >= WORLD_MAX_VISIBLE_ZOOM - 0.5 && !detailed;
   notice.hidden = !show;
   if (show) {
-    notice.textContent = 'Esta zona no tiene mapa detallado. Aleja el mapa o prepara el país con ' +
-      'make prepare-region REGION=<país>.';
+    notice.textContent = 'Aquí solo está el mapa base mundial. Las calles, búsquedas y rutas detalladas ' +
+      'están disponibles en Ecuador.';
   }
 }
+
+// ---------------------------------------------------------------- layers (traffic, climate, heat maps)
+
+const LAYER_OPTIONS = [
+  {
+    id: 'traffic', label: 'Tráfico en vivo', icon: 'i-traffic',
+    legend: [['--color-traffic-free', 'Fluido'], ['--color-traffic-moderate', 'Moderado'],
+      ['--color-traffic-slow', 'Lento'], ['--color-traffic-jammed', 'Detenido']],
+    note: 'Velocidades de los últimos 15 minutos medidas por los recorridos de la app.',
+  },
+  {
+    id: 'precipitation', label: 'Lluvia anual', icon: 'i-rain',
+    legend: [['--color-rain-1', '< 500 mm'], ['--color-rain-3', '1000–2000 mm'], ['--color-rain-5', '3000–4000 mm'],
+      ['--color-rain-6', '> 4000 mm']],
+    note: 'Regiones de precipitación anual (climatología oficial).',
+  },
+  {
+    id: 'temperature', label: 'Pisos climáticos', icon: 'i-thermometer',
+    legend: [['--color-temp-1', 'Muy frío'], ['--color-temp-3', 'Templado frío'], ['--color-temp-4', 'Templado'],
+      ['--color-temp-6', 'Cálido']],
+    note: 'Termotipos por altitud (climatología oficial).',
+  },
+  {
+    id: 'population', label: 'Densidad de población', icon: 'i-flame',
+    legend: [['--color-heat-low', 'Baja'], ['--color-heat-mid', 'Media'], ['--color-heat-high', 'Alta']],
+    note: 'Mapa de calor de la malla censal de 1 km².',
+  },
+  {
+    id: 'activity', label: 'Actividad de la app (24 h)', icon: 'i-activity',
+    legend: [['--color-heat-low', 'Poca'], ['--color-heat-high', 'Mucha']],
+    note: 'Zonas por donde pasaron al menos 3 recorridos distintos en las últimas 24 horas.',
+  },
+];
+
+function readLayers() {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(LAYERS_KEY) ?? '[]');
+    return new Set(Array.isArray(saved) ? saved.filter((id) => LAYER_OPTIONS.some((o) => o.id === id)) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+const activeLayers = readLayers();
+
+function saveLayers() {
+  try {
+    window.localStorage.setItem(LAYERS_KEY, JSON.stringify([...activeLayers]));
+  } catch {
+    // Private mode: the choice lasts for this visit only.
+  }
+}
+
+class LayersControl {
+  onAdd() {
+    this.container = el('div', { class: 'maplibregl-ctrl maplibregl-ctrl-group layers-control' });
+    const button = el('button', {
+      type: 'button', class: 'layers-control__button', 'aria-label': 'Capas del mapa', title: 'Capas del mapa',
+      'aria-expanded': 'false', 'aria-controls': 'layers-panel',
+    }, icon('i-layers'));
+    const panel = el('div', { class: 'layers-panel', id: 'layers-panel', role: 'group', 'aria-label': 'Capas', hidden: true });
+    panel.append(el('p', { class: 'layers-panel__title' }, 'Capas'));
+    for (const option of LAYER_OPTIONS) {
+      const input = el('input', { type: 'checkbox', value: option.id, checked: activeLayers.has(option.id) });
+      input.addEventListener('change', () => {
+        if (input.checked) activeLayers.add(option.id);
+        else activeLayers.delete(option.id);
+        saveLayers();
+        applyLayers();
+      });
+      const legend = el('span', { class: 'layers-legend', 'aria-hidden': 'true' },
+        ...option.legend.map(([color, text]) =>
+          el('span', { class: 'layers-legend__item' },
+            el('span', { class: 'layers-legend__swatch', style: `background: var(${color})` }), text)));
+      panel.append(el('label', { class: 'layers-option' }, input, icon(option.icon),
+        el('span', { class: 'layers-option__text' }, el('span', { class: 'layers-option__name' }, option.label),
+          el('span', { class: 'layers-option__note' }, option.note), legend)));
+    }
+    panel.append(el('p', { class: 'layers-panel__status', id: 'layers-status', role: 'status' }));
+    button.addEventListener('click', () => {
+      const open = panel.hidden;
+      panel.hidden = !open;
+      button.setAttribute('aria-expanded', String(open));
+    });
+    this.container.append(button, panel);
+    return this.container;
+  }
+
+  onRemove() {
+    this.container.remove();
+  }
+}
+
+function overlayLayerIds(kind) {
+  return map.getStyle().layers.map((layer) => layer.id).filter((id) => id.endsWith(`/overlay-${kind}`));
+}
+
+function applyLayers() {
+  if (!mapReady) return;
+  for (const kind of ['precipitation', 'temperature', 'population']) {
+    for (const id of overlayLayerIds(kind)) {
+      map.setLayoutProperty(id, 'visibility', activeLayers.has(kind) ? 'visible' : 'none');
+    }
+  }
+  for (const [kind, layers] of [['traffic', ['traffic-casing', 'traffic-line']], ['activity', ['activity-heat']]]) {
+    for (const id of layers) {
+      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', activeLayers.has(kind) ? 'visible' : 'none');
+    }
+  }
+  refreshLiveLayers();
+}
+
+function addOverlaySources() {
+  const empty = { type: 'FeatureCollection', features: [] };
+  map.addSource('traffic', { type: 'geojson', data: empty });
+  map.addSource('activity', { type: 'geojson', data: empty });
+  const firstLabel = map.getStyle().layers.find((layer) => layer.type === 'symbol')?.id;
+  const status = ['match', ['get', 'status'], 'free', token('--color-traffic-free'),
+    'moderate', token('--color-traffic-moderate'), 'slow', token('--color-traffic-slow'),
+    token('--color-traffic-jammed')];
+  // ["zoom"] may only feed a top-level interpolate: the casing gets its own, 2 px wider.
+  const widths = (extra) => ['interpolate', ['linear'], ['zoom'], 11, 2 + extra, 14, 4 + extra, 17, 8 + extra];
+  const width = widths(0);
+  map.addLayer({ id: 'traffic-casing', type: 'line', source: 'traffic', layout: { visibility: 'none',
+    'line-cap': 'round', 'line-join': 'round' },
+  paint: { 'line-color': token('--color-card'), 'line-width': widths(2) } }, firstLabel);
+  map.addLayer({ id: 'traffic-line', type: 'line', source: 'traffic', layout: { visibility: 'none',
+    'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': status, 'line-width': width } }, firstLabel);
+  map.addLayer({ id: 'activity-heat', type: 'heatmap', source: 'activity', layout: { visibility: 'none' },
+    paint: {
+      'heatmap-weight': ['interpolate', ['linear'], ['get', 'trips'], 3, 0.3, 30, 1],
+      'heatmap-radius': ['interpolate', ['exponential', 2], ['zoom'], 10, 8, 14, 30, 17, 80],
+      'heatmap-opacity': 0.8,
+    } }, firstLabel);
+}
+
+let liveRequest = 0;
+async function refreshLiveLayers() {
+  const status = $('layers-status');
+  const wanted = ['traffic', 'activity'].filter((kind) => activeLayers.has(kind));
+  if (!map || wanted.length === 0) {
+    if (status) status.textContent = '';
+    return;
+  }
+  const bounds = map.getBounds();
+  const span = Math.max(bounds.getEast() - bounds.getWest(), bounds.getNorth() - bounds.getSouth());
+  if (map.getZoom() < 10 || span > 2.5) {
+    if (status) status.textContent = 'Acércate a una ciudad para ver el tráfico y la actividad.';
+    return;
+  }
+  const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()]
+    .map((value) => value.toFixed(4)).join(',');
+  const request = ++liveRequest;
+  const messages = [];
+  await Promise.all(wanted.map(async (kind) => {
+    try {
+      const data = await api(`/traffic/${kind === 'traffic' ? 'flow' : 'activity'}?bbox=${bbox}`);
+      if (request !== liveRequest) return;
+      map.getSource(kind)?.setData(data);
+      if (kind === 'traffic') {
+        messages.push(data.features.length > 0
+          ? `Tráfico: ${data.features.length} tramos con datos de los últimos ${data.windowMinutes} minutos.`
+          : 'Tráfico: aún no hay recorridos recientes en esta zona.');
+      } else if (data.features.length === 0) {
+        messages.push('Actividad: sin recorridos suficientes en las últimas 24 horas.');
+      }
+    } catch (error) {
+      messages.push(error.message);
+    }
+  }));
+  if (request === liveRequest && status) status.textContent = messages.join(' ');
+}
+
+setInterval(() => {
+  if (!document.hidden && activeLayers.has('traffic')) refreshLiveLayers();
+}, 60_000);
 
 function renderCoverage() {
   const { world, detailed } = tilesets();
@@ -363,13 +551,17 @@ function createCombobox(input, listbox, { onSelect }) {
     active = -1;
     setOpen(true);
   };
-  const run = async (text) => {
+  const run = async (text, chooseFirst = false) => {
     const id = ++request;
     if (listbox.hidden) info('Buscando…');
     try {
       const found = await searchPlaces(text);
       if (id !== request) return;
       results = found;
+      if (chooseFirst && results.length > 0) {
+        choose(0);
+        return;
+      }
       render();
     } catch (error) {
       if (id === request) info(error.message);
@@ -399,7 +591,7 @@ function createCombobox(input, listbox, { onSelect }) {
         choose(Math.max(active, 0));
       } else if (input.value.trim().length >= 2) {
         clearTimeout(timer);
-        run(input.value.trim());
+        run(input.value.trim(), true);
       }
     } else if (event.key === 'Escape' && !listbox.hidden) {
       event.preventDefault();
@@ -717,10 +909,34 @@ function renderRoutes() {
     return el('label', { class: 'route-option' }, input,
       el('span', { class: 'route-option__time' }, formatDuration(route.durationSeconds)),
       el('span', { class: 'route-option__distance' }, formatDistance(route.distanceMeters)),
-      el('span', { class: 'route-option__label' }, routeLabel(index)));
+      el('span', { class: 'route-option__label' }, routeLabel(index)),
+      ...conditionLines(route).map((line) => el('span', { class: 'route-option__condition' }, line)));
   }));
   $('routes').hidden = routes.length === 0;
   renderSteps();
+}
+
+/** Traffic and climate of a route in one or two short lines (never invented: see the API). */
+function conditionLines(route) {
+  const lines = [];
+  const approximate = (route.approximateSections ?? []).reduce((sum, section) => sum + section.distanceMeters, 0);
+  if (approximate > 0) {
+    lines.push(`Incluye ${formatDistance(approximate)} de acceso sin vía registrada (trazo aproximado)`);
+  }
+  const conditions = route.conditions;
+  if (!conditions) return lines;
+  const traffic = conditions.traffic;
+  if (traffic?.status === 'observed') {
+    const delay = Math.round((traffic.delaySeconds ?? 0) / 60);
+    lines.push(delay > 0
+      ? `Tráfico actual: ${traffic.averageSpeedKph} km/h, +${delay} min`
+      : `Tráfico actual: fluido (${traffic.averageSpeedKph} km/h)`);
+  } else {
+    lines.push('Tráfico: sin recorridos recientes en el trayecto');
+  }
+  const warning = conditions.climate?.warnings?.[0];
+  if (warning) lines.push(warning);
+  return lines;
 }
 
 function renderSteps() {
@@ -752,6 +968,12 @@ function addRouteLayers() {
       'line-width': 5,
     },
   }, firstLabel);
+  // Dotted link between a point off the road and where the route starts or ends.
+  map.addSource('route-links', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addLayer({
+    id: 'route-links', type: 'line', source: 'route-links', layout: { 'line-cap': 'round' },
+    paint: { 'line-color': token('--color-route'), 'line-width': 3, 'line-dasharray': [0.1, 2] },
+  }, firstLabel);
 }
 
 function drawRoutes() {
@@ -759,10 +981,46 @@ function drawRoutes() {
   if (!source) return; // added on load, which draws the current routes
   source.setData({
     type: 'FeatureCollection',
-    features: routes.map((route, index) => ({
-      type: 'Feature', properties: { selected: index === selectedRoute }, geometry: route.geometry,
-    })),
+    features: routes.flatMap((route, index) => mappedParts(route).map((coordinates) => ({
+      type: 'Feature', properties: { selected: index === selectedRoute },
+      geometry: { type: 'LineString', coordinates },
+    }))),
   });
+  const route = routes[selectedRoute];
+  const coordinates = route?.geometry?.coordinates ?? [];
+  const ends = [[stops[0]?.point, coordinates[0]], [stops.at(-1)?.point, coordinates.at(-1)]];
+  const links = route ? ends
+    .filter(([point, end]) => point && end && distanceMeters(point, end) > 10)
+    .map(([point, end]) => ({
+      type: 'Feature', properties: {},
+      geometry: { type: 'LineString', coordinates: [[point.lng, point.lat], end] },
+    })) : [];
+  // Stretches without a mapped road (access to a town): dotted like the links, never as a road.
+  for (const section of route?.approximateSections ?? []) {
+    const [from, to] = section.geometryIndex;
+    links.push({ type: 'Feature', properties: {},
+      geometry: { type: 'LineString', coordinates: coordinates.slice(from, to + 1) } });
+  }
+  map.getSource('route-links')?.setData({ type: 'FeatureCollection', features: links });
+}
+
+/** The route geometry without its approximate sections (those are drawn dotted). */
+function mappedParts(route) {
+  const coordinates = route.geometry?.coordinates ?? [];
+  const sections = [...(route.approximateSections ?? [])].sort((a, b) => a.geometryIndex[0] - b.geometryIndex[0]);
+  const parts = [];
+  let start = 0;
+  for (const { geometryIndex: [from, to] } of sections) {
+    if (from > start) parts.push(coordinates.slice(start, from + 1));
+    start = Math.max(start, to);
+  }
+  if (start < coordinates.length - 1) parts.push(coordinates.slice(start));
+  return parts.filter((part) => part.length >= 2);
+}
+
+function distanceMeters(point, [lng, lat]) {
+  const kx = 111_195 * Math.cos((lat * Math.PI) / 180);
+  return Math.hypot((point.lng - lng) * kx, (point.lat - lat) * 111_195);
 }
 
 // ---------------------------------------------------------------- start

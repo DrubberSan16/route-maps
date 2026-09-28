@@ -1,5 +1,13 @@
 import { Module } from '@nestjs/common';
 import { AppConfigService } from '../../config/app-config.service';
+import {
+  NATIVE_GRAPH_STORE,
+  NativeGraphStore,
+} from '../../infrastructure/native/native-graph.store';
+import {
+  NATIVE_SEARCH_STORE,
+  NativeSearchStore,
+} from '../../infrastructure/native/native-search.store';
 import { GeocodingService } from './application/geocoding.service';
 import { GEOCODING_PROVIDER, GeocodingProvider } from './domain/geocoding-provider';
 import { CompositeGeocodingProvider } from './infrastructure/composite-geocoding.provider';
@@ -9,11 +17,15 @@ import { NativeGeocodingProvider } from './infrastructure/native-geocoding.provi
 import { WorldPlaceIndex } from './infrastructure/world-place-index';
 import { GeocodingController } from './presentation/geocoding.controller';
 
-const geocodingProviderFactory = (config: AppConfigService): GeocodingProvider => {
+const geocodingProviderFactory = (
+  config: AppConfigService,
+  graph: NativeGraphStore,
+  search: NativeSearchStore,
+): GeocodingProvider => {
   const geocoding = config.get('geocoding');
   const detailed =
     geocoding.provider === 'native'
-      ? new NativeGeocodingProvider(geocoding.nativeDataPath)
+      ? new NativeGeocodingProvider(search, graph)
       : geocoding.provider === 'nominatim'
         ? new NominatimGeocodingProvider({
             baseUrl: geocoding.nominatimUrl,
@@ -31,7 +43,7 @@ const geocodingProviderFactory = (config: AppConfigService): GeocodingProvider =
     {
       provide: GEOCODING_PROVIDER,
       useFactory: geocodingProviderFactory,
-      inject: [AppConfigService],
+      inject: [AppConfigService, NATIVE_GRAPH_STORE, NATIVE_SEARCH_STORE],
     },
   ],
   exports: [GEOCODING_PROVIDER],

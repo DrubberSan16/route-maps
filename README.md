@@ -8,16 +8,20 @@ rutas o geocodificación a proveedores externos durante la ejecución.
 
 ## Capacidades
 
-- Mapa vectorial PMTiles de Ecuador, servido con peticiones HTTP Range.
-- Red vial estatal nacional y motor de rutas nativo para auto, camión y moto.
-- Provincias, cantones, parroquias, localidades, cuerpos de agua, salud,
-  educación y turismo.
-- Regiones climáticas de precipitación incluidas en el mapa.
+- Mapa vectorial PMTiles de todo Ecuador con cada calle del país (610 mil ejes
+  viales del Marco Geoestadístico del INEC con su nombre), manzanas,
+  edificaciones, parques, ríos, límites, ciudades, barrios y más de 130 mil
+  puntos de interés con iconos por categoría.
+- Motor de rutas nativo sobre el grafo nacional (calles + red vial estatal)
+  para auto, camión, moto, bicicleta y a pie, con indicaciones giro a giro,
+  paradas y rutas alternativas.
+- Búsqueda local de lugares, calles, intersecciones y puntos de interés, y
+  búsqueda inversa por calle.
+- Capas de tráfico en vivo y actividad (recorridos propios), lluvia anual,
+  pisos térmicos y densidad de población (mapa de calor).
 - Validación de cada ruta contra tráfico reciente propio y climatología local.
-- Geocodificación local de localidades y puntos de interés oficiales.
 - API pública, visor web y SDK JavaScript servidos por la misma instalación.
 - Descarga offline del archivo de mapa con checksum y manifiesto versionado.
-- Actualización programable, atómica y con registro de procedencia.
 
 ## Arquitectura de ejecución
 
@@ -27,8 +31,8 @@ Aplicación / SDK / móvil
         Nginx
        /     \
   PMTiles    API NestJS
-               |-- rutas nativas (roads.geojson)
-               |-- geocodificación nativa
+               |-- rutas nativas (graph.bin)
+               |-- geocodificación nativa (search.ndjson)
                |-- tráfico agregado propio
                |-- PostgreSQL/PostGIS + Redis
 ```
@@ -56,8 +60,9 @@ Abrir `http://localhost:8080`. Los datos generados no se versionan en Git.
 - `POST /api/v1/routes/calculate`: ruta, distancia, tiempo y condiciones.
 - `GET /api/v1/geocoding/search`: búsqueda local.
 - `GET /api/v1/geocoding/reverse`: lugar oficial cercano.
-- `GET /api/v1/tracking/traffic`: tráfico agregado, solo cuando hay al menos
-  tres viajes y cinco muestras por celda.
+- `GET /api/v1/traffic/flow`: tráfico de los últimos 15 minutos por tramo de vía.
+- `GET /api/v1/traffic/activity`: mapa de calor de actividad de las últimas 24 h.
+- `GET /api/v1/tracking/traffic`: tráfico agregado por celdas (compatibilidad).
 - `GET /sdk/route-maps.js`: SDK web sin CDN.
 - `GET /developers.html`: ejemplos de integración.
 
@@ -95,11 +100,17 @@ make regions-sync
 
 Cada salida se escribe en un temporal y se renombra al finalizar. El refresco
 desatendido usa `infrastructure/scripts/refresh-region.sh` y las unidades de
-`infrastructure/systemd/`.
+`infrastructure/systemd/` en equipos con al menos 6 GB de RAM y 10 GB libres. Un
+servidor pequeño recibe la región ya generada desde una estación de trabajo:
 
-Las ortofotos no se descargan automáticamente: el IGM exige un flujo controlado
-de acceso/licencia. El catálogo deja preparada esa fuente, pero evita publicar
-imágenes sin autorización.
+```bash
+./infrastructure/scripts/publish-region.sh ecuador <host-ssh>
+./infrastructure/scripts/validate-coverage.sh https://route-map.softwareeasydev.com
+```
+
+Las ortofotos y la cartografía del IGM no se usan: su licencia prohíbe
+redistribuir por Internet la información descargada. El catálogo lo deja
+registrado para que nadie la incorpore por error.
 
 ## Validación
 
@@ -121,7 +132,7 @@ docker compose config
 - Los secretos viven en `.env`, nunca en Git.
 - Las descargas offline requieren archivos y checksums registrados.
 - El tráfico público es agregado y aplica umbral de privacidad.
-- Los motores heredados están bajo perfiles opcionales y no arrancan por
-  defecto.
+- No se ejecuta ningún motor ni servicio cartográfico de terceros: mapa, rutas y
+  búsqueda salen de los datos oficiales procesados por la propia plataforma.
 
 Más detalle: `docs/maps.md`, `docs/integration.md` y `docs/architecture.md`.

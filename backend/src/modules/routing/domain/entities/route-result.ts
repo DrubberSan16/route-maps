@@ -42,6 +42,13 @@ export interface RouteStep {
   geometryIndex: [number, number];
 }
 
+/** Part of a route over a gap of the road data, drawn as a straight approximate link. */
+export interface ApproximateSection {
+  /** Index range inside the route geometry. */
+  geometryIndex: [number, number];
+  distanceMeters: number;
+}
+
 export interface RouteResult {
   distanceMeters: number;
   durationSeconds: number;
@@ -50,6 +57,8 @@ export interface RouteResult {
   bbox: BoundingBox;
   hasTolls?: boolean;
   hasFerry?: boolean;
+  /** Stretches without a mapped road (see ApproximateSection); absent when there are none. */
+  approximateSections?: ApproximateSection[];
 }
 
 export interface RouteCalculation {

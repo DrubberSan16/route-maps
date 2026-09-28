@@ -73,7 +73,8 @@ services:
       ROUTING_PROVIDER: ${ROUTING_PROVIDER:-native}
       ROUTING_LANGUAGE: ${ROUTING_LANGUAGE:-es-ES}
       ROUTING_MAX_ALTERNATIVES: ${ROUTING_MAX_ALTERNATIVES:-2}
-      NATIVE_ROUTING_GRAPH_FILE: ${NATIVE_ROUTING_GRAPH_FILE:-/data/native/ecuador/roads.geojson}
+      NATIVE_ROUTING_GRAPH_FILE: ${NATIVE_ROUTING_GRAPH_FILE:-/data/native/ecuador/graph.bin}
+      NATIVE_SEARCH_FILE: ${NATIVE_SEARCH_FILE:-/data/native/ecuador/search.ndjson}
       GEOCODING_PROVIDER: ${GEOCODING_PROVIDER:-native}
       NATIVE_DATA_PATH: ${NATIVE_DATA_PATH:-/data/native/ecuador}
       GEOCODING_COUNTRY_CODES: ${GEOCODING_COUNTRY_CODES:-}
@@ -163,7 +164,8 @@ services:
       dockerfile: data-tools/Dockerfile
     image: ${IMAGE_PREFIX:-maps-platform}/data-tools:${IMAGE_TAG:-latest}
     environment:
-      TILEGEN_MEMORY: ${TILEGEN_MEMORY:-2g}
+      TILEGEN_MEMORY: ${TILEGEN_MEMORY:-3g}
+      SKIP_BUILDINGS: ${SKIP_BUILDINGS:-false}
       REGION_VERSION: ${REGION_VERSION:-}
     volumes:
       - ${STORAGE_PATH:-./storage}/imports:/data/imports

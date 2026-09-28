@@ -1,18 +1,22 @@
 import { Logger } from '@nestjs/common';
 import { AppConfigService } from '../../../../config/app-config.service';
+import { NativeGraphStore } from '../../../../infrastructure/native/native-graph.store';
 import { RoutingProvider } from '../../domain/interfaces/routing-provider';
 import { OsrmRoutingProvider } from './osrm-routing.provider';
 import { ValhallaRoutingProvider } from './valhalla-routing.provider';
 import { NativeRoutingProvider } from './native-routing.provider';
 
 /** Selects the routing engine adapter from ROUTING_PROVIDER. */
-export function createRoutingProvider(config: AppConfigService): RoutingProvider {
+export function createRoutingProvider(
+  config: AppConfigService,
+  graph: NativeGraphStore,
+): RoutingProvider {
   const routing = config.get('routing');
   const logger = new Logger('RoutingProviderFactory');
   switch (routing.provider) {
     case 'native':
-      logger.log(`Using the native official-road graph at ${routing.nativeGraphFile}`);
-      return new NativeRoutingProvider(routing.nativeGraphFile);
+      logger.log(`Using the native road graph at ${graph.file}`);
+      return new NativeRoutingProvider(graph);
     case 'osrm': {
       const { carUrl, bicycleUrl, footUrl } = routing.osrm;
       logger.log('Using OSRM routing provider');

@@ -70,8 +70,8 @@ download-region: check-region ## Descarga las fuentes oficiales auditadas: REGIO
 build-map: check-region ## Genera el mapa PMTiles de una región descargada (WATER=1: océanos)
 	$(TOOLS) map $(REGION) $(if $(WATER),--water-polygons)
 
-build-routing: check-region ## Verifica que la región use la red vial nativa
-	@echo "El routing nativo usa storage/imports/native/ecuador/roads.geojson; no hay un grafo externo."
+build-routing: check-region ## Construye grafo de rutas, índice de búsqueda y capas nativas: REGION=ecuador
+	$(TOOLS) build $(REGION)
 
 prepare-region: check-region ## Descarga + mapa + manifiesto + registro: REGION=ecuador
 	./infrastructure/scripts/download-region.sh $(REGION) $(PREPARE_FLAGS)

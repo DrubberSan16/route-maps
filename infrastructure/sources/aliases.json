@@ -1,0 +1,70 @@
+{
+  "description": "Nombres populares que no figuran en las fuentes oficiales. Cada alias apunta a una entrada oficial (palabras del nombre, tipo y prefijo del codigo de parroquia); si no se encuentra, la construccion lo informa y no lo inventa.",
+  "aliases": [
+    {
+      "names": ["Malecón 2000", "Malecón de Guayaquil"],
+      "target": {"name": "malecon simon bolivar", "kind": "street", "parish": "0901"},
+      "rank": 72
+    },
+    {
+      "names": ["Terminal Terrestre Jaime Roldós Aguilera", "Terminal de buses de Guayaquil"],
+      "target": {"name": "terminal terrestre guayaquil", "kind": "poi", "parish": "0901"},
+      "rank": 72
+    },
+    {
+      "names": ["Aeropuerto de Guayaquil"],
+      "target": {"name": "aeropuerto olmedo", "kind": "poi", "parish": "0901"},
+      "rank": 74
+    },
+    {
+      "names": ["Aeropuerto de Quito"],
+      "target": {"name": "aeropuerto mariscal sucre", "kind": "poi", "parish": "1701"},
+      "rank": 74
+    },
+    {
+      "names": ["Terminal Quitumbe", "Terminal sur de Quito"],
+      "target": {"name": "terminal terrestre quitumbe", "kind": "poi", "parish": "1701"},
+      "rank": 70
+    },
+    {
+      "names": ["Mitad del Mundo"],
+      "target": {"name": "ciudad mitad del mundo", "kind": "poi", "parish": "1701"},
+      "rank": 70
+    },
+    {
+      "names": ["El Coca", "Coca"],
+      "target": {"name": "puerto francisco orellana", "kind": "place", "parish": "2201"},
+      "rank": 86
+    },
+    {
+      "names": ["Santo Domingo"],
+      "target": {"name": "santo domingo colorados", "kind": "place", "parish": "2301"},
+      "rank": 88
+    },
+    {
+      "names": ["Baños"],
+      "target": {"name": "banos agua santa", "kind": "place", "parish": "1802"},
+      "rank": 80
+    },
+    {
+      "names": ["Av. Amazonas", "Avenida Amazonas"],
+      "target": {"name": "rio amazonas", "kind": "street", "parish": "170150"},
+      "rank": 66
+    },
+    {
+      "names": ["Terminal Terrestre de Manta", "Terminal Terrestre Luis Valdiviezo Mora"],
+      "target": {"name": "terminal terrestreluis valdiviezo mora", "kind": "poi", "parish": "1308"},
+      "rank": 68
+    },
+    {
+      "names": ["Terminal Terrestre de Tulcán"],
+      "target": {"name": "terminal terreste", "kind": "poi", "parish": "0401"},
+      "rank": 66
+    },
+    {
+      "names": ["Terminal Terrestre de Ambato"],
+      "target": {"name": "terminal terrestre 67", "kind": "poi", "parish": "1801"},
+      "rank": 68
+    }
+  ]
+}

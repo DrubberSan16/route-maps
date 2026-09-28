@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Maps Platform</title>
+  <title>Route Maps</title>
   <link rel="preload" href="vendor/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="vendor/maplibre-gl.css">
   <link rel="stylesheet" href="viewer.css">
@@ -13,7 +13,7 @@
 
   <aside class="panel" aria-label="Búsqueda y rutas">
     <header class="panel__header">
-      <h1 class="brand">Maps Platform</h1>
+      <h1 class="brand">Route Maps</h1>
     </header>
     <p class="status status--error" id="app-status" role="alert" hidden></p>
 
@@ -95,6 +95,7 @@
     <footer class="panel__footer">
       <a href="/developers.html">Integrar en otra aplicación</a>
       <a href="/api/docs" target="_blank" rel="noopener">API (Swagger)</a>
+      <a href="/fuentes.html">Fuentes de datos</a>
     </footer>
   </aside>
 
@@ -118,6 +119,12 @@
     <symbol id="i-truck" viewBox="0 0 24 24"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></symbol>
     <symbol id="i-moto" viewBox="0 0 24 24"><circle cx="5" cy="17" r="3"/><circle cx="19" cy="17" r="3"/><path d="M8 17h6l3-6h-5"/><path d="M12 11 9.5 7H7"/><path d="m17 11 2 6"/></symbol>
     <symbol id="i-bike" viewBox="0 0 24 24"><circle cx="18.5" cy="17.5" r="3.5"/><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="15" cy="5" r="1"/><path d="M12 17.5V14l-3-3 4-3 2 3h2"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7Z"/><path d="m2 12 10 5 10-5"/><path d="m2 17 10 5 10-5"/></symbol>
+    <symbol id="i-traffic" viewBox="0 0 24 24"><rect x="8" y="2" width="8" height="20" rx="3"/><circle cx="12" cy="7" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="17" r="1.5"/></symbol>
+    <symbol id="i-rain" viewBox="0 0 24 24"><path d="M20 14.9A5 5 0 0 0 17.5 5h-1.3A8 8 0 1 0 4 13.3"/><path d="M8 19v2"/><path d="M8 13v2"/><path d="M12 21v2"/><path d="M12 15v2"/><path d="M16 19v2"/><path d="M16 13v2"/></symbol>
+    <symbol id="i-thermometer" viewBox="0 0 24 24"><path d="M14 4v10.5a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/></symbol>
+    <symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 22a7 7 0 0 0 7-7c0-3.5-2.4-5.9-4-8-.6 2.3-1.8 3.5-3.5 4.1.6-2.9 0-6.4-2.9-8.6 0 4.1-3.6 7-3.6 12.5a7 7 0 0 0 7 7Z"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
     <symbol id="i-walk" viewBox="0 0 24 24"><circle cx="13" cy="4" r="2"/><path d="m9 21 2.5-5.5L14 18v3"/><path d="M11.5 15.5 12 10l-3 2v3"/><path d="m12 10 3 2.5 2.5 1"/></symbol>
   </svg>
 

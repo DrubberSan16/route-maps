@@ -6,10 +6,12 @@
 # Commands
 #   list                         regions of the catalog and what is already built
 #   download <region>            download the audited sources required by the region
+#   build <region>               road graph, search index and map layers from the sources
+#   aliases <region>             apply neighbourhood groups and popular names (no geometry rebuild)
 #   map <region>                 build the visual map (PMTiles) with tilegen
-#   routing <region>             build the Valhalla routing graph
+#   routing <region>             legacy Valhalla graph (OSM regions only)
 #   manifest <region>            write the manifest read by the backend
-#   prepare <region>             download (if missing) + map + routing + manifest
+#   prepare <region>             download (if missing) + build + map + manifest
 #   source-version <region>      print the upstream data fingerprint
 #
 # Options
@@ -24,7 +26,10 @@
 #   index of countries and cities used by the place search.
 #
 # Files (Docker bind mounts of ./storage on the host)
-#   /data/imports/native/<region>/*.geojson  audited official/public inputs
+#   /data/imports/native/<region>/*.geojson  audited official/public inputs and the map layers
+#   /data/imports/native/<region>/inec/      census cartography cache (one folder per province)
+#   /data/imports/native/<region>/graph.bin  road graph read by the backend (routing, reverse geocoding)
+#   /data/imports/native/<region>/search.ndjson  search index read by the backend
 #   /data/imports/naturalearth/*.zip         Natural Earth shapefiles (world input)
 #   /data/maps/<dir>/<region>.pmtiles        visual map, vector tiles
 #   /data/maps/<dir>/<region>.region.json    manifest registered by the backend
@@ -304,8 +309,8 @@ cmd_map() {
   elif is_native "$region"; then
     local native_region bbox
     native_region=$(jq -r '.source.nativeRegion' <<<"$region")
-    [[ -s "$IMPORTS_DIR/native/$native_region/manifest.json" ]] ||
-      die "native sources not found: run 'download $code' first"
+    [[ -s "$IMPORTS_DIR/native/$native_region/build.json" ]] ||
+      die "native map layers not found: run 'build $code' first"
     args+=(--native_data="$IMPORTS_DIR/native/$native_region")
     bbox=$(jq -r '.bbox // empty | join(",")' <<<"$region")
     [[ -n "$bbox" ]] && args+=(--bounds="$bbox")
@@ -340,6 +345,29 @@ cmd_map() {
   fi
   match_owner "$dir" "$MAPS_DIR"
   log "Map ready: $out ($(du -h "$out" | cut -f1))"
+}
+
+cmd_build() {
+  local code=$1 region native_region
+  region=$(region_json "$code")
+  is_native "$region" || die "$code is not built from the native catalog"
+  native_region=$(jq -r '.source.nativeRegion' <<<"$region")
+  [[ -s "$IMPORTS_DIR/native/$native_region/manifest.json" ]] ||
+    die "native sources not found: run 'download $code' first"
+  local args=(build "$native_region")
+  [[ "${SKIP_BUILDINGS:-false}" == true ]] && args+=(--skip-buildings)
+  native-data "${args[@]}" >/dev/null
+  match_owner "$IMPORTS_DIR/native/$native_region" "$IMPORTS_DIR"
+  log "Road graph, search index and map layers ready: $IMPORTS_DIR/native/$native_region"
+}
+
+cmd_aliases() {
+  local code=$1 region native_region
+  region=$(region_json "$code")
+  is_native "$region" || die "$code does not use the native search index"
+  native_region=$(jq -r '.source.nativeRegion' <<<"$region")
+  native-data aliases "$native_region"
+  match_owner "$IMPORTS_DIR/native/$native_region" "$IMPORTS_DIR"
 }
 
 cmd_routing() {
@@ -444,6 +472,15 @@ cmd_prepare() {
   local started=$SECONDS region
   region=$(region_json "$code")
   cmd_download "$code" "$force"
+  if is_native "$region"; then
+    local native_region
+    native_region=$(jq -r '.source.nativeRegion' <<<"$region")
+    # Regions sharing a native catalog (ecuador, guayas, quito...) build it once.
+    if [[ ! -s "$IMPORTS_DIR/native/$native_region/build.json" || "$force" == true ||
+      "$IMPORTS_DIR/native/$native_region/manifest.json" -nt "$IMPORTS_DIR/native/$native_region/build.json" ]]; then
+      cmd_build "$code"
+    fi
+  fi
   cmd_map "$code" "$water"
   if [[ "$skip_routing" != true ]] && ! is_natural_earth "$region" && ! is_native "$region"; then
     cmd_routing "$code"
@@ -495,6 +532,8 @@ main() {
   list) cmd_list ;;
   source-version) cmd_source_version "${code:?region required}" ;;
   download) cmd_download "${code:?region required}" "$force" ;;
+  build) cmd_build "${code:?region required}" ;;
+  aliases) cmd_aliases "${code:?region required}" ;;
   map) cmd_map "${code:?region required}" "$water" ;;
   routing) cmd_routing "${code:?region required}" ;;
   manifest) cmd_manifest "${code:?region required}" ;;

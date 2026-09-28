@@ -9,6 +9,26 @@
       "coordinateReference": "EPSG:4326",
       "layers": [
         {
+          "id": "census",
+          "title": "Marco Geoestadistico Nacional 2026: ejes viales, manzanas, edificaciones, areas amanzanadas, localidades y malla de poblacion",
+          "role": "transportation",
+          "kind": "inec-geostatistical",
+          "url": "https://www.ecuadorencifras.gob.ec/documentos/web-inec/Geografia_Estadistica/Documentos/",
+          "nationalFile": "marco_geoestadistico_2026.zip",
+          "populationFromNational": true,
+          "required": true,
+          "updateCadence": "monthly-check",
+          "method": "measured",
+          "organization": "Instituto Nacional de Estadistica y Censos",
+          "license": {
+            "id": "INEC-MGN-2025",
+            "attributionRequired": true,
+            "commercialUse": "requires-agreement",
+            "citation": "Fuente: INSTITUTO NACIONAL DE ESTADISTICA Y CENSOS - INEC; Marco Geoestadistico Nacional; 2026; GeoPackage; Quito, Ecuador.",
+            "termsUrl": "https://www.ecuadorencifras.gob.ec/documentos/web-inec/Geografia_Estadistica/Micrositio_geoportal/assets/acuerdousopoliticasmgn.pdf"
+          }
+        },
+        {
           "id": "roads",
           "title": "Red Vial Estatal nacional",
           "role": "transportation",
@@ -23,24 +43,8 @@
           "license": {
             "id": "CC-BY",
             "attributionRequired": true,
+            "citation": "Ministerio de Transporte y Obras Publicas, Red Vial Estatal.",
             "termsUrl": "https://www.datosabiertos.gob.ec/dataset/red-vial-estatal-ecuatoriana-en-kilometros"
-          }
-        },
-        {
-          "id": "places",
-          "title": "Localidades oficiales",
-          "role": "place",
-          "kind": "arcgis-feature-layer",
-          "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/LOCALIDADES_07072026/FeatureServer/0",
-          "required": true,
-          "expectedGeometry": ["Point"],
-          "updateCadence": "quarterly",
-          "method": "measured",
-          "organization": "Secretaria Nacional de Gestion de Riesgos",
-          "license": {
-            "id": "EC-public-information",
-            "attributionRequired": true,
-            "termsUrl": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/LOCALIDADES_07072026/FeatureServer/0"
           }
         },
         {
@@ -50,16 +54,17 @@
           "adminLevel": 4,
           "kind": "arcgis-feature-layer",
           "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/OT_PROVINCIAL_17072026/FeatureServer/0",
-          "maxAllowableOffset": 0.00005,
+          "maxAllowableOffset": 0.0001,
           "required": true,
           "expectedGeometry": ["Polygon", "MultiPolygon"],
           "updateCadence": "quarterly",
           "method": "measured",
           "organization": "Comite Nacional de Limites Internos / Secretaria Nacional de Gestion de Riesgos",
           "license": {
-            "id": "EC-free-access-cartography",
+            "id": "EC-public-information",
             "attributionRequired": true,
-            "termsUrl": "https://www.geoportaligm.gob.ec/portal/index.php/descargas/cartografia-de-libre-acceso/registro/"
+            "citation": "Comite Nacional de Limites Internos (CONALI), organizacion territorial 2026.",
+            "termsUrl": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/OT_PROVINCIAL_17072026/FeatureServer/0"
           }
         },
         {
@@ -69,16 +74,17 @@
           "adminLevel": 6,
           "kind": "arcgis-feature-layer",
           "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/OT_CANTONAL_17072026/FeatureServer/0",
-          "maxAllowableOffset": 0.00003,
+          "maxAllowableOffset": 0.0001,
           "required": true,
           "expectedGeometry": ["Polygon", "MultiPolygon"],
           "updateCadence": "quarterly",
           "method": "measured",
           "organization": "Comite Nacional de Limites Internos / Secretaria Nacional de Gestion de Riesgos",
           "license": {
-            "id": "EC-free-access-cartography",
+            "id": "EC-public-information",
             "attributionRequired": true,
-            "termsUrl": "https://www.geoportaligm.gob.ec/portal/index.php/descargas/cartografia-de-libre-acceso/registro/"
+            "citation": "Comite Nacional de Limites Internos (CONALI), organizacion territorial 2026.",
+            "termsUrl": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/OT_CANTONAL_17072026/FeatureServer/0"
           }
         },
         {
@@ -88,25 +94,26 @@
           "adminLevel": 8,
           "kind": "arcgis-feature-layer",
           "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/OT_PARROQUIAL_17072026/FeatureServer/0",
-          "maxAllowableOffset": 0.00002,
+          "maxAllowableOffset": 0.0001,
           "required": true,
           "expectedGeometry": ["Polygon", "MultiPolygon"],
           "updateCadence": "quarterly",
           "method": "measured",
           "organization": "Comite Nacional de Limites Internos / Secretaria Nacional de Gestion de Riesgos",
           "license": {
-            "id": "EC-free-access-cartography",
+            "id": "EC-public-information",
             "attributionRequired": true,
-            "termsUrl": "https://www.geoportaligm.gob.ec/portal/index.php/descargas/cartografia-de-libre-acceso/registro/"
+            "citation": "Comite Nacional de Limites Internos (CONALI), organizacion territorial 2026.",
+            "termsUrl": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/OT_PARROQUIAL_17072026/FeatureServer/0"
           }
         },
         {
           "id": "poi-health",
-          "title": "Establecimientos de salud",
+          "title": "Establecimientos de salud 2023",
           "role": "poi",
           "category": "hospital",
           "kind": "arcgis-feature-layer",
-          "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/CENTROS_DE_SALUD/FeatureServer/0",
+          "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/Establecimientos_de_Salud/FeatureServer/0",
           "required": true,
           "expectedGeometry": ["Point"],
           "updateCadence": "monthly",
@@ -115,16 +122,17 @@
           "license": {
             "id": "EC-public-information",
             "attributionRequired": true,
-            "termsUrl": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/CENTROS_DE_SALUD/FeatureServer/0"
+            "citation": "Ministerio de Salud Publica, establecimientos de salud 2023.",
+            "termsUrl": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/Establecimientos_de_Salud/FeatureServer/0"
           }
         },
         {
           "id": "poi-education",
-          "title": "Centros educativos",
+          "title": "Instituciones educativas 2021",
           "role": "poi",
           "category": "school",
           "kind": "arcgis-feature-layer",
-          "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/CENTROS_EDUCATIVOS/FeatureServer/0",
+          "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/Instituciones_Educativas/FeatureServer/0",
           "required": true,
           "expectedGeometry": ["Point"],
           "updateCadence": "monthly",
@@ -133,16 +141,17 @@
           "license": {
             "id": "EC-public-information",
             "attributionRequired": true,
-            "termsUrl": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/CENTROS_EDUCATIVOS/FeatureServer/0"
+            "citation": "Ministerio de Educacion, instituciones educativas 2021.",
+            "termsUrl": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/Instituciones_Educativas/FeatureServer/0"
           }
         },
         {
           "id": "poi-tourism",
-          "title": "Atractivos turisticos",
+          "title": "Atractivos turisticos 2024",
           "role": "poi",
           "category": "attraction",
           "kind": "arcgis-feature-layer",
-          "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/ATRACTIVOS_TURISTICOS_CORT_DIC_2023/FeatureServer/0",
+          "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/MINTUR_AMEN_ATRAC_DIC2024_09012025/FeatureServer/0",
           "required": true,
           "expectedGeometry": ["Point"],
           "updateCadence": "quarterly",
@@ -151,7 +160,49 @@
           "license": {
             "id": "EC-public-information",
             "attributionRequired": true,
-            "termsUrl": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/ATRACTIVOS_TURISTICOS_CORT_DIC_2023/FeatureServer/0"
+            "citation": "Ministerio de Turismo, inventario de atractivos turisticos 2024.",
+            "termsUrl": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/MINTUR_AMEN_ATRAC_DIC2024_09012025/FeatureServer/0"
+          }
+        },
+        {
+          "id": "neighborhoods-guayaquil",
+          "title": "Cooperativas y urbanizaciones de Guayaquil",
+          "role": "place",
+          "kind": "arcgis-feature-layer",
+          "url": "https://geoportalcat.guayaquil.gob.ec/arcgis/rest/services/Geoportal_Actualizado/GEOPORTAL_ACTUALIZADO/MapServer/5",
+          "maxAllowableOffset": 0.00001,
+          "required": true,
+          "tolerateFailure": true,
+          "skipEmptyGeometry": true,
+          "expectedGeometry": ["Polygon", "MultiPolygon"],
+          "updateCadence": "quarterly",
+          "method": "measured",
+          "organization": "Gobierno Autonomo Descentralizado Municipal de Guayaquil",
+          "license": {
+            "id": "EC-public-information",
+            "attributionRequired": true,
+            "citation": "GAD Municipal de Guayaquil, geoportal catastral.",
+            "termsUrl": "https://geoportalcat.guayaquil.gob.ec/arcgis/rest/services/Geoportal_Actualizado/GEOPORTAL_ACTUALIZADO/MapServer/5"
+          }
+        },
+        {
+          "id": "neighborhoods-quito",
+          "title": "Parroquias urbanas del Distrito Metropolitano de Quito",
+          "role": "place",
+          "kind": "arcgis-feature-layer",
+          "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/PARROQUIAS_URBANAS_DMQ_POL/FeatureServer/0",
+          "maxAllowableOffset": 0.00002,
+          "required": true,
+          "tolerateFailure": true,
+          "expectedGeometry": ["Polygon", "MultiPolygon"],
+          "updateCadence": "quarterly",
+          "method": "measured",
+          "organization": "Municipio del Distrito Metropolitano de Quito / Secretaria Nacional de Gestion de Riesgos",
+          "license": {
+            "id": "EC-public-information",
+            "attributionRequired": true,
+            "citation": "Municipio del Distrito Metropolitano de Quito, parroquias urbanas.",
+            "termsUrl": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/PARROQUIAS_URBANAS_DMQ_POL/FeatureServer/0"
           }
         },
         {
@@ -169,6 +220,7 @@
           "license": {
             "id": "EC-public-information",
             "attributionRequired": true,
+            "citation": "Secretaria Nacional de Gestion de Riesgos, hidrografia.",
             "termsUrl": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/RIO_A/FeatureServer/0"
           }
         },
@@ -188,6 +240,7 @@
           "license": {
             "id": "EC-public-information",
             "attributionRequired": true,
+            "citation": "Secretaria Nacional de Gestion de Riesgos, hidrografia.",
             "termsUrl": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/RIO_L/FeatureServer/0"
           }
         },
@@ -206,6 +259,27 @@
           "license": {
             "id": "EC-open-hydrometeorological-data",
             "attributionRequired": true,
+            "citation": "Instituto Nacional de Meteorologia e Hidrologia (INAMHI), regiones de precipitacion.",
+            "termsUrl": "https://geoservicios.inamhi.gob.ec/"
+          }
+        },
+        {
+          "id": "climate-temperature-regions",
+          "title": "Regiones de temperatura (termotipos)",
+          "role": "climate",
+          "kind": "wfs-geojson",
+          "url": "https://geoservicios.inamhi.gob.ec/geoserver/ows",
+          "typeName": "geonode:regiones_tempe",
+          "required": true,
+          "tolerateFailure": true,
+          "expectedGeometry": ["Polygon", "MultiPolygon"],
+          "updateCadence": "monthly",
+          "method": "measured",
+          "organization": "Instituto Nacional de Meteorologia e Hidrologia",
+          "license": {
+            "id": "EC-open-hydrometeorological-data",
+            "attributionRequired": true,
+            "citation": "Instituto Nacional de Meteorologia e Hidrologia (INAMHI), regiones de temperatura.",
             "termsUrl": "https://geoservicios.inamhi.gob.ec/"
           }
         },
@@ -225,7 +299,7 @@
             "attributionRequired": true,
             "termsUrl": "https://www.geoportaligm.gob.ec/portal/wp-content/uploads/2012/10/LEE-ME.pdf"
           },
-          "note": "La imagen se incorpora solo por zona y despues de registrar/aceptar la licencia IGM; no se enlaza en tiempo de ejecucion."
+          "note": "No se incorpora: la licencia del IGM prohibe redistribuir por Internet la informacion descargada, incluso como parte de otros servicios."
         }
       ]
     }

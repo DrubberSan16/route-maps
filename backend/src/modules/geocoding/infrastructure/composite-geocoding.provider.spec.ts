@@ -52,6 +52,59 @@ describe('mergeResults', () => {
     expect(mergeResults([lima], [limaFromNominatim], 10)).toEqual([lima.result]);
     expect(mergeResults([lima, limaOhio], [], 1)).toEqual([lima.result]);
   });
+
+  it('prefers the best nearby place of the prepared country found by its popular name', () => {
+    const dominican = { result: result('Santo Domingo', 18.47, -69.89), important: true };
+    const colorados = { ...result('Santo Domingo de los Colorados', -0.25, -79.17), type: 'city' };
+    const clinic = { ...result('Santo Domingo', -0.26, -79.18), type: 'clinic' };
+
+    expect(
+      mergeResults([dominican], [colorados, clinic], 5, {
+        text: 'Santo Domingo',
+        limit: 5,
+        near: { latitude: -0.25, longitude: -79.17 },
+      }),
+    ).toEqual([colorados, dominican.result, clinic]);
+  });
+
+  it('keeps the order of the detailed index (a park before a namesake parish)', () => {
+    const park = { ...result('Parque la Carolina', -0.18, -78.48), type: 'park' };
+    const parish = { ...result('La Carolina', 0.67, -78.24), type: 'administrative' };
+
+    expect(
+      mergeResults([], [park, parish], 5, {
+        text: 'La Carolina',
+        limit: 5,
+        near: { latitude: -0.2, longitude: -78.49 },
+      }),
+    ).toEqual([park, parish]);
+  });
+
+  it('puts the world namesake first when the map shows another continent', () => {
+    const dominican = { result: result('Santo Domingo', 18.47, -69.89), important: true };
+    const colorados = { ...result('Santo Domingo de los Colorados', -0.25, -79.17), type: 'city' };
+
+    expect(
+      mergeResults([dominican], [colorados], 5, {
+        text: 'Santo Domingo',
+        limit: 5,
+        near: { latitude: 40.42, longitude: -3.7 },
+      })[0],
+    ).toBe(dominican.result);
+  });
+
+  it('prefers an exact prepared-country place near the requested map centre', () => {
+    const macasar = { result: result('Macasar', -5.14, 119.41), important: true };
+    const macas = { ...result('Macas', -2.31, -78.11), type: 'city' };
+
+    expect(
+      mergeResults([macasar], [macas], 5, {
+        text: 'Macas',
+        limit: 5,
+        near: { latitude: -2.31, longitude: -78.11 },
+      })[0],
+    ).toBe(macas);
+  });
 });
 
 describe('CompositeGeocodingProvider', () => {

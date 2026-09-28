@@ -9,7 +9,8 @@
 # Range requests, style and glyphs, routing with every profile, trips +
 # tracking, offline sync (push, idempotent retry, pull), geocoding and the web
 # viewer. Needs curl, jq and sha256sum; at least one region must be prepared
-# (make prepare-region REGION=...).
+# (make prepare-region REGION=...). ALLOW_NO_REGION=1 checks a stack without map
+# data (CI): regions, downloads and routes are then expected to be unavailable.
 set -uo pipefail
 
 BASE="${1:-${BASE_URL:-http://localhost:8080}}"
@@ -37,7 +38,11 @@ http() {
   shift 3 2>/dev/null || shift $#
   [[ "$target" == http* ]] || target="$API$target"
   local args=(-sS -o "$WORK/body" -D "$WORK/headers" -w '%{http_code}' -X "$method" "$target")
-  [[ -n "$body" ]] && args+=(-H 'Content-Type: application/json' --data "$body")
+  if [[ -n "$body" ]]; then
+    # From a file: a long route geometry exceeds the maximum length of one argument.
+    printf '%s' "$body" >"$WORK/request"
+    args+=(-H 'Content-Type: application/json' --data-binary "@$WORK/request")
+  fi
   [[ -n "${TOKEN:-}" ]] && args+=(-H "Authorization: Bearer $TOKEN")
   curl "${args[@]}" "$@" || echo 000
 }
@@ -96,11 +101,27 @@ section "Map regions"
 status=$(http GET /maps/regions)
 expect "GET /maps/regions -> 200" test "$status" = 200
 count=$(json '.data | length')
+NO_REGION=""
 if [[ "${count:-0}" -lt 1 ]]; then
-  fail "no prepared regions: run make prepare-region REGION=<region> first"
-  printf '\n%d passed, %d failed\n' "$PASSED" "$FAILED"
-  exit 1
+  if [[ "${ALLOW_NO_REGION:-0}" == 1 ]]; then
+    pass "no prepared regions (ALLOW_NO_REGION=1): region, download and routing checks adapted"
+    NO_REGION=1
+  else
+    fail "no prepared regions: run make prepare-region REGION=<region> first"
+    printf '\n%d passed, %d failed\n' "$PASSED" "$FAILED"
+    exit 1
+  fi
 fi
+if [[ -n "$NO_REGION" ]]; then
+  section "Style and glyphs"
+  status=$(http GET "$BASE/maps/style/style.json")
+  expect "style.json -> 200 ($(json '.layers | length') layers)" test "$status" = 200
+  expect "style has no external provider label" test "$(grep -ci 'OpenStreetMap contributors' "$WORK/body")" = 0
+  status=$(http GET "$BASE/maps/fonts/Noto%20Sans%20Regular/0-255.pbf")
+  expect "glyphs Noto Sans Regular 0-255 -> 200" test "$status" = 200
+  O_LAT=-2.1709; O_LNG=-79.9224
+  D_LAT=-2.1894; D_LNG=-79.8870
+else
 # The world base map has no routing package: test a prepared region.
 REGION="${REGION:-$(json '([.data[] | select(.id != "world")][0].id) // .data[0].id')}"
 pass "$count region(s) available, testing '$REGION'"
@@ -168,9 +189,15 @@ status=$(http GET "$BASE/maps/fonts/Noto%20Sans%20Regular/0-255.pbf")
 expect "glyphs Noto Sans Regular 0-255 -> 200" test "$status" = 200
 status=$(http GET "$BASE/maps/$REGION.region.json")
 expect "manifests are not public (/maps/*.region.json -> 404)" test "$status" = 404
+fi
 
 # ------------------------------------------------------------------ routing
 section "Routing (POST /api/v1/routes/calculate)"
+if [[ -n "$NO_REGION" ]]; then
+  ROUTE_POINTS="\"origin\":{\"latitude\":$O_LAT,\"longitude\":$O_LNG},\"destination\":{\"latitude\":$D_LAT,\"longitude\":$D_LNG}"
+  status=$(http POST /routes/calculate "{$ROUTE_POINTS,\"profile\":\"CAR\"}")
+  expect "no road graph -> 503 ($(json .error.code))" test "$status" = 503
+else
 # Two points on the bbox diagonal (40% and 60%); the engine snaps them to roads.
 O_LAT=$(jq -n "$MIN_LAT + ($MAX_LAT - $MIN_LAT) * 0.4")
 O_LNG=$(jq -n "$MIN_LNG + ($MAX_LNG - $MIN_LNG) * 0.4")
@@ -205,6 +232,7 @@ if [[ -s "$WORK/route.json" ]]; then
   status=$(http GET "/routes/$ROUTE_ID")
   expect "GET saved route with geometry" test "$status:$(json '.data.geometry.type')" = "200:LineString"
 fi
+fi
 
 # ------------------------------------------------------------------ trips, tracking, sync
 section "Trips, tracking and offline sync"
@@ -234,7 +262,11 @@ expect "retrying the same push is idempotent (DUPLICATE)" test "$(json '[.data.r
 status=$(http GET "/trips/$SYNC_TRIP")
 expect "synced trip is COMPLETED with 2 points and distance > 0 ($(json .data.distanceMeters) m)" test "$(json .data.status):$(json .data.pointCount):$(json '.data.distanceMeters > 0')" = "COMPLETED:2:true"
 status=$(http GET "/sync/pull?since=2000-01-01T00:00:00.000Z")
-expect "sync pull returns the saved routes" test "$status:$(json '.data.routes | length >= 1')" = "200:true"
+if [[ -n "$NO_REGION" ]]; then
+  expect "sync pull -> 200" test "$status" = 200
+else
+  expect "sync pull returns the saved routes" test "$status:$(json '.data.routes | length >= 1')" = "200:true"
+fi
 
 # ------------------------------------------------------------------ geocoding, docs, viewer
 section "Geocoding, Swagger and viewer"

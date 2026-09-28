@@ -9,7 +9,7 @@ User=root
 WorkingDirectory=/opt/route-maps
 Environment=STORAGE_PATH=/opt/route-maps/storage
 Environment=BASE_URL=http://127.0.0.1:8090
-Environment=MIN_FREE_GB=4
+Environment=MIN_FREE_GB=10
 ExecStart=/opt/route-maps/infrastructure/scripts/refresh-region.sh %i
 Nice=10
 IOSchedulingClass=best-effort

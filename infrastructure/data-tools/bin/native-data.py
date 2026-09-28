@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Download and validate non-OSM geospatial sources into an auditable local cache."""
+"""Download and validate non-OSM geospatial sources into an auditable local cache, then build the
+region's routing graph, search index and map layers from it (`build`)."""
 
 from __future__ import annotations
 
@@ -17,10 +18,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+# The pipeline library lives next to this script in the repository and in /opt/mapsdata in the image.
+for candidate in (Path(__file__).resolve().parent.parent / "lib", Path("/opt/mapsdata")):
+    if (candidate / "mapsdata").is_dir():
+        sys.path.insert(0, str(candidate))
+        break
+
+from mapsdata import catalog, geo, inec, network  # noqa: E402
+from mapsdata.text import Speller  # noqa: E402
 
 CATALOG = Path(os.environ.get("SOURCES_CATALOG", "/etc/maps-platform/sources.json"))
+ALIASES = Path(os.environ.get("ALIASES_CATALOG", str(CATALOG.with_name("aliases.json"))))
 IMPORTS = Path(os.environ.get("IMPORTS_DIR", "/data/imports")) / "native"
 USER_AGENT = os.environ.get("DOWNLOAD_USER_AGENT", "maps-platform-native-data/1.0")
+#: Outputs of `build`, read by the backend and the tile generator.
+BUILD_OUTPUTS = ("graph.bin", "search.ndjson", "map-roads.geojson", "map-places.geojson", "map-pois.geojson",
+                 "map-landuse.geojson", "map-urban.geojson", "map-blocks.geojson", "map-buildings.geojson",
+                 "map-population.geojson")
 
 
 def now_iso() -> str:
@@ -138,7 +152,31 @@ def wfs_features(source: dict[str, Any]) -> tuple[dict[str, Any], Iterable[dict[
     return {"declaredCount": int(data.get("totalFeatures") or len(data.get("features") or []))}, iter(data.get("features") or [])
 
 
+def download_census(source: dict[str, Any], destination: Path, force: bool) -> dict[str, Any]:
+    """National census cartography: chunked GeoPackages converted into the local cache."""
+    report = inec.ingest(source, destination, force, USER_AGENT)
+    chunks = report["chunks"]
+    fingerprint = hashlib.sha256(json.dumps(
+        {code: [meta.get("fingerprint"), meta.get("sha256")] for code, meta in sorted(chunks.items())},
+        sort_keys=True).encode("utf-8")).hexdigest()
+    totals: dict[str, int] = {}
+    for meta in chunks.values():
+        for layer, count in (meta.get("counts") or {}).items():
+            totals[layer] = totals.get(layer, 0) + int(count)
+    return {
+        "id": source["id"],
+        "status": "cached-chunks",
+        "featureCount": totals.get("streets", 0),
+        "layers": totals,
+        "chunks": {code: {"fingerprint": meta.get("fingerprint"), "sha256": meta.get("sha256")}
+                   for code, meta in sorted(chunks.items())},
+        "sha256": fingerprint,
+    }
+
+
 def download_layer(source: dict[str, Any], destination: Path, bbox: list[float], force: bool) -> dict[str, Any]:
+    if source["kind"] == "inec-geostatistical":
+        return download_census(source, destination, force)
     target = destination / f"{source['id']}.geojson"
     if target.exists() and target.stat().st_size > 0 and not force:
         with target.open(encoding="utf-8") as handle:
@@ -161,6 +199,7 @@ def download_layer(source: dict[str, Any], destination: Path, bbox: list[float],
     destination.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(prefix=f".{source['id']}.", suffix=".part", dir=destination)
     count = 0
+    skipped = 0
     digest = hashlib.sha256()
     try:
         with os.fdopen(descriptor, "wb") as output:
@@ -169,6 +208,9 @@ def download_layer(source: dict[str, Any], destination: Path, bbox: list[float],
             digest.update(prefix)
             first = True
             for feature in features:
+                if source.get("skipEmptyGeometry") and not list(iter_coordinates((feature.get("geometry") or {}).get("coordinates"))):
+                    skipped += 1  # municipal layers keep records without a drawn shape
+                    continue
                 validate_feature(feature, source, bbox)
                 encoded = json.dumps(feature, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
                 if not first:
@@ -183,8 +225,8 @@ def download_layer(source: dict[str, Any], destination: Path, bbox: list[float],
             digest.update(suffix)
             output.flush()
             os.fsync(output.fileno())
-        if count != details["declaredCount"]:
-            raise RuntimeError(f"{source['id']}: received {count}, expected {details['declaredCount']}")
+        if count + skipped != details["declaredCount"]:
+            raise RuntimeError(f"{source['id']}: received {count + skipped}, expected {details['declaredCount']}")
         os.replace(temporary, target)
         os.chmod(target, 0o644)
     except Exception:
@@ -197,6 +239,7 @@ def download_layer(source: dict[str, Any], destination: Path, bbox: list[float],
         "id": source["id"],
         "status": "downloaded",
         "featureCount": count,
+        **({"skippedWithoutGeometry": skipped} if skipped else {}),
         "bytes": target.stat().st_size,
         "sha256": digest.hexdigest(),
     }
@@ -244,8 +287,16 @@ def command_download(args: argparse.Namespace) -> None:
     reports = []
     for source in selected_sources(item, args):
         print(f"downloading {source['id']}...", file=sys.stderr, flush=True)
-        reports.append(download_layer(source, destination, item["bbox"], args.force))
-        print(f"  {reports[-1]['featureCount']} features, {reports[-1]['bytes']} bytes", file=sys.stderr)
+        try:
+            reports.append(download_layer(source, destination, item["bbox"], args.force))
+        except Exception as error:  # noqa: BLE001 - optional municipal/climate services may be down
+            if not source.get("tolerateFailure"):
+                raise
+            print(f"  WARNING {source['id']} failed ({error}); keeping the previous copy", file=sys.stderr)
+            if source["id"] in previous:
+                reports.append({**previous[source["id"]], "status": "stale"})
+            continue
+        print(f"  {reports[-1]['featureCount']} features, {reports[-1].get('bytes', '-')} bytes", file=sys.stderr)
     updated = {entry["id"]: entry for entry in reports}
     # A targeted refresh must not erase the audit records of the other cached layers.
     if args.layer:
@@ -260,9 +311,92 @@ def command_download(args: argparse.Namespace) -> None:
         "layers": reports,
     }
     destination.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     os.chmod(manifest_path, 0o644)
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 22), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def command_build(args: argparse.Namespace) -> None:
+    """Routing graph, search index and map layers from the downloaded sources."""
+    started = time.time()
+    item = region(load_catalog(), args.region)
+    destination = IMPORTS / item["code"]
+    manifest_path = destination / "manifest.json"
+    if not manifest_path.exists():
+        raise SystemExit(f"no downloaded sources for {item['code']}: run 'download {item['code']}' first")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    source_fingerprint = hashlib.sha256(json.dumps(
+        sorted((entry["id"], entry.get("sha256")) for entry in manifest.get("layers", []))).encode("utf-8")).hexdigest()
+
+    speller = Speller()
+    catalog.learn_names(destination, speller)
+    admin = catalog.Admin(destination, speller)
+    speller.freeze()
+    admin.finish(speller)
+    meta = {"region": item["code"], "builtAt": now_iso(), "sourceFingerprint": source_fingerprint}
+    water = geo.PolygonIndex()
+    for feature in catalog.read_collection(destination / "water-areas.geojson"):
+        water.add(catalog.polygons_of(feature.get("geometry") or {}))
+
+    def is_land(lon: float, lat: float) -> bool:
+        return admin.locate(lon, lat) is not None and not water.contains(lon, lat)
+
+    graph = network.build(destination, inec.features(destination, "streets"), destination / "roads.geojson",
+                          speller, admin.parish, meta, is_land=is_land)
+    layers = catalog.assemble(destination, speller, admin, catalog.load_aliases(ALIASES),
+                              include_buildings=not args.skip_buildings)
+    outputs = {}
+    for name in BUILD_OUTPUTS:
+        path = destination / name
+        if path.exists():
+            os.chmod(path, 0o644)
+            outputs[name] = {"bytes": path.stat().st_size, "sha256": sha256_file(path)}
+    build = {
+        "schemaVersion": 1,
+        "region": item["code"],
+        "builtAt": meta["builtAt"],
+        "sourceFingerprint": source_fingerprint,
+        "seconds": round(time.time() - started),
+        "graph": graph,
+        "layers": layers,
+        "outputs": outputs,
+    }
+    (destination / "build.json").write_text(json.dumps(build, ensure_ascii=False, indent=2) + "\n",
+                                            encoding="utf-8", newline="\n")
+    os.chmod(destination / "build.json", 0o644)
+    print(json.dumps(build, ensure_ascii=False, indent=2))
+
+
+def command_aliases(args: argparse.Namespace) -> None:
+    """Apply the neighbourhood groups and the audited popular names without rebuilding geometry."""
+    item = region(load_catalog(), args.region)
+    destination = IMPORTS / item["code"]
+    search_path = destination / "search.ndjson"
+    build_path = destination / "build.json"
+    if not search_path.exists() or not build_path.exists():
+        raise SystemExit(f"no built search index for {item['code']}: run 'build {item['code']}' first")
+    groups = catalog.add_neighbourhood_groups(search_path)
+    report = catalog.add_aliases(search_path, catalog.load_aliases(ALIASES))
+    build = json.loads(build_path.read_text(encoding="utf-8"))
+    build.setdefault("layers", {})["aliases"] = report
+    build["layers"]["neighbourhood_groups"] = groups
+    build.setdefault("outputs", {})["search.ndjson"] = {
+        "bytes": search_path.stat().st_size,
+        "sha256": sha256_file(search_path),
+    }
+    build["aliasesUpdatedAt"] = now_iso()
+    build_path.write_text(json.dumps(build, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    os.chmod(search_path, 0o644)
+    os.chmod(build_path, 0o644)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
 
 
 def parse_args() -> argparse.Namespace:
@@ -278,6 +412,13 @@ def parse_args() -> argparse.Namespace:
     download.add_argument("--include-large", action="store_true")
     download.add_argument("--force", action="store_true")
     download.set_defaults(handler=command_download)
+    build = sub.add_parser("build", help="routing graph, search index and map layers")
+    build.add_argument("region")
+    build.add_argument("--skip-buildings", action="store_true", help="leave building footprints out of the map")
+    build.set_defaults(handler=command_build)
+    aliases = sub.add_parser("aliases", help="apply neighbourhood groups and popular names to the search index")
+    aliases.add_argument("region")
+    aliases.set_defaults(handler=command_aliases)
     return parser.parse_args()
 
 

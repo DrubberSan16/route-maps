@@ -9,6 +9,7 @@ import { AppConfigService } from './config/app-config.service';
 import { AppConfigModule } from './config/config.module';
 import { CacheModule } from './infrastructure/cache/cache.module';
 import { buildLoggerParams } from './infrastructure/logging/logger.config';
+import { NativeDataModule } from './infrastructure/native/native-data.module';
 import { PrismaModule } from './infrastructure/prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { GeocodingModule } from './modules/geocoding/geocoding.module';
@@ -39,6 +40,7 @@ import { UsersModule } from './modules/users/users.module';
     }),
     PrismaModule,
     CacheModule,
+    NativeDataModule,
     AuthModule,
     UsersModule,
     MapsModule,

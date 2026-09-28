@@ -31,6 +31,10 @@ usa CDN. Exporta:
 | `calculateRoute(input, options?)` | ruta principal, alternativas, geometría e indicaciones |
 | `offlineMapUrl(regionId, options?)` | URL de descarga PMTiles reanudable |
 
+El objeto devuelto por `createMap` incluye `setOverlay(kind, visible)` para mostrar u ocultar las capas
+`precipitation` (lluvia anual), `temperature` (pisos térmicos) y `population` (mapa de calor de población).
+Los iconos de los puntos de interés se dibujan en el navegador (`/sdk/map-icons.js`).
+
 `baseUrl` es opcional y permite apuntar a otra instalación. Las coordenadas de
 la API usan `{ latitude, longitude }`; GeoJSON mantiene el orden estándar
 `[longitude, latitude]`.
@@ -49,9 +53,20 @@ Content-Type: application/json
 }
 ```
 
-La red vial oficial admite `CAR`, `TRUCK` y `MOTORCYCLE`. Se aceptan hasta 23
+Perfiles: `CAR`, `TRUCK`, `MOTORCYCLE`, `BICYCLE` y `PEDESTRIAN`. Se aceptan hasta 23
 paradas intermedias en `waypoints`. La respuesta incorpora `conditions` con
-tráfico medido, zonas climáticas, tiempo base y tiempo ajustado.
+tráfico medido, zonas climáticas, tiempo base y tiempo ajustado, indicaciones con
+nombres de calles y, cuando existen, `approximateSections` (accesos sin vía
+registrada que se deben dibujar como aproximados).
+
+## Búsqueda, tráfico y actividad
+
+- `GET /api/v1/geocoding/search?q=…&lat=…&lng=…`: lugares, calles, intersecciones
+  ("Av. 9 de Octubre y Boyacá") y puntos de interés de todo el país.
+- `GET /api/v1/geocoding/reverse?lat=…&lng=…`: calle, lugar y división administrativa.
+- `GET /api/v1/traffic/flow?bbox=…` y `GET /api/v1/traffic/activity?bbox=…`: tráfico de
+  los últimos 15 minutos por tramo y mapa de calor de actividad (GeoJSON, ver
+  `docs/routing.md`).
 
 ## Mapas offline
 
@@ -72,4 +87,6 @@ de espacio, reanudación, SHA-256 y reemplazo atómico.
   definir contratos de cuota o claves de API antes de elevar esos límites.
 - La interfaz no muestra marcas de motores o librerías internas. La procedencia
   y licencia de cada conjunto oficial se conserva en el registro auditable de
-  fuentes y debe acompañar cualquier redistribución de los datos.
+  fuentes y en `/fuentes.html`. Una aplicación que muestre este mapa debe citar
+  las fuentes (el INEC lo exige en todo producto derivado y pide un acuerdo para
+  uso comercial).

@@ -43,10 +43,23 @@ describe('GeocodingService', () => {
     await expect(service.search({ text: '  Lima ', limit: 5 })).resolves.toEqual([lima]);
     expect(provider.search).toHaveBeenCalledWith({ text: 'Lima', limit: 5 });
     expect(cache.set).toHaveBeenCalledWith(
-      expect.stringMatching(/^geocode:v1:search:/),
+      expect.stringMatching(/^geocode:v2:search:/),
       [lima],
       86400,
     );
+  });
+
+  it('keys the cache by the version of the data behind the answers', async () => {
+    let version = 'index-1';
+    provider.dataVersion = () => Promise.resolve(version);
+    const service = new GeocodingService(provider, cache, config);
+
+    await service.search({ text: 'Lima', limit: 5 });
+    version = 'index-2';
+    await service.search({ text: 'Lima', limit: 5 });
+
+    const [first, second] = cache.set.mock.calls.map(([key]) => key);
+    expect(first).not.toBe(second);
   });
 
   it('does not cache partial answers while a source is down', async () => {

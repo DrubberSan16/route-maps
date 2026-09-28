@@ -9,27 +9,37 @@ import java.util.Locale;
 import org.locationtech.jts.geom.Coordinate;
 
 /**
- * Official/public Ecuador layers downloaded by {@code native-data}. The source fields are deliberately translated
- * here into the platform schema so neither the viewer nor API consumers depend on a government server or its field
- * names at runtime.
+ * Region layers prepared by the data pipeline ({@code native-data download} + {@code build}) in the platform's own
+ * schema: roads with classes and labels, places, points of interest, land use, blocks, buildings, the census
+ * population grid and climate zones, plus the official boundaries and hydrography. Field names of the government
+ * services never reach the tiles, so neither the viewer nor API consumers depend on them.
  */
 public final class NativeData {
 
   public static final String PREFIX = "native_";
-  public static final String ROADS = PREFIX + "roads";
-  public static final String PLACES = PREFIX + "places";
+  public static final String ROADS = PREFIX + "map-roads";
+  public static final String PLACES = PREFIX + "map-places";
+  public static final String POIS = PREFIX + "map-pois";
+  public static final String LANDUSE = PREFIX + "map-landuse";
+  public static final String URBAN = PREFIX + "map-urban";
+  public static final String BLOCKS = PREFIX + "map-blocks";
+  public static final String BUILDINGS = PREFIX + "map-buildings";
+  public static final String POPULATION = PREFIX + "map-population";
   public static final String PROVINCES = PREFIX + "boundary-province";
   public static final String CANTONS = PREFIX + "boundary-canton";
   public static final String PARISHES = PREFIX + "boundary-parish";
-  public static final String HEALTH = PREFIX + "poi-health";
-  public static final String EDUCATION = PREFIX + "poi-education";
-  public static final String TOURISM = PREFIX + "poi-tourism";
   public static final String WATER_AREAS = PREFIX + "water-areas";
   public static final String WATERWAYS = PREFIX + "waterways";
   public static final String CLIMATE_PRECIPITATION = PREFIX + "climate-precipitation-regions";
+  public static final String CLIMATE_TEMPERATURE = PREFIX + "climate-temperature-regions";
 
-  public static final List<String> SOURCES = List.of(ROADS, PLACES, PROVINCES, CANTONS, PARISHES, HEALTH,
-    EDUCATION, TOURISM, WATER_AREAS, WATERWAYS, CLIMATE_PRECIPITATION);
+  public static final List<String> SOURCES = List.of(ROADS, PLACES, POIS, LANDUSE, URBAN, BLOCKS, BUILDINGS,
+    POPULATION, PROVINCES, CANTONS, PARISHES, WATER_AREAS, WATERWAYS, CLIMATE_PRECIPITATION, CLIMATE_TEMPERATURE);
+
+  /** Layer of the census population grid (drawn as a heat map by the clients). */
+  public static final String POPULATION_LAYER = "population";
+  /** Layer of the climate zones (optional overlay of the clients). */
+  public static final String CLIMATE_LAYER = "climate";
 
   private NativeData() {}
 
@@ -41,69 +51,254 @@ public final class NativeData {
     switch (feature.getSource()) {
       case ROADS -> road(feature, features);
       case PLACES -> place(feature, features);
-      case PROVINCES -> boundary(feature, features, 4, "dpa_despro", "state", 2, 5);
-      case CANTONS -> boundary(feature, features, 6, "dpa_descan", "town", 4, 8);
-      case PARISHES -> boundary(feature, features, 8, "dpa_despar", "village", 5, 11);
-      case HEALTH -> poi(feature, features, "hospital", "health", "uni_nombre", 5, 12);
-      case EDUCATION -> poi(feature, features, "school", "education", "nom_instit", 20, 14);
-      case TOURISM -> poi(feature, features, "attraction", "tourism", "nombre", 10, 13);
+      case POIS -> poi(feature, features);
+      case LANDUSE -> landuse(feature, features);
+      case URBAN -> urban(feature, features);
+      case BLOCKS -> block(feature, features);
+      case BUILDINGS -> building(feature, features);
+      case POPULATION -> population(feature, features);
+      case PROVINCES -> boundary(feature, features, 4, "dpa_despro");
+      case CANTONS -> boundary(feature, features, 6, null);
+      case PARISHES -> boundary(feature, features, 8, null);
       case WATER_AREAS -> water(feature, features);
       case WATERWAYS -> waterway(feature, features);
-      case CLIMATE_PRECIPITATION -> climate(feature, features);
+      case CLIMATE_PRECIPITATION -> precipitation(feature, features);
+      case CLIMATE_TEMPERATURE -> temperature(feature, features);
       default -> {
         // Not a native catalog source.
       }
     }
   }
 
+  // ---------------------------------------------------------------- roads
+
+  /** Zoom where a road class appears in the detailed network (the overview covers the state roads below 12). */
+  static int roadMinZoom(String roadClass, boolean hasRef) {
+    return switch (roadClass) {
+      case "motorway", "trunk", "primary" -> hasRef ? 12 : 10;
+      case "secondary" -> 11;
+      case "tertiary", "street", "track" -> 13;
+      default -> 14;
+    };
+  }
+
+  static int roadNameMinZoom(String roadClass) {
+    return switch (roadClass) {
+      case "motorway", "trunk", "primary" -> 12;
+      case "secondary" -> 13;
+      default -> 14;
+    };
+  }
+
   private static void road(SourceFeature feature, FeatureCollector features) {
     if (!feature.canBeLine()) {
       return;
     }
-    String hierarchy = lower(feature, "clasificac");
-    String roadClass = hierarchy == null ? "primary" : switch (hierarchy) {
-      case "arterial", "troncal" -> "trunk";
-      case "colectora" -> "primary";
-      case "vecinal", "local" -> "secondary";
-      default -> "primary";
+    String roadClass = text(feature, "class");
+    if (roadClass == null) {
+      return;
+    }
+    String layerClass = switch (roadClass) {
+      case "street" -> "minor";
+      case "footway", "steps" -> "path";
+      default -> roadClass;
     };
-    int minZoom = roadClass.equals("trunk") ? 5 : roadClass.equals("primary") ? 7 : 9;
+    String ref = text(feature, "ref");
+    boolean overview = "overview".equals(text(feature, "scope"));
+    boolean state = feature.hasTag("state");
+    int minZoom;
+    int maxZoom = Zooms.MAX;
+    if (overview) {
+      minZoom = switch (roadClass) {
+        case "motorway", "trunk" -> 5;
+        default -> 7;
+      };
+      maxZoom = 11;
+    } else if (state) {
+      minZoom = 12;
+    } else {
+      minZoom = roadMinZoom(roadClass, ref != null);
+    }
     var line = features.line(TransportationLayer.NAME)
-      .setAttr("class", roadClass)
-      .setAttr("source", "official")
+      .setAttr("class", layerClass)
       .setMinZoom(minZoom)
-      .setMinPixelSize(0);
-    setText(line, feature, "name", "nombre_tra", Math.max(minZoom, 9));
-    setText(line, feature, "ref", "codigo_via", Math.max(minZoom, 8));
-    setText(line, feature, "condition", "estado", 11);
-    String surface = lower(feature, "tipo_calza");
-    if (surface != null) {
-      line.setAttrWithMinzoom("surface", surface.contains("pavimento") || surface.contains("asfalto") ?
-        "paved" : "unpaved", 11);
+      .setMaxZoom(maxZoom)
+      .setMinPixelSize(0)
+      .setSortKey(sortKey(roadClass));
+    if (!layerClass.equals(roadClass)) {
+      line.setAttr("subclass", roadClass);
+    } else if (text(feature, "kind") != null && roadClass.equals("path")) {
+      line.setAttr("subclass", text(feature, "kind").toLowerCase(Locale.ROOT));
     }
-    double lanes = NaturalEarth.number(feature, "numero_car", 0);
-    if (lanes > 0 && lanes <= 20) {
-      line.setAttrWithMinzoom("lanes", (int) lanes, 12);
+    if (ref != null) {
+      line.setAttrWithMinzoom("ref", ref, Math.max(minZoom, 8));
     }
+    String name = text(feature, "name");
+    if (name != null) {
+      line.setAttrWithMinzoom("name", name, Math.max(minZoom, roadNameMinZoom(roadClass)));
+    }
+    if ("unpaved".equals(text(feature, "surface"))) {
+      line.setAttrWithMinzoom("surface", "unpaved", 11);
+    }
+    if ("tunnel".equals(text(feature, "brunnel"))) {
+      line.setAttrWithMinzoom("brunnel", "tunnel", 12);
+    }
+  }
+
+  static int sortKey(String roadClass) {
+    return switch (roadClass) {
+      case "motorway" -> 90;
+      case "trunk" -> 80;
+      case "primary" -> 70;
+      case "secondary" -> 60;
+      case "tertiary" -> 50;
+      case "street" -> 40;
+      case "service", "track" -> 30;
+      default -> 20;
+    };
+  }
+
+  // ---------------------------------------------------------------- places and points of interest
+
+  static int placeMinZoom(String placeClass, long population) {
+    return switch (placeClass) {
+      case "city" -> population >= 1_000_000 ? 4 : population >= 200_000 ? 5 : 6;
+      case "town" -> population >= 50_000 ? 7 : 8;
+      case "village" -> 10;
+      case "suburb" -> 12;
+      case "hamlet" -> 12;
+      default -> 13;
+    };
   }
 
   private static void place(SourceFeature feature, FeatureCollector features) {
-    String name = text(feature, "n_loc");
-    if (name == null || !feature.isPoint()) {
+    String name = text(feature, "name");
+    String placeClass = text(feature, "class");
+    if (name == null || placeClass == null || !feature.isPoint()) {
       return;
     }
+    long population = (long) number(feature, "population", 0);
+    int rank = (int) number(feature, "rank", 6);
+    int minZoom = placeMinZoom(placeClass, population);
     var point = features.point(PlaceLayer.NAME)
-      .setAttr("class", "village")
-      .setAttr("rank", 5)
+      .setAttr("class", placeClass)
+      .setAttr("rank", rank)
       .setAttr("name", name)
-      .setMinZoom(10)
-      .setSortKey(PlaceLayer.sortKey(5, 0))
+      .setMinZoom(minZoom)
+      .setSortKey(PlaceLayer.sortKey(rank, population))
       .setPointLabelGridSizeAndLimit(12, PlaceLayer.LABEL_GRID_PIXELS, PlaceLayer.LABEL_GRID_LIMIT)
       .setBufferPixels(PlaceLayer.LABEL_GRID_PIXELS);
+    if (population > 0) {
+      point.setAttr("population", population);
+    }
+    String capital = text(feature, "capital");
+    if (capital != null) {
+      point.setAttr("capital", capital);
+    }
   }
 
-  private static void boundary(SourceFeature feature, FeatureCollector features, int adminLevel, String nameField,
-    String placeClass, int rank, int labelZoom) {
+  static int poiMinZoom(int rank) {
+    return rank <= 8 ? 12 : rank <= 14 ? 13 : 14;
+  }
+
+  private static void poi(SourceFeature feature, FeatureCollector features) {
+    String poiClass = text(feature, "class");
+    if (poiClass == null || !feature.isPoint()) {
+      return;
+    }
+    int rank = (int) number(feature, "rank", 20);
+    var point = features.point(PoiLayer.NAME)
+      .setAttr("class", poiClass)
+      .setAttr("rank", rank)
+      .setMinZoom(poiMinZoom(rank))
+      .setSortKey(rank)
+      .setPointLabelGridSizeAndLimit(Zooms.MAX - 1, PoiLayer.LABEL_GRID_PIXELS, PoiLayer.LABEL_GRID_LIMIT)
+      .setBufferPixels(PoiLayer.LABEL_GRID_PIXELS);
+    String subclass = text(feature, "subclass");
+    if (subclass != null) {
+      point.setAttr("subclass", subclass);
+    }
+    String name = text(feature, "name");
+    if (name != null) {
+      point.setAttr("name", name);
+    }
+  }
+
+  // ---------------------------------------------------------------- areas
+
+  private static void landuse(SourceFeature feature, FeatureCollector features) {
+    String landuseClass = text(feature, "class");
+    if (landuseClass == null || !feature.canBePolygon()) {
+      return;
+    }
+    String layerClass = switch (landuseClass) {
+      case "pitch" -> "sports";
+      case "square" -> "pedestrian";
+      default -> landuseClass;
+    };
+    features.polygon(LanduseLayer.NAME)
+      .setAttr("class", layerClass)
+      .setMinZoom(landuseClass.equals("square") ? 14 : 12)
+      .setMinPixelSize(1);
+    String name = text(feature, "name");
+    if (name != null && (landuseClass.equals("park") || landuseClass.equals("cemetery"))) {
+      features.pointOnSurface(PoiLayer.NAME)
+        .setAttr("class", landuseClass)
+        .setAttr("subclass", landuseClass)
+        .setAttr("rank", 16)
+        .setAttr("name", name)
+        .setMinZoom(14)
+        .setSortKey(16)
+        .setPointLabelGridSizeAndLimit(Zooms.MAX - 1, PoiLayer.LABEL_GRID_PIXELS, PoiLayer.LABEL_GRID_LIMIT)
+        .setBufferPixels(PoiLayer.LABEL_GRID_PIXELS);
+    }
+  }
+
+  private static void urban(SourceFeature feature, FeatureCollector features) {
+    if (feature.canBePolygon()) {
+      features.polygon(LanduseLayer.NAME)
+        .setAttr("class", "residential")
+        .setMinZoom(6)
+        .setMaxZoom(12)
+        .setMinPixelSize(2);
+    }
+  }
+
+  private static void block(SourceFeature feature, FeatureCollector features) {
+    if (feature.canBePolygon()) {
+      features.polygon(LanduseLayer.NAME)
+        .setAttr("class", "block")
+        .setMinZoom(13)
+        .setMinPixelSize(1);
+    }
+  }
+
+  private static void building(SourceFeature feature, FeatureCollector features) {
+    if (feature.canBePolygon()) {
+      features.polygon(BuildingLayer.NAME)
+        .setMinZoom(Zooms.MAX)
+        .setMinPixelSize(1);
+    }
+  }
+
+  private static void population(SourceFeature feature, FeatureCollector features) {
+    if (!feature.isPoint()) {
+      return;
+    }
+    double people = number(feature, "pop", 0);
+    if (people <= 0) {
+      return;
+    }
+    features.point(POPULATION_LAYER)
+      .setAttr("pop", (long) people)
+      .setMinZoom(4)
+      .setMaxZoom(12)
+      .setSortKey((int) Math.max(0, 100_000 - Math.min(people, 100_000)));
+  }
+
+  // ---------------------------------------------------------------- boundaries, water, climate
+
+  private static void boundary(SourceFeature feature, FeatureCollector features, int adminLevel, String nameField) {
     if (!feature.canBePolygon()) {
       return;
     }
@@ -116,42 +311,18 @@ public final class NativeData {
     } catch (GeometryException error) {
       return;
     }
-    String name = text(feature, nameField);
+    String name = nameField == null ? null : text(feature, nameField);
     if (name != null) {
       features.pointOnSurface(PlaceLayer.NAME)
-        .setAttr("class", placeClass)
-        .setAttr("rank", rank)
-        .setAttr("name", name)
-        .setMinZoom(labelZoom)
-        .setSortKey(PlaceLayer.sortKey(rank, 0))
+        .setAttr("class", "state")
+        .setAttr("rank", 2)
+        .setAttr("name", titleCase(name))
+        .setMinZoom(5)
+        .setMaxZoom(9)
+        .setSortKey(PlaceLayer.sortKey(2, 0))
         .setPointLabelGridSizeAndLimit(12, PlaceLayer.LABEL_GRID_PIXELS, PlaceLayer.LABEL_GRID_LIMIT)
         .setBufferPixels(PlaceLayer.LABEL_GRID_PIXELS);
     }
-  }
-
-  private static void poi(SourceFeature feature, FeatureCollector features, String poiClass, String subclass,
-    String nameField, int rank, int minZoom) {
-    if (!feature.isPoint()) {
-      return;
-    }
-    String name = text(feature, nameField);
-    if (name == null) {
-      name = text(feature, "nam");
-    }
-    if (name == null) {
-      return;
-    }
-    var point = features.point(PoiLayer.NAME)
-      .setAttr("class", poiClass)
-      .setAttr("subclass", subclass)
-      .setAttr("rank", rank)
-      .setAttr("name", name)
-      .setAttr("source", "official")
-      .setMinZoom(minZoom)
-      .setSortKey(rank)
-      .setPointLabelGridSizeAndLimit(Zooms.MAX - 1, PoiLayer.LABEL_GRID_PIXELS, PoiLayer.LABEL_GRID_LIMIT)
-      .setBufferPixels(PoiLayer.LABEL_GRID_PIXELS);
-    setText(point, feature, "address", "uni_direcc", minZoom);
   }
 
   private static void water(SourceFeature feature, FeatureCollector features) {
@@ -160,11 +331,11 @@ public final class NativeData {
     }
     var polygon = features.polygon(WaterLayer.NAME)
       .setAttr("class", "river")
-      .setMinZoom(7)
+      .setMinZoom(6)
       .setMinPixelSizeBelowZoom(11, 2);
     String name = text(feature, "nam");
     if (name != null) {
-      polygon.setAttrWithMinzoom("name", name, 10);
+      polygon.setAttrWithMinzoom("name", titleCase(name), 10);
     }
   }
 
@@ -176,27 +347,98 @@ public final class NativeData {
       .setAttr("class", "river")
       .setMinZoom(9)
       .setMinPixelSize(0);
-    setText(line, feature, "name", "nam", 10);
+    String name = text(feature, "nam");
+    if (name != null) {
+      line.setAttrWithMinzoom("name", titleCase(name), 10);
+    }
     String permanence = lower(feature, "hyp_desc");
     if (permanence != null && !permanence.contains("perenne")) {
       line.setAttr("intermittent", true);
     }
   }
 
-  private static void climate(SourceFeature feature, FeatureCollector features) {
+  private static void precipitation(SourceFeature feature, FeatureCollector features) {
     if (!feature.canBePolygon()) {
       return;
     }
-    var polygon = features.polygon("climate")
-      .setAttr("class", "precipitation-region")
-      .setMinZoom(5)
+    String range = text(feature, "rango");
+    var polygon = features.polygon(CLIMATE_LAYER)
+      .setAttr("class", "precipitation")
+      .setMinZoom(4)
+      .setMaxZoom(12)
       .setMinPixelSize(2);
-    for (String field : List.of("name", "nombre", "region", "precip", "precipitac")) {
-      String value = text(feature, field);
-      if (value != null) {
-        polygon.setAttr(field, value);
+    if (range != null) {
+      polygon.setAttr("range", range);
+      double[] bounds = numbers(range);
+      if (bounds.length > 0) {
+        polygon.setAttr("mm_max", bounds[bounds.length - 1]);
       }
     }
+  }
+
+  private static void temperature(SourceFeature feature, FeatureCollector features) {
+    if (!feature.canBePolygon()) {
+      return;
+    }
+    String thermotype = text(feature, "termotipo");
+    if (thermotype == null) {
+      return;
+    }
+    features.polygon(CLIMATE_LAYER)
+      .setAttr("class", "temperature")
+      .setAttr("thermotype", titleCase(thermotype))
+      .setAttr("band", thermalBand(thermotype))
+      .setMinZoom(4)
+      .setMaxZoom(12)
+      .setMinPixelSize(2);
+  }
+
+  /** 1 (coldest) to 6 (warmest) from the bioclimatic thermotype. */
+  static int thermalBand(String thermotype) {
+    String value = thermotype.toLowerCase(Locale.ROOT);
+    if (value.contains("criorotropical") || value.contains("crioro")) {
+      return 1;
+    }
+    if (value.contains("orotropical")) {
+      return 2;
+    }
+    if (value.contains("supratropical")) {
+      return 3;
+    }
+    if (value.contains("mesotropical")) {
+      return 4;
+    }
+    if (value.contains("termotropical")) {
+      return 5;
+    }
+    return value.contains("infratropical") ? 6 : 4;
+  }
+
+  // ---------------------------------------------------------------- helpers
+
+  private static double[] numbers(String text) {
+    return java.util.regex.Pattern.compile("\\d+(?:[.,]\\d+)?").matcher(text).results()
+      .mapToDouble(match -> Double.parseDouble(match.group().replace(',', '.'))).toArray();
+  }
+
+  static String titleCase(String value) {
+    if (value == null || !value.equals(value.toUpperCase(Locale.ROOT))) {
+      return value;
+    }
+    StringBuilder out = new StringBuilder(value.length());
+    boolean start = true;
+    for (String word : value.toLowerCase(Locale.ROOT).split(" ")) {
+      if (word.isEmpty()) {
+        continue;
+      }
+      if (!start) {
+        out.append(' ');
+      }
+      boolean particle = !start && List.of("de", "del", "la", "las", "los", "el", "y").contains(word);
+      out.append(particle ? word : Character.toUpperCase(word.charAt(0)) + word.substring(1));
+      start = false;
+    }
+    return out.toString();
   }
 
   private static String text(WithTags feature, String field) {
@@ -212,11 +454,18 @@ public final class NativeData {
     return value == null ? null : value.toLowerCase(Locale.ROOT);
   }
 
-  private static void setText(FeatureCollector.Feature output, WithTags input, String outputField,
-    String inputField, int minZoom) {
-    String value = text(input, inputField);
-    if (value != null) {
-      output.setAttrWithMinzoom(outputField, value, minZoom);
+  private static double number(WithTags feature, String field, double fallback) {
+    Object value = feature.getTag(field);
+    if (value instanceof Number number) {
+      return number.doubleValue();
+    }
+    if (value == null) {
+      return fallback;
+    }
+    try {
+      return Double.parseDouble(value.toString());
+    } catch (NumberFormatException error) {
+      return fallback;
     }
   }
 

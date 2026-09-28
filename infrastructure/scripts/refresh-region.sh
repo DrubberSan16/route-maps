@@ -4,9 +4,12 @@
 #   ./infrastructure/scripts/refresh-region.sh ecuador
 #   ./infrastructure/scripts/refresh-region.sh ecuador --record-current
 #
-# The upstream fingerprint is checked first. Existing map/routing artifacts are
-# backed up on the same filesystem and restored if generation or health checks
-# fail. Only one refresh can run at a time.
+# Sources are downloaded and validated first. Their content fingerprint is then
+# compared with the accepted version; expensive graph/tile generation is skipped
+# when nothing changed. Only runtime artifacts are backed up on the same
+# filesystem and restored if generation or health checks fail. Intermediate
+# GeoJSON layers are reproducible and are deliberately not duplicated (~1.6 GB
+# for Ecuador). Only one refresh can run at a time.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -28,7 +31,10 @@ STATE_DIR="$STORAGE_PATH/.state"
 BACKUP_ROOT="$STORAGE_PATH/.refresh-backups"
 LOCK_FILE="$STORAGE_PATH/.refresh.lock"
 BASE_URL="${BASE_URL:-http://127.0.0.1:8090}"
-MIN_FREE_GB="${MIN_FREE_GB:-4}"
+# The national INEC package is about 4.7 GB while it is being converted and
+# atomic outputs temporarily coexist with the accepted ones. Refuse to start a
+# refresh without enough room for that peak.
+MIN_FREE_GB="${MIN_FREE_GB:-10}"
 STATE_FILE="$STATE_DIR/$REGION.source-version"
 
 mkdir -p "$STATE_DIR" "$BACKUP_ROOT"
@@ -49,6 +55,17 @@ if [[ "$MODE" == "--record-current" ]]; then
   exit 0
 fi
 
+# The graph build and the tile generator need about 6 GB of RAM for the whole country. A smaller
+# server must not start them (it would starve the other services): the region is then built on a
+# workstation and published with infrastructure/scripts/publish-region.sh.
+MIN_MEMORY_GB="${MIN_MEMORY_GB:-6}"
+MEMORY_KB="$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo 2>/dev/null || echo 0)"
+if (( ${MEMORY_KB:-0} < MIN_MEMORY_GB * 1024 * 1024 * 95 / 100 )); then
+  echo "Memoria insuficiente: se requieren ${MIN_MEMORY_GB} GiB para regenerar $REGION en este equipo." >&2
+  echo "Genérela en una estación de trabajo y publíquela con infrastructure/scripts/publish-region.sh." >&2
+  exit 1
+fi
+
 FREE_KB="$(df -Pk "$STORAGE_PATH" | awk 'NR == 2 { print $4 }')"
 REQUIRED_KB=$((MIN_FREE_GB * 1024 * 1024))
 if (( FREE_KB < REQUIRED_KB )); then
@@ -57,13 +74,24 @@ if (( FREE_KB < REQUIRED_KB )); then
 fi
 
 BACKUP_DIR="$(mktemp -d "$BACKUP_ROOT/$REGION.XXXXXX")"
-NATIVE_DIR="$STORAGE_PATH/imports/native/$REGION"
+NATIVE_REGION="$(jq -r --arg code "$REGION" \
+  '.regions[] | select(.code == $code) | (.source.nativeRegion // .code)' \
+  infrastructure/regions/regions.json)"
+[[ -n "$NATIVE_REGION" ]] || {
+  echo "La región $REGION no existe en el catálogo." >&2
+  exit 64
+}
+NATIVE_DIR="$STORAGE_PATH/imports/native/$NATIVE_REGION"
 MANIFEST="$(find "$STORAGE_PATH/maps" -type f -name "$REGION.region.json" -print -quit)"
 MAP_REL=""
-if [[ -d "$NATIVE_DIR" ]]; then
-  mkdir -p "$BACKUP_DIR/native"
-  cp -a "$NATIVE_DIR" "$BACKUP_DIR/native/$REGION"
-fi
+RUNTIME_NATIVE_FILES=(graph.bin search.ndjson build.json manifest.json climate-precipitation-regions.geojson)
+mkdir -p "$BACKUP_DIR/native"
+for file in "${RUNTIME_NATIVE_FILES[@]}"; do
+  if [[ -f "$NATIVE_DIR/$file" ]]; then
+    cp -a "$NATIVE_DIR/$file" "$BACKUP_DIR/native/$file"
+    printf '%s\n' "$file" >>"$BACKUP_DIR/native/existing.txt"
+  fi
+done
 if [[ -n "$MANIFEST" ]]; then
   MAP_REL="$(jq -r '.mapFile // empty' "$MANIFEST")"
   [[ "$MAP_REL" != /* && "$MAP_REL" != *".."* ]] || {
@@ -83,23 +111,39 @@ restore() {
     cp -a "$BACKUP_DIR/maps/$MAP_REL" "$STORAGE_PATH/maps/$MAP_REL"
     cp -a "$BACKUP_DIR/maps/$(dirname "$MAP_REL")/$REGION.region.json" "$MANIFEST"
   fi
-  if [[ -d "$BACKUP_DIR/native/$REGION" ]]; then
-    rm -rf -- "$NATIVE_DIR"
-    mkdir -p "$(dirname "$NATIVE_DIR")"
-    cp -a "$BACKUP_DIR/native/$REGION" "$NATIVE_DIR"
-  fi
+  mkdir -p "$NATIVE_DIR"
+  for file in "${RUNTIME_NATIVE_FILES[@]}"; do
+    if grep -Fxq "$file" "$BACKUP_DIR/native/existing.txt" 2>/dev/null; then
+      cp -a "$BACKUP_DIR/native/$file" "$NATIVE_DIR/$file"
+    else
+      rm -f -- "$NATIVE_DIR/$file"
+    fi
+  done
   docker compose exec -T backend node dist/src/cli/sync-regions.js >/dev/null 2>&1 || true
   rm -rf -- "$BACKUP_DIR"
   exit "$exit_code"
 }
 trap restore EXIT INT TERM
 
-./infrastructure/scripts/download-region.sh "$REGION" --force-download
+PREVIOUS="$(cat "$STATE_FILE" 2>/dev/null || source_version)"
+docker compose --profile tools run --rm data-tools download "$REGION" --force-download
 CURRENT="$(source_version)"
 [[ -n "$CURRENT" ]] || {
   echo "No se pudo determinar la versión descargada para $REGION." >&2
   exit 1
 }
+if [[ "$CURRENT" == "$PREVIOUS" ]]; then
+  printf '%s\n' "$CURRENT" >"$STATE_FILE"
+  trap - EXIT INT TERM
+  rm -rf -- "$BACKUP_DIR"
+  echo "$REGION no cambió ($CURRENT); se conserva la publicación actual."
+  exit 0
+fi
+
+docker compose --profile tools run --rm data-tools build "$REGION"
+docker compose --profile tools run --rm data-tools map "$REGION"
+docker compose --profile tools run --rm data-tools manifest "$REGION" >/dev/null
+docker compose exec -T backend node dist/src/cli/sync-regions.js
 
 HEALTH=""
 for _ in $(seq 1 40); do

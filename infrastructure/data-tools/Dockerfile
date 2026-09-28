@@ -42,13 +42,19 @@ ENV PATH="${JAVA_HOME}/bin:${PATH}"
 COPY --from=tilegen /out/ /opt/tilegen/
 COPY --chmod=755 data-tools/bin/region.sh /usr/local/bin/region.sh
 COPY --chmod=755 data-tools/bin/native-data.py /usr/local/bin/native-data
+COPY data-tools/lib/mapsdata /opt/mapsdata/mapsdata
+COPY data-tools/tests /opt/mapsdata/tests
 COPY regions/regions.json /etc/maps-platform/regions.json
 COPY sources/sources.json /etc/maps-platform/sources.json
+COPY sources/aliases.json /etc/maps-platform/aliases.json
 
+# The pipeline library is tested while the image is built.
 RUN java -version \
  && jq empty /etc/maps-platform/regions.json \
  && jq empty /etc/maps-platform/sources.json \
- && python3 -m py_compile /usr/local/bin/native-data
+ && jq empty /etc/maps-platform/aliases.json \
+ && python3 -m py_compile /usr/local/bin/native-data \
+ && cd /opt/mapsdata && PYTHONPATH=/opt/mapsdata python3 -m unittest discover -s tests -t /opt/mapsdata
 
 WORKDIR /data
 ENTRYPOINT ["region.sh"]

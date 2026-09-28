@@ -6,6 +6,7 @@
  * an account with a third-party map provider.
  */
 import * as maplibregl from '../vendor/maplibre-gl.mjs';
+import { registerPoiIcons } from './map-icons.js';
 
 const SDK_URL = new URL(import.meta.url);
 const DEFAULT_BASE_URL = SDK_URL.origin;
@@ -196,12 +197,20 @@ export async function createMap(options) {
     pitchWithRotate: false,
   });
   map.touchZoomRotate.disableRotation();
+  registerPoiIcons(map, JSON.parse(templateText).metadata?.['maps-platform:poi-colors'] ?? {});
   if (options.navigationControl !== false) {
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
   }
+  const setOverlay = (kind, visible) => {
+    for (const layer of map.getStyle().layers) {
+      if (layer.id.endsWith(`/overlay-${kind}`)) map.setLayoutProperty(layer.id, 'visibility', visible ? 'visible' : 'none');
+    }
+  };
   return {
     map,
     regions,
+    /** Shows or hides a map overlay: 'precipitation', 'temperature' or 'population'. */
+    setOverlay,
     calculateRoute: (input) => calculateRoute(input, { baseUrl: origin }),
     searchPlaces: (query, searchOptions = {}) =>
       searchPlaces(query, { ...searchOptions, baseUrl: origin }),

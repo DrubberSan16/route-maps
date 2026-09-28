@@ -55,7 +55,7 @@ $commands = [ordered]@{
   'regions-sync'    = 'Registra en el backend las regiones preparadas'
   'download-region' = 'Descarga las fuentes oficiales auditadas: -Region ecuador'
   'build-map'       = 'Genera el mapa PMTiles de una región descargada (-WaterPolygons: océanos)'
-  'build-routing'   = 'Verifica la red vial nativa de una región'
+  'build-routing'   = 'Construye grafo de rutas, índice de búsqueda y capas nativas'
   'prepare-region'  = 'Descarga + mapa + manifiesto + registro: -Region ecuador'
   'geocoding-up'    = 'Informa sobre la geocodificación nativa integrada'
   'prod-up'         = 'Producción: construye y levanta con docker-compose.prod.yml'
@@ -95,7 +95,7 @@ switch ($Command) {
   }
   'build-routing' {
     Assert-Region
-    'El routing nativo usa storage\imports\native\ecuador\roads.geojson; no hay un grafo externo.'
+    Invoke-Docker @tools build $Region
   }
   'prepare-region' {
     Assert-Region

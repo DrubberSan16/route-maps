@@ -35,6 +35,7 @@ export interface AppConfig {
     language: string;
     cacheTtlSeconds: number;
     maxAlternatives: number;
+    /** Road graph built by the data pipeline (graph.bin). */
     nativeGraphFile: string;
   };
   geocoding: {
@@ -46,6 +47,8 @@ export interface AppConfig {
     /** Countries and cities of the world base map (world.places.json), searched with Nominatim. */
     placesFile: string;
     nativeDataPath: string;
+    /** Search index built by the data pipeline (search.ndjson). */
+    nativeSearchFile: string;
   };
   maps: {
     storagePath: string;
@@ -81,6 +84,7 @@ const optional = (value: string | undefined): string | undefined =>
 export const loadConfiguration = (): AppConfig => {
   const env = process.env;
   const cors = (env.CORS_ORIGINS ?? '*').trim();
+  const nativeDataPath = optional(env.NATIVE_DATA_PATH) ?? '/data/native/ecuador';
   return {
     nodeEnv: env.NODE_ENV ?? 'development',
     port: int(env.APP_PORT, 3000),
@@ -122,9 +126,7 @@ export const loadConfiguration = (): AppConfig => {
       language: env.ROUTING_LANGUAGE ?? 'es-ES',
       cacheTtlSeconds: int(env.ROUTING_CACHE_TTL_SECONDS, 600),
       maxAlternatives: int(env.ROUTING_MAX_ALTERNATIVES, 2),
-      nativeGraphFile:
-        optional(env.NATIVE_ROUTING_GRAPH_FILE) ??
-        join(env.NATIVE_DATA_PATH ?? '/data/native', 'ecuador', 'roads.geojson'),
+      nativeGraphFile: optional(env.NATIVE_ROUTING_GRAPH_FILE) ?? join(nativeDataPath, 'graph.bin'),
     },
     geocoding: {
       provider: (env.GEOCODING_PROVIDER ?? 'none').toLowerCase() as GeocodingProviderName,
@@ -135,7 +137,8 @@ export const loadConfiguration = (): AppConfig => {
       placesFile:
         optional(env.GEOCODING_PLACES_FILE) ??
         join(env.MAP_STORAGE_PATH ?? '/data/maps', 'world', 'world.places.json'),
-      nativeDataPath: env.NATIVE_DATA_PATH ?? '/data/native/ecuador',
+      nativeDataPath,
+      nativeSearchFile: optional(env.NATIVE_SEARCH_FILE) ?? join(nativeDataPath, 'search.ndjson'),
     },
     maps: {
       storagePath: env.MAP_STORAGE_PATH ?? '/data/maps',
