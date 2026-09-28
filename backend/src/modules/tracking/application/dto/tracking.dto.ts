@@ -71,6 +71,28 @@ export class TrackLocationBatchDto {
   locations: TrackLocationDto[];
 }
 
+export class TrafficQueryDto {
+  @ApiProperty({ example: -2.5 })
+  @Type(() => Number)
+  @IsLatitude()
+  minLat: number;
+
+  @ApiProperty({ example: -80.2 })
+  @Type(() => Number)
+  @IsLongitude()
+  minLng: number;
+
+  @ApiProperty({ example: -1.8 })
+  @Type(() => Number)
+  @IsLatitude()
+  maxLat: number;
+
+  @ApiProperty({ example: -79.6 })
+  @Type(() => Number)
+  @IsLongitude()
+  maxLng: number;
+}
+
 export const toLocationPoint = (dto: TrackLocationDto) => ({
   tripId: dto.tripId,
   latitude: dto.latitude,

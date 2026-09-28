@@ -11,7 +11,6 @@ import '../../domain/entities/offline_route.dart';
 import '../../domain/repositories/map_repository.dart';
 import '../../domain/services/location_service.dart';
 import '../../presentation/providers.dart';
-import '../../presentation/widgets/attribution.dart';
 import '../../presentation/widgets/connection_banner.dart';
 import '../../services/regions/region_download_service.dart';
 import '../account/account_screen.dart';
@@ -141,7 +140,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                       onOfflineMaps: () => _push(const OfflineMapsScreen()),
                     ),
                     const SizedBox(height: 4),
-                    const Align(alignment: Alignment.centerLeft, child: OsmAttribution()),
                   ],
                 ),
               ),

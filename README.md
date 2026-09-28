@@ -1,404 +1,127 @@
-# Maps Platform
+# Route Maps
 
-Plataforma propia de mapas y navegación construida sobre datos de
-OpenStreetMap: mapas vectoriales generados por nosotros, cálculo de rutas
-autohospedado, mapas descargables por región para usar sin conexión, rutas
-guardadas, recorridos con GPS y sincronización offline-first entre la app
-móvil y el servidor.
+Plataforma cartográfica autónoma para Ecuador. La instalación descarga
+instantáneas auditables de fuentes oficiales, genera sus propias teselas
+vectoriales, calcula rutas con su propio grafo, busca lugares localmente y
+publica mapas descargables para uso sin conexión. Ninguna vista solicita mapas,
+rutas o geocodificación a proveedores externos durante la ejecución.
 
-- **Backend**: monolito modular NestJS + PostgreSQL/PostGIS + Redis.
-- **Routing**: Valhalla autohospedado (OSRM como alternativa), nunca expuesto a Internet.
-- **Mapas**: teselas vectoriales propias (Planetiler) en archivos PMTiles por región.
-- **App**: Flutter (Android e iOS) con MapLibre, Riverpod, Drift y Dio.
-- **Entrada única**: Nginx es el único servicio publicado.
+## Capacidades
 
-No se usan teselas ni datos de Google Maps y no se descargan teselas de
-`tile.openstreetmap.org`: todos los mapas se generan a partir de extractos
-`.osm.pbf` de proveedores legítimos (Geofabrik).
+- Mapa vectorial PMTiles de Ecuador, servido con peticiones HTTP Range.
+- Red vial estatal nacional y motor de rutas nativo para auto, camión y moto.
+- Provincias, cantones, parroquias, localidades, cuerpos de agua, salud,
+  educación y turismo.
+- Regiones climáticas de precipitación incluidas en el mapa.
+- Validación de cada ruta contra tráfico reciente propio y climatología local.
+- Geocodificación local de localidades y puntos de interés oficiales.
+- API pública, visor web y SDK JavaScript servidos por la misma instalación.
+- Descarga offline del archivo de mapa con checksum y manifiesto versionado.
+- Actualización programable, atómica y con registro de procedencia.
 
-## Contenido
+## Arquitectura de ejecución
 
-1. [Arquitectura](#arquitectura)
-2. [Tecnologías](#tecnologías)
-3. [Requisitos](#requisitos)
-4. [Instalación](#instalación)
-5. [Variables de entorno](#variables-de-entorno)
-6. [Docker](#docker)
-7. [Migraciones](#migraciones)
-8. [Carga de datos OSM](#carga-de-datos-osm)
-9. [Preparación del routing](#preparación-del-routing)
-10. [Mapas offline](#mapas-offline)
-11. [App Flutter](#app-flutter)
-12. [Endpoints](#endpoints)
-13. [Swagger](#swagger)
-14. [Pruebas](#pruebas)
-15. [Troubleshooting](#troubleshooting)
-16. [Producción](#producción)
-17. [Licencias y atribución](#licencias-y-atribución)
-
-## Arquitectura
-
-```mermaid
-flowchart LR
-  app["App Flutter<br/>MapLibre + SQLite"] -->|HTTPS| nginx
-  web["Visor web"] --> nginx
-  subgraph edge["Red pública"]
-    nginx["Nginx<br/>único puerto publicado"]
-  end
-  subgraph private["maps-network (interna, sin Internet)"]
-    backend["Backend NestJS"]
-    postgres[("PostgreSQL + PostGIS")]
-    redis[("Redis")]
-    routing["Valhalla"]
-    nominatim["Nominatim<br/>(opcional)"]
-  end
-  nginx -->|/api, /health| backend
-  nginx -->|/maps/*.pmtiles, descargas| storage[("./storage<br/>PMTiles y grafos")]
-  backend --> postgres
-  backend --> redis
-  backend --> routing
-  backend --> nominatim
-  tools["data-tools<br/>(bajo demanda)"] -->|genera| storage
+```text
+Aplicación / SDK / móvil
+          |
+        Nginx
+       /     \
+  PMTiles    API NestJS
+               |-- rutas nativas (roads.geojson)
+               |-- geocodificación nativa
+               |-- tráfico agregado propio
+               |-- PostgreSQL/PostGIS + Redis
 ```
 
-- El backend es un monolito modular (auth, users, regions, maps, routing,
-  trips, tracking, places, geofences, geocoding, synchronization, health),
-  separado en capas de dominio, aplicación, infraestructura y presentación.
-- Los mapas y grafos de cada región se generan con la imagen `data-tools` en
-  `./storage`, fuera del arranque de los servicios.
-- La app funciona sin conexión con los mapas descargados y sus rutas guardadas,
-  y sincroniza cuando vuelve la conexión.
+Los portales oficiales solo se consultan en la fase de ingesta. Los archivos
+descargados se validan, se resumen en `manifest.json` y se conservan en
+`storage/imports/native/`. El servicio en producción lee exclusivamente copias
+locales.
 
-Detalle y diagramas: [docs/architecture.md](docs/architecture.md),
-[docs/offline-architecture.md](docs/offline-architecture.md),
-[docs/routing.md](docs/routing.md) y [docs/maps.md](docs/maps.md).
-
-## Tecnologías
-
-| Área | Tecnología |
-| --- | --- |
-| API | Node.js 24, NestJS 11, TypeScript, Prisma 7, class-validator, Swagger, Pino |
-| Base de datos | PostgreSQL 17 + PostGIS 3.5 (`postgis/postgis:17-3.5`) |
-| Caché | Redis 8 |
-| Routing | Valhalla 3.9 (`ghcr.io/valhalla/valhalla:3.9.0`); adaptador OSRM disponible |
-| Geocoding | Nominatim 5.1 (perfil opcional `geocoding`) |
-| Mapas | Planetiler 0.10 (Java 21) → PMTiles v3, estilo MapLibre propio, glifos Noto Sans |
-| Proxy | Nginx 1.28 |
-| App | Flutter 3.47, maplibre_gl, flutter_riverpod 3, drift, dio, geolocator |
-| Contenedores | Docker, Docker Compose |
-
-## Requisitos
-
-- Docker 24 o superior con Docker Compose 2.24.4 o superior.
-- `make` y `bash` (Linux/macOS/WSL). En Windows sin WSL: `.\make.ps1 <comando>`.
-- Memoria asignada a Docker: 4 GB para una ciudad; para preparar Ecuador completo
-  se recomiendan 8 GB y `TILEGEN_MEMORY=4g` (generación de teselas y grafo).
-- Disco: espacio para el extracto, el mapa y el grafo de cada región, en
-  `./storage` (`du -sh storage/*` muestra lo ocupado).
-- Para la app: Flutter 3.47.5 y JDK 21 (ver [mobile/README.md](mobile/README.md)).
-- Para desarrollar el backend fuera de Docker: Node.js 22.12 o superior.
-
-## Instalación
+## Inicio local
 
 ```bash
-git clone https://github.com/DrubberSan16/route-maps.git
-cd route-maps
-make init                             # crea .env con secretos aleatorios
-make up                               # construye y levanta el stack
-make prepare-region REGION=guayaquil  # descarga, mapa, routing y registro
-make prepare-region REGION=world      # mapa base mundial + búsqueda de países y ciudades
+cp .env.example .env
+make init
+make prepare-region REGION=ecuador
+docker compose up -d --build
 ```
 
-Guayaquil se recorta del extracto de Ecuador, así que la primera vez se descarga
-Ecuador completo desde Geofabrik; las regiones siguientes reutilizan ese
-extracto.
+Abrir `http://localhost:8080`. Los datos generados no se versionan en Git.
 
-- Visor web: <http://localhost:8080> (búsqueda de lugares con sugerencias,
-  "Cómo llegar" con paradas, mapa mundial y regiones detalladas)
-- API: <http://localhost:8080/api/v1>
-- Swagger: <http://localhost:8080/api/docs>
-- Salud: <http://localhost:8080/health>
+## API para otras aplicaciones
 
-`make up` no descarga ni procesa datos geográficos: el stack arranca vacío y
-cada región se prepara con `make prepare-region`. Mientras no haya un grafo
-para `ROUTING_REGION`, el servicio `routing` espera (lo revisa cada 30 s y
-arranca solo cuando aparece) y el cálculo de rutas responde
-`ROUTING_PROVIDER_UNAVAILABLE`.
+- `GET /api/v1/maps/regions`: regiones y versiones publicadas.
+- `GET /api/v1/maps/regions/{id}/download`: mapa PMTiles offline.
+- `POST /api/v1/routes/calculate`: ruta, distancia, tiempo y condiciones.
+- `GET /api/v1/geocoding/search`: búsqueda local.
+- `GET /api/v1/geocoding/reverse`: lugar oficial cercano.
+- `GET /api/v1/tracking/traffic`: tráfico agregado, solo cuando hay al menos
+  tres viajes y cinco muestras por celda.
+- `GET /sdk/route-maps.js`: SDK web sin CDN.
+- `GET /developers.html`: ejemplos de integración.
 
-Comprobación completa del stack (salud, auth, regiones, descargas con Range,
-rutas en todos los perfiles, recorridos, sincronización, visor):
+Ejemplo de ruta:
 
 ```bash
-./infrastructure/scripts/smoke-test.sh http://localhost:8080
+curl -X POST https://route-map.softwareeasydev.com/api/v1/routes/calculate \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "origin":{"latitude":-2.1709,"longitude":-79.9224},
+    "destination":{"latitude":-0.1807,"longitude":-78.4678},
+    "profile":"CAR"
+  }'
 ```
 
-## Variables de entorno
+La respuesta incluye `distanceMeters`, `durationSeconds` y `conditions`:
 
-Todas salen de `.env` (plantilla comentada: [.env.example](.env.example));
-`docker-compose.yml` no contiene contraseñas, tokens ni secretos y se niega a
-arrancar si faltan (`DATABASE_PASSWORD`, `REDIS_PASSWORD`, `JWT_SECRET`,
-`JWT_REFRESH_SECRET`). `.env` nunca se sube a Git.
+- `traffic.status=observed` solo con muestras recientes y anónimas suficientes;
+  de lo contrario devuelve `insufficient_data`.
+- `climate.status=climatology` identifica las zonas de precipitación anual
+  atravesadas. No se presenta como meteorología en vivo.
+- `baseDurationSeconds` y `adjustedDurationSeconds` separan el tiempo de red vial
+  del ajuste medido por tráfico.
 
-| Variable | Uso |
-| --- | --- |
-| `NGINX_HTTP_PORT` | Puerto del host publicado por Nginx (8080 en desarrollo) |
-| `DATABASE_NAME`, `DATABASE_USER`, `DATABASE_PASSWORD` | PostgreSQL |
-| `REDIS_PASSWORD`, `REDIS_MAXMEMORY` | Redis |
-| `JWT_SECRET`, `JWT_REFRESH_SECRET` | Firma de tokens (distintos, 32+ caracteres en producción) |
-| `JWT_ACCESS_TTL_SECONDS`, `JWT_REFRESH_TTL_SECONDS` | Vigencia de los tokens (15 min y 30 días) |
-| `CORS_ORIGINS` | Orígenes permitidos (obligatorio en producción) |
-| `SWAGGER_ENABLED` | Publica `/api/docs` |
-| `RATE_LIMIT_TTL_MS`, `RATE_LIMIT_MAX` | Límite de peticiones por IP en la API |
-| `ROUTING_PROVIDER` | `valhalla` (por defecto) u `osrm` |
-| `ROUTING_REGION` | Región cuyo grafo sirve el contenedor `routing` |
-| `ROUTING_LANGUAGE` | Idioma de las indicaciones (`es-ES`) |
-| `ROUTING_MAX_ALTERNATIVES` | Rutas alternativas como máximo (2 por defecto, hasta 3) |
-| `GEOCODING_PROVIDER` | `none` o `nominatim` (la búsqueda de países y ciudades del mapa mundial funciona con ambos) |
-| `NOMINATIM_REGION`, `NOMINATIM_PASSWORD` | Extracto importado por Nominatim |
-| `STORAGE_PATH` | Carpeta con `imports/`, `maps/` y `routing/` |
-| `TILEGEN_MEMORY`, `VALHALLA_BUILD_THREADS` | Recursos para preparar regiones |
-| `SEED_DEMO_DATA`, `SEED_ADMIN_PASSWORD`, `SEED_DEMO_PASSWORD` | Datos de demostración (solo desarrollo) |
+## Datos y actualización
 
-## Docker
-
-| Servicio | Imagen | Publicado | Función |
-| --- | --- | --- | --- |
-| `nginx` | propia (nginx 1.28) | `NGINX_HTTP_PORT` | Proxy de la API, PMTiles con Range, descargas autorizadas, visor web |
-| `backend` | propia (Node 24) | no | API REST `/api/v1`, migraciones al arrancar |
-| `postgres` | `postgis/postgis:17-3.5` | no | Datos y consultas geoespaciales |
-| `redis` | `redis:8-alpine` | no | Caché de rutas, regiones y geocoding |
-| `routing` | propia (Valhalla 3.9) | no | Motor de rutas de `ROUTING_REGION` |
-| `data-tools` | propia (perfil `tools`) | no | Descarga extractos, genera PMTiles, grafos y manifiestos |
-| `nominatim` | `mediagis/nominatim:5.1` (perfil `geocoding`) | no | Búsqueda de direcciones |
-
-- Redes: `edge` (Nginx y la descarga de extractos) y `maps-network`
-  (`internal: true`, sin salida a Internet). PostgreSQL, Redis, el backend y
-  Valhalla no publican puertos.
-- Volúmenes: `postgres_data`, `redis_data`, `nominatim_data` y la carpeta
-  `./storage` montada en solo lectura en Nginx, el backend y `routing`.
-- Para acceder a PostgreSQL desde el host en desarrollo, copia
-  `docker-compose.override.example.yml` a `docker-compose.override.yml`
-  (publica el puerto solo en `127.0.0.1`).
-
-Comandos habituales: `make ps`, `make logs SERVICE=backend`, `make restart
-SERVICE=routing`, `make down`, `make config`. `make help` lista todos.
-
-## Migraciones
-
-El esquema está en [backend/prisma/schema.prisma](backend/prisma/schema.prisma)
-y las migraciones en `backend/prisma/migrations/`. Tablas: `users`,
-`refresh_tokens`, `devices`, `map_regions`, `downloaded_regions`, `places`,
-`favorite_places`, `routes`, `route_points`, `route_tombstones`, `trips`,
-`trip_points`, `geofences` y `synchronization_events`; las geometrías usan
-tipos PostGIS con índices GiST.
-
-- El backend aplica las migraciones pendientes al arrancar (`RUN_MIGRATIONS=true`).
-- A mano: `make migrate`.
-- Datos de demostración: `make seed` (usuarios `admin@maps.local` y
-  `demo@maps.local`; en desarrollo sus contraseñas por defecto están en
-  `.env.example`).
-- Nueva migración durante el desarrollo: modifica el esquema y ejecuta
-  `cd backend && npm run prisma:migrate:dev -- --name <cambio>` con
-  `DATABASE_URL` apuntando a una base de desarrollo.
-
-## Carga de datos OSM
-
-Las regiones se definen en
-[infrastructure/regions/regions.json](infrastructure/regions/regions.json):
-cada una se descarga de Geofabrik (`source.url`) o se recorta de su región
-padre con un `bbox` (`source.parent`). El catálogo incluye el mapa base
-mundial (`world`), Ecuador, Guayas, Guayaquil, Pichincha, Quito y Mónaco
-(región pequeña para pruebas). Además, **cualquier extracto de Geofabrik** se
-prepara por su id sin tocar el catálogo: `peru`, `colombia`, `spain`,
-`south-america`… (<https://download.geofabrik.de>).
+El registro completo está en `infrastructure/sources/sources.json`. Para revisar
+o regenerar:
 
 ```bash
-make regions                           # catálogo y lo ya generado
-make download-region REGION=guayaquil  # solo el extracto .osm.pbf
-make build-map REGION=guayaquil        # solo el mapa PMTiles
-make prepare-region REGION=guayaquil   # todo: extracto, mapa, routing, manifiesto, registro
-make prepare-region REGION=peru        # un país fuera del catálogo (índice de Geofabrik)
+docker compose --profile tools run --rm data-tools list
+make prepare-region REGION=ecuador
+make regions-sync
 ```
 
-- Los extractos se guardan en `storage/imports/`, se verifican con el MD5
-  publicado por Geofabrik y con `osmium`, y se reanudan si la descarga se corta.
-- Para una región a medida (una ciudad), añade una entrada al catálogo (código
-  en minúsculas, `bbox` como `[oeste, sur, este, norte]`) y ejecuta
-  `make prepare-region`.
-- **Mapa base mundial** (`REGION=world`): se genera con Natural Earth (dominio
-  público, ~45 MB de descarga, ~11 MB de mapa) y cubre todos los países hasta el
-  zoom 7: océanos, fronteras, ciudades, carreteras principales y ríos. Escribe
-  también `storage/maps/world/world.places.json` (unos 7.600 países y ciudades),
-  que la búsqueda usa junto a Nominatim. No tiene routing: las rutas y el
-  detalle de calles salen de las regiones preparadas. Todos los países con
-  detalle a la vez requieren el planeta de OSM (~85 GB y un servidor de 64 GB+
-  de RAM), así que se preparan los países que se necesiten.
-- Planetiler y Valhalla escriben sus temporales dentro del contenedor
-  (`TILEGEN_TMPDIR`, `ROUTING_BUILD_TMPDIR`): en Windows/macOS escribir miles de
-  archivos en `./storage` es muy lento.
-- Los archivos GIS (`.osm.pbf`, `.pmtiles`, grafos) nunca se versionan en Git.
-- `WATER=1` dibuja los océanos con los polígonos de OSMCoastline (descarga
-  única de ~1 GB); sin ellos, las zonas de mar se ven con el color de fondo.
+Cada salida se escribe en un temporal y se renombra al finalizar. El refresco
+desatendido usa `infrastructure/scripts/refresh-region.sh` y las unidades de
+`infrastructure/systemd/`.
 
-## Preparación del routing
+Las ortofotos no se descargan automáticamente: el IGM exige un flujo controlado
+de acceso/licencia. El catálogo deja preparada esa fuente, pero evita publicar
+imágenes sin autorización.
+
+## Validación
 
 ```bash
-make build-routing REGION=guayaquil
+cd backend
+npm run typecheck
+npm test -- --runInBand
+npm run build
+
+cd ../infrastructure/maps/tilegen
+mvn test
+
+docker compose config
 ```
 
-Genera el grafo de Valhalla en `storage/routing/guayaquil/` (con el paquete
-`guayaquil.valhalla.tar`) y reemplaza el anterior de forma atómica. El
-contenedor `routing` sirve la región de `ROUTING_REGION`; después de cambiarla:
-`docker compose up -d routing` (`make prepare-region` lo reinicia solo cuando
-reconstruye esa región). Perfiles: auto, camión, moto, bicicleta y a pie; la
-ruta principal y hasta 2 alternativas (`ROUTING_MAX_ALTERNATIVES`); indicaciones
-en español. Detalles, límites y la alternativa OSRM en
-[docs/routing.md](docs/routing.md).
+## Seguridad y operación
 
-## Mapas offline
+- Solo Nginx publica puertos; base de datos y caché permanecen en red privada.
+- Los secretos viven en `.env`, nunca en Git.
+- Las descargas offline requieren archivos y checksums registrados.
+- El tráfico público es agregado y aplica umbral de privacidad.
+- Los motores heredados están bajo perfiles opcionales y no arrancan por
+  defecto.
 
-1. `make prepare-region` genera `storage/maps/<carpeta>/<región>.pmtiles` y su
-   manifiesto `<región>.region.json` (versión `AAAA.MM.DD.HHMM`, SHA-256, bbox,
-   zooms).
-2. El backend registra los manifiestos al arrancar o con `make regions-sync` y
-   los publica en `GET /api/v1/maps/regions`.
-3. La app descarga el archivo con `GET /api/v1/maps/regions/{id}/download`:
-   el backend autoriza y Nginx lo entrega (`X-Accel-Redirect`) con soporte de
-   `Range`/`If-Range` y la cabecera `X-Checksum-Sha256`.
-4. La app escribe en un `.part`, reanuda si se corta, comprueba el espacio
-   libre y el SHA-256, y solo entonces reemplaza la versión anterior.
-5. Con `POST /api/v1/maps/regions/updates` la app sabe qué regiones tienen
-   versión nueva.
-
-Los mismos PMTiles se sirven en línea en `/maps/<carpeta>/<región>.pmtiles`
-(lecturas por rango, sin generar teselas en el servidor). Esquema de capas,
-estilo y glifos en [docs/maps.md](docs/maps.md); comportamiento sin conexión
-en [docs/offline-architecture.md](docs/offline-architecture.md).
-
-## App Flutter
-
-```bash
-cd mobile
-flutter pub get
-flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080   # emulador Android
-```
-
-Pantallas: mapa principal (búsqueda, Mi ubicación, Trazar ruta con paradas,
-Mapas offline), búsqueda, mapas offline, rutas guardadas, recorridos y cuenta
-con el estado de la sincronización. Configuración, permisos y compilación de
-release en [mobile/README.md](mobile/README.md). El CI publica en cada ejecución
-el APK de release apuntando a producción (artefacto `maps-platform-apk`; la
-URL sale de la variable del repositorio `API_BASE_URL`).
-
-## Endpoints
-
-Prefijo `/api/v1` salvo `/health`. Respuestas `{ "success": true, "data": … }`
-o `{ "success": false, "error": { "code", "message", "details", "requestId" } }`.
-🔓 público, 🔑 requiere `Authorization: Bearer`, 🛡️ administrador.
-
-| Módulo | Endpoints |
-| --- | --- |
-| Salud | 🔓 `GET /health` (base de datos, Redis, routing, geocoding) · 🔓 `GET /health/live` |
-| Auth | 🔓 `POST /auth/register` · 🔓 `POST /auth/login` · 🔓 `POST /auth/refresh` (rotación) · 🔓 `POST /auth/logout` · 🔑 `GET /auth/me` |
-| Usuarios | 🔑 `PATCH /users/me` · 🔑 `POST /users/me/devices` · 🔑 `GET /users/me/devices` |
-| Regiones | 🔓 `GET /maps/regions` · 🔓 `GET /maps/regions/locate?lat=&lng=` · 🔓 `GET /maps/regions/{id}` · 🔓 `GET /maps/regions/{id}/version` · 🔓 `POST /maps/regions/updates` · 🔓 `GET /maps/regions/{id}/download` · 🔓 `GET /maps/regions/{id}/routing/download` · 🔑 `GET /maps/regions/downloaded` · 🛡️ `POST /maps/regions/sync` · 🛡️ `PATCH /maps/regions/{id}` |
-| Rutas | 🔓 `POST /routes/calculate` · 🔑 `POST /routes` · 🔑 `GET /routes` · 🔑 `GET /routes/{id}` · 🔑 `DELETE /routes/{id}` |
-| Recorridos | 🔑 `POST /trips` · 🔑 `GET /trips` · 🔑 `GET /trips/{id}` · 🔑 `GET /trips/{id}/path?maxPoints=` · 🔑 `POST /trips/{id}/finish` · 🔑 `POST /trips/{id}/cancel` |
-| Tracking | 🔑 `POST /tracking/location` · 🔑 `POST /tracking/locations/batch` · 🔑 `GET /tracking/trips/{tripId}/last` |
-| Lugares | 🔑 `POST /places` · 🔑 `GET /places` · 🔑 `GET /places/{id}` · 🔑 `PATCH /places/{id}` · 🔑 `DELETE /places/{id}` · 🔑 `PUT /places/{id}/favorite` · 🔑 `DELETE /places/{id}/favorite` |
-| Geocercas | 🔑 `POST /geofences` · 🔑 `GET /geofences` · 🔑 `GET /geofences/check?lat=&lng=` · 🔑 `GET /geofences/{id}` · 🔑 `PATCH /geofences/{id}` · 🔑 `DELETE /geofences/{id}` |
-| Geocoding | 🔓 `GET /geocoding/search?q=` · 🔓 `GET /geocoding/reverse?lat=&lng=` |
-| Sincronización | 🔑 `POST /sync/push` · 🔑 `GET /sync/pull?since=&afterId=` |
-
-Nginx además sirve `/maps/<carpeta>/<región>.pmtiles`, `/maps/style/style.json`
-y `/maps/fonts/{fontstack}/{range}.pbf`.
-
-## Swagger
-
-Documentación interactiva en `/api/docs` y el esquema OpenAPI en
-`/api/docs-json`. Activo por defecto en desarrollo (`SWAGGER_ENABLED=true`) y
-desactivado en producción salvo que se habilite explícitamente.
-
-## Pruebas
-
-```bash
-make test-backend   # Jest: pruebas unitarias del backend
-make test-e2e       # e2e contra PostGIS real (E2E_DATABASE_URL a una base *_e2e)
-make test-tilegen   # generador de mapas (Maven, Java 21)
-make test-mobile    # Flutter: unitarias y de widgets
-make lint           # ESLint, Prettier, dart format y flutter analyze
-./infrastructure/scripts/smoke-test.sh   # stack completo levantado, a través de Nginx
-```
-
-Las pruebas e2e crean y vacían sus propias tablas: `E2E_DATABASE_URL` debe
-apuntar a una base cuyo nombre termine en `_e2e`, por ejemplo
-`postgresql://maps:<contraseña>@localhost:5432/maps_e2e`. El workflow de CI
-([.github/workflows/ci.yml](.github/workflows/ci.yml)) ejecuta todas estas
-comprobaciones y prepara la región de Mónaco para la prueba de humo.
-
-## Troubleshooting
-
-| Síntoma | Causa y solución |
-| --- | --- |
-| `docker compose up` falla con `Set DATABASE_PASSWORD in .env` | Falta `.env`: `make init` |
-| `routing` en *starting* o *unhealthy* y rutas con `ROUTING_PROVIDER_UNAVAILABLE` | No hay grafo para `ROUTING_REGION` (`make logs SERVICE=routing` lo dice): `make prepare-region REGION=<región>` o cambia `ROUTING_REGION` |
-| La ruta falla con `ROUTE_NOT_FOUND` | Los puntos están fuera de la región que sirve `routing` o lejos de cualquier calle |
-| La ruta falla con `INVALID_COORDINATES` | Coordenadas fuera de rango, origen igual al destino o puntos a más de 2.000 km |
-| El catálogo de regiones está vacío | La región no se registró: `make regions-sync` (o reinicia el backend) |
-| La descarga de un extracto se corta | Vuelve a ejecutar el comando: continúa desde el `.part` |
-| El mar se ve del color del fondo | Genera el mapa con `WATER=1` para dibujar los océanos |
-| La app no llega al servidor desde un teléfono | Usa la IP del equipo en `API_BASE_URL` y abre el puerto 8080 en el firewall |
-| La app dice "Sin conexión" con Wi-Fi | La app comprueba `/health/live`: revisa que Nginx y el backend estén sanos (`make ps`) |
-| La preparación de una región termina con `Killed` o código 137 | Falta memoria: sube la memoria de Docker, ajusta `TILEGEN_MEMORY` o prepara una región más pequeña |
-| Respuestas `429` | Límite de Nginx (30 peticiones/s por IP, ráfagas de 60) o del backend (`RATE_LIMIT_MAX` por ventana de `RATE_LIMIT_TTL_MS`, código `RATE_LIMIT_EXCEEDED`) |
-
-## Producción
-
-```bash
-make prod-up    # docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
-```
-
-- `docker-compose.prod.yml` fija `NODE_ENV=production`: el backend no arranca
-  con secretos JWT débiles (menos de 32 caracteres, iguales entre sí o con
-  `CHANGE_ME`), y Swagger y los datos de demostración quedan desactivados salvo
-  que se activen en `.env`.
-- TLS en Nginx: `NGINX_SERVER_CONF=./infrastructure/nginx/tls/https.conf` y
-  certificados `fullchain.pem`/`privkey.pem` en `TLS_CERTS_PATH` (nunca en Git).
-  Detrás de un balanceador que termina TLS, basta el puerto HTTP.
-- **Detrás del Nginx del servidor** (varios sitios en la misma máquina): publica
-  el contenedor solo en local, `NGINX_HTTP_PORT=127.0.0.1:8090` y
-  `NGINX_HTTPS_PORT=127.0.0.1:8453`, y en el sitio del host
-  `proxy_pass http://127.0.0.1:8090;` con `X-Forwarded-For` y
-  `X-Forwarded-Proto` (el Nginx del contenedor toma la IP real del cliente de
-  `X-Forwarded-For` cuando la conexión viene de la red de Docker).
-- **Base de datos en otro servidor**: añade `-f docker-compose.external-db.yml`
-  y define `DATABASE_HOST`, `DATABASE_NAME`, `DATABASE_USER`,
-  `DATABASE_PASSWORD` y `DATABASE_SSLMODE` (`require` por defecto). El
-  contenedor `postgres` no se levanta; la base necesita la extensión `postgis`.
-- `CORS_ORIGINS` es obligatorio; todos los servicios tienen reinicio automático
-  y límites de memoria ajustables (`BACKEND_MEMORY_LIMIT`, `ROUTING_MEMORY_LIMIT`, …).
-- Respaldos: `docker compose exec -T postgres pg_dump -U maps maps > respaldo.sql`
-  (usuario y base según `DATABASE_USER` y `DATABASE_NAME`).
-  `./storage` se puede regenerar a partir de los extractos.
-- Actualizar mapas: vuelve a ejecutar `make prepare-region` (nueva versión) y
-  las apps ofrecen la actualización; los usuarios conservan la versión anterior
-  hasta que la nueva esté completa y verificada.
-- El servicio `routing` sirve una región: para varios países, un contenedor por
-  región detrás del backend o un grafo que las incluya (ver
-  [docs/routing.md](docs/routing.md)).
-
-## Licencias y atribución
-
-- **Datos del mapa**: © OpenStreetMap contributors, disponibles bajo la
-  [Open Database License (ODbL) 1.0](https://opendatacommons.org/licenses/odbl/).
-  La atribución se muestra siempre sobre el mapa en la app y en el visor, y va
-  en la metadata de los PMTiles y del estilo. Los PMTiles y los grafos de
-  routing contienen datos de OpenStreetMap: al distribuirlos (por ejemplo, en
-  las descargas de la app) se aplican las condiciones de la ODbL, atribución y
-  compartir bajo la misma licencia las bases de datos derivadas
-  (<https://www.openstreetmap.org/copyright>).
-- **Tipografías**: Noto Sans (SIL Open Font License 1.1,
-  [infrastructure/maps/fonts/OFL.txt](infrastructure/maps/fonts/OFL.txt)).
-- **Software de terceros**: Valhalla, OSRM, Planetiler, MapLibre, Nominatim,
-  PostgreSQL/PostGIS, Redis, Nginx y los paquetes de npm, Maven y pub
-  mantienen sus propias licencias.
+Más detalle: `docs/maps.md`, `docs/integration.md` y `docs/architecture.md`.

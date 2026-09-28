@@ -6,7 +6,7 @@ import '../../domain/entities/routing_profile.dart';
 import '../../domain/services/routing_service.dart';
 
 /// Routes calculated by the platform (`POST /api/v1/routes/calculate`), which
-/// forwards to the self-hosted engine (Valhalla or OSRM).
+/// forwards to the platform's native official-road engine.
 class OnlineRoutingService implements RoutingService {
   OnlineRoutingService(this._api, {this.language = 'es-ES'});
 

@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 
-export type RoutingProviderName = 'valhalla' | 'osrm';
-export type GeocodingProviderName = 'nominatim' | 'none';
+export type RoutingProviderName = 'native' | 'valhalla' | 'osrm';
+export type GeocodingProviderName = 'native' | 'nominatim' | 'none';
 
 export interface AppConfig {
   nodeEnv: string;
@@ -35,6 +35,7 @@ export interface AppConfig {
     language: string;
     cacheTtlSeconds: number;
     maxAlternatives: number;
+    nativeGraphFile: string;
   };
   geocoding: {
     provider: GeocodingProviderName;
@@ -44,6 +45,7 @@ export interface AppConfig {
     defaultCountryCodes?: string;
     /** Countries and cities of the world base map (world.places.json), searched with Nominatim. */
     placesFile: string;
+    nativeDataPath: string;
   };
   maps: {
     storagePath: string;
@@ -109,7 +111,7 @@ export const loadConfiguration = (): AppConfig => {
       refreshTtlSeconds: int(env.JWT_REFRESH_TTL_SECONDS, 60 * 60 * 24 * 30),
     },
     routing: {
-      provider: (env.ROUTING_PROVIDER ?? 'valhalla').toLowerCase() as RoutingProviderName,
+      provider: (env.ROUTING_PROVIDER ?? 'native').toLowerCase() as RoutingProviderName,
       valhallaUrl: env.VALHALLA_URL ?? 'http://routing:8002',
       osrm: {
         carUrl: optional(env.OSRM_URL) ?? optional(env.OSRM_CAR_URL),
@@ -120,6 +122,9 @@ export const loadConfiguration = (): AppConfig => {
       language: env.ROUTING_LANGUAGE ?? 'es-ES',
       cacheTtlSeconds: int(env.ROUTING_CACHE_TTL_SECONDS, 600),
       maxAlternatives: int(env.ROUTING_MAX_ALTERNATIVES, 2),
+      nativeGraphFile:
+        optional(env.NATIVE_ROUTING_GRAPH_FILE) ??
+        join(env.NATIVE_DATA_PATH ?? '/data/native', 'ecuador', 'roads.geojson'),
     },
     geocoding: {
       provider: (env.GEOCODING_PROVIDER ?? 'none').toLowerCase() as GeocodingProviderName,
@@ -130,6 +135,7 @@ export const loadConfiguration = (): AppConfig => {
       placesFile:
         optional(env.GEOCODING_PLACES_FILE) ??
         join(env.MAP_STORAGE_PATH ?? '/data/maps', 'world', 'world.places.json'),
+      nativeDataPath: env.NATIVE_DATA_PATH ?? '/data/native/ecuador',
     },
     maps: {
       storagePath: env.MAP_STORAGE_PATH ?? '/data/maps',

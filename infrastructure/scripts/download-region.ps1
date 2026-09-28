@@ -1,12 +1,10 @@
 <#
 .SYNOPSIS
-  Downloads and prepares an offline region into .\storage (STORAGE_PATH).
+  Downloads audited sources and prepares an offline region into .\storage.
 .DESCRIPTION
-  1. Downloads the region's .osm.pbf from Geofabrik (or clips it from its parent
-     extract) into storage\imports and verifies it (MD5 + PBF check).
-  2. Builds the visual map storage\maps\<dir>\<region>.pmtiles.
-  3. Prepares the routing graph storage\routing\<region>\.
-  4. Writes the region manifest and registers the region in the backend.
+  Downloads and validates the official/public source catalog, builds the PMTiles
+  map, and writes the manifest registered by the backend. Routing reads the
+  audited road network directly and needs no separate service.
   Regions are defined in infrastructure\regions\regions.json. Everything runs
   inside the data-tools image: the host only needs Docker Desktop.
 .EXAMPLE
@@ -43,13 +41,4 @@ if ($backend) {
   Write-Host 'The backend is not running: the region is registered when it starts (.\make.ps1 up).'
 }
 
-if (-not $SkipRouting) {
-  $served = (& docker compose exec -T routing printenv ROUTING_REGION 2>$null)
-  if ($served) { $served = $served.Trim() }
-  if ($served -eq $Region) {
-    Write-Host "Restarting the routing service to load the new graph of $Region..."
-    & docker compose restart routing
-  } else {
-    Write-Host "The routing service serves '$served'. To route in $Region set ROUTING_REGION=$Region in .env and run: docker compose up -d routing"
-  }
-}
+Write-Host 'El backend nativo lee la red vial auditada directamente; no requiere un servicio de rutas separado.'

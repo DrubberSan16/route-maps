@@ -201,7 +201,7 @@ class RouteResult {
 
   final RoutingProfile profile;
 
-  /// Engine that produced the route (`valhalla`, `osrm`...).
+  /// Engine that produced the route (normally `native`).
   final String provider;
   final RouteSource source;
   final List<RouteOption> routes;

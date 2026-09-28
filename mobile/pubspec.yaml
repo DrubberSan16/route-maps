@@ -1,5 +1,5 @@
 name: maps_platform
-description: "Maps Platform: mapas offline, rutas y tracking sobre OpenStreetMap."
+description: "Route Maps: cartografía oficial, rutas y seguimiento autónomos."
 publish_to: 'none'
 version: 1.0.0+1
 

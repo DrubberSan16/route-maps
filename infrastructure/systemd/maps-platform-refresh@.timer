@@ -1,0 +1,11 @@
+[Unit]
+Description=Comprobar mensualmente actualizaciones cartográficas de %i
+
+[Timer]
+OnCalendar=Sun *-*-01..07 03:15:00
+RandomizedDelaySec=45m
+Persistent=true
+Unit=maps-platform-refresh@%i.service
+
+[Install]
+WantedBy=timers.target

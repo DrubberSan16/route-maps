@@ -1,6 +1,7 @@
 package com.mapsplatform.tilegen;
 
 import com.mapsplatform.tilegen.layers.NaturalEarth;
+import com.mapsplatform.tilegen.layers.NativeData;
 import com.onthegomap.planetiler.Planetiler;
 import com.onthegomap.planetiler.config.Arguments;
 import java.io.IOException;
@@ -13,7 +14,7 @@ import java.nio.file.Path;
  *
  * <pre>
  * java -jar tilegen-with-deps.jar \
- *   --osm_path=/data/imports/guayaquil.osm.pbf \
+ *   --native_data=/data/imports/native/ecuador \
  *   --output=/data/maps/ecuador/guayaquil.pmtiles \
  *   --name="Guayaquil" \
  *   [--water_polygons=/data/imports/water-polygons-split-3857.zip]
@@ -42,6 +43,8 @@ public final class TileGenerator {
     Path osm = arguments.file("osm_path", "OpenStreetMap extract (.osm.pbf) to render", null);
     Path naturalEarth = arguments.file("natural_earth",
       "folder with the Natural Earth 10m shapefiles (<name>.zip) of the world base map", null);
+    Path nativeData = arguments.file("native_data",
+      "folder with cataloged GeoJSON files produced by native-data", null);
     Path gazetteer = arguments.file("gazetteer",
       "JSON file to write the countries and cities of the world base map to (with --natural_earth)", null);
     Path output = arguments.file("output", "PMTiles file to write", Path.of("data", "output.pmtiles"));
@@ -52,14 +55,15 @@ public final class TileGenerator {
     if (!output.getFileName().toString().endsWith(".pmtiles")) {
       throw new IllegalArgumentException("--output must end with .pmtiles: " + output);
     }
-    if (osm == null && naturalEarth == null) {
-      throw new IllegalArgumentException("--osm_path (a region) or --natural_earth (the world base map) is required");
+    if (osm == null && naturalEarth == null && nativeData == null) {
+      throw new IllegalArgumentException("--native_data, --osm_path (legacy) or --natural_earth is required");
     }
     if (gazetteer != null && naturalEarth == null) {
       throw new IllegalArgumentException("--gazetteer needs --natural_earth");
     }
 
-    MapsPlatformProfile profile = new MapsPlatformProfile(name, osm == null);
+    MapsPlatformProfile profile = new MapsPlatformProfile(name, naturalEarth != null && osm == null && nativeData == null,
+      nativeData != null);
     Planetiler planetiler = Planetiler.create(arguments).setProfile(profile);
     if (osm != null) {
       if (!Files.isRegularFile(osm)) {
@@ -75,6 +79,22 @@ public final class TileGenerator {
         }
         // The projection comes from the .prj file inside the archive (WGS 84).
         planetiler.addShapefileSource(source, shapefile);
+      }
+    }
+    if (nativeData != null) {
+      if (!Files.isDirectory(nativeData)) {
+        throw new IllegalArgumentException("--native_data folder not found: " + nativeData);
+      }
+      int sources = 0;
+      for (String source : NativeData.SOURCES) {
+        Path geojson = nativeData.resolve(source.substring(NativeData.PREFIX.length()) + ".geojson");
+        if (Files.isRegularFile(geojson)) {
+          planetiler.addGeoJsonSource(source, geojson);
+          sources++;
+        }
+      }
+      if (sources == 0) {
+        throw new IllegalArgumentException("--native_data has no cataloged GeoJSON files: " + nativeData);
       }
     }
     if (waterPolygons != null) {

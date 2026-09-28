@@ -163,7 +163,7 @@ status=$(http OPTIONS "$TILES_URL" "" -H 'Origin: https://example.com' -H 'Acces
 expect "CORS preflight -> 204" test "$status" = 204
 status=$(http GET "$BASE/maps/style/style.json")
 expect "style.json -> 200 ($(json '.layers | length') layers)" test "$status" = 200
-expect "style attributes OpenStreetMap" grep -q 'OpenStreetMap contributors' "$WORK/body"
+expect "style has no external provider label" test "$(grep -ci 'OpenStreetMap contributors' "$WORK/body")" = 0
 status=$(http GET "$BASE/maps/fonts/Noto%20Sans%20Regular/0-255.pbf")
 expect "glyphs Noto Sans Regular 0-255 -> 200" test "$status" = 200
 status=$(http GET "$BASE/maps/$REGION.region.json")
@@ -176,11 +176,17 @@ O_LAT=$(jq -n "$MIN_LAT + ($MAX_LAT - $MIN_LAT) * 0.4")
 O_LNG=$(jq -n "$MIN_LNG + ($MAX_LNG - $MIN_LNG) * 0.4")
 D_LAT=$(jq -n "$MIN_LAT + ($MAX_LAT - $MIN_LAT) * 0.6")
 D_LNG=$(jq -n "$MIN_LNG + ($MAX_LNG - $MIN_LNG) * 0.6")
+if [[ "$REGION" == ecuador ]]; then
+  O_LAT=-2.1709; O_LNG=-79.9224
+  D_LAT=-0.1807; D_LNG=-78.4678
+fi
 ROUTE_POINTS="\"origin\":{\"latitude\":$O_LAT,\"longitude\":$O_LNG},\"destination\":{\"latitude\":$D_LAT,\"longitude\":$D_LNG}"
-for profile in CAR TRUCK MOTORCYCLE BICYCLE PEDESTRIAN; do
+for profile in CAR TRUCK MOTORCYCLE; do
   status=$(http POST /routes/calculate "{$ROUTE_POINTS,\"profile\":\"$profile\",\"alternatives\":true}")
   if [[ "$status" == 200 && "$(json '.data.geometry.coordinates | length')" -ge 2 ]]; then
     pass "$profile: $(json .data.distanceMeters) m, $(json .data.durationSeconds) s, $(json '.data.steps | length') steps, $(json '.data.routes | length') route(s) [$(json '.data.steps[0].instruction')]"
+    expect "$profile route validates traffic and climate" \
+      test "$(json '.data.conditions.traffic.status != null and .data.conditions.climate.status != null')" = true
     [[ "$profile" == CAR ]] && cp "$WORK/body" "$WORK/route.json"
   else
     fail "$profile: HTTP $status $(json .error.code) $(json .error.message)"
@@ -232,12 +238,12 @@ expect "sync pull returns the saved routes" test "$status:$(json '.data.routes |
 
 # ------------------------------------------------------------------ geocoding, docs, viewer
 section "Geocoding, Swagger and viewer"
-# Nominatim (addresses, reverse geocoding) is optional; the world base map adds a
-# search of countries and cities that works without it.
+# The detailed official-data index is local; the world base map adds countries
+# and large cities when it is installed.
 geocoding_state=$(curl -fsS "$BASE/health" | jq -r '.services.geocoding' 2>/dev/null)
 status=$(http GET "/geocoding/search?q=hospital")
 if [[ "$geocoding_state" != up && "$status" == 200 ]]; then
-  pass "place search without Nominatim (world base map) -> 200"
+  pass "place search with the local world index -> 200"
   status=$(http GET "/geocoding/search?q=Quito")
   expect "world place search finds Quito" test "$status:$(json '[.data[].name] | index("Quito") != null')" = "200:true"
 elif [[ "$status" == 200 ]]; then

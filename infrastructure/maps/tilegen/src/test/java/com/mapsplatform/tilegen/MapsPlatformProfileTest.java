@@ -89,7 +89,7 @@ class MapsPlatformProfileTest {
   void exposesTheDocumentedLayers() {
     assertEquals(List.of("water", "water_name", "waterway", "landuse", "building", "transportation", "boundary",
       "place", "poi", "housenumber"), profile.layerNames());
-    assertTrue(profile.attribution().contains("OpenStreetMap contributors"));
+    assertTrue(profile.attribution().isEmpty());
     assertEquals("maps-platform", profile.extraArchiveMetadata().get("schema"));
   }
 

@@ -18,7 +18,7 @@ PREPARE_FLAGS := $(if $(SKIP_ROUTING),--skip-routing) $(if $(WATER),--water-poly
 
 .PHONY: help init up down restart ps logs build config migrate seed regions regions-sync \
         download-region build-map build-routing prepare-region geocoding-up \
-        prod-up prod-down prod-logs test test-backend test-e2e test-tilegen test-mobile lint check-region
+        refresh-region prod-up prod-down prod-logs test test-backend test-e2e test-tilegen test-mobile lint check-region
 
 help: ## Muestra esta ayuda
 	@grep -hE '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -28,7 +28,7 @@ help: ## Muestra esta ayuda
 init: ## Crea .env desde .env.example con secretos aleatorios
 	@./infrastructure/scripts/init-env.sh
 
-up: ## Construye y levanta nginx, backend, postgres, redis y routing
+up: ## Construye y levanta nginx, backend, postgres y redis
 	$(COMPOSE) up -d --build
 
 down: ## Detiene el stack (conserva volúmenes y ./storage)
@@ -64,20 +64,23 @@ regions-sync: ## Registra en el backend las regiones preparadas
 check-region:
 	@[[ "$(REGION)" =~ ^[a-z0-9][a-z0-9-]{1,62}$$ ]] || { echo "Uso: make $(MAKECMDGOALS) REGION=<código> (ver: make regions)"; exit 64; }
 
-download-region: check-region ## Descarga (o recorta) el extracto OSM: REGION=guayaquil
+download-region: check-region ## Descarga las fuentes oficiales auditadas: REGION=ecuador
 	$(TOOLS) download $(REGION) $(if $(FORCE),--force-download)
 
 build-map: check-region ## Genera el mapa PMTiles de una región descargada (WATER=1: océanos)
 	$(TOOLS) map $(REGION) $(if $(WATER),--water-polygons)
 
-build-routing: check-region ## Genera el grafo de routing Valhalla de una región descargada
-	$(TOOLS) routing $(REGION)
+build-routing: check-region ## Verifica que la región use la red vial nativa
+	@echo "El routing nativo usa storage/imports/native/ecuador/roads.geojson; no hay un grafo externo."
 
-prepare-region: check-region ## Descarga + mapa + routing + manifiesto + registro: REGION=guayaquil
+prepare-region: check-region ## Descarga + mapa + manifiesto + registro: REGION=ecuador
 	./infrastructure/scripts/download-region.sh $(REGION) $(PREPARE_FLAGS)
 
-geocoding-up: ## Levanta Nominatim (la primera vez importa el extracto de NOMINATIM_REGION)
-	$(COMPOSE) --profile geocoding up -d
+refresh-region: check-region ## Actualiza solo si cambió el origen; rollback y validación: REGION=ecuador
+	./infrastructure/scripts/refresh-region.sh $(REGION)
+
+geocoding-up: ## Informa sobre la geocodificación nativa
+	@echo "La geocodificación nativa forma parte del backend y no requiere un servicio externo."
 
 prod-up: ## Producción: construye y levanta con docker-compose.prod.yml
 	$(PROD) up -d --build

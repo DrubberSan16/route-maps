@@ -72,8 +72,8 @@ class NaturalEarthTest {
 
   @Test
   void usesTheNaturalEarthAttribution() {
-    assertTrue(profile.attribution().contains("Natural Earth"));
-    assertTrue(new MapsPlatformProfile("Ecuador", false).attribution().contains("OpenStreetMap"));
+    assertTrue(profile.attribution().isEmpty());
+    assertTrue(new MapsPlatformProfile("Ecuador", false).attribution().isEmpty());
     assertTrue(profile.caresAboutSource(NaturalEarth.OCEAN));
   }
 

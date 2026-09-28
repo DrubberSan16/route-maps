@@ -142,11 +142,13 @@ export class RouteResponse {
   @ApiProperty({ type: LineStringDto }) geometry: LineStringDto;
   @ApiProperty({ type: RouteStepResponse, isArray: true }) steps: RouteStepResponse[];
   @ApiProperty({ example: [-79.93, -2.18, -79.88, -2.14] }) bbox: [number, number, number, number];
+  @ApiPropertyOptional({ description: 'Traffic and climate validation along this route' })
+  conditions?: Record<string, unknown>;
 }
 
 export class CalculateRouteResponse extends RouteResponse {
   @ApiProperty({ enum: ROUTING_PROFILES }) profile: RoutingProfile;
-  @ApiProperty({ example: 'valhalla' }) provider: string;
+  @ApiProperty({ example: 'native' }) provider: string;
   @ApiProperty({ type: RouteResponse, isArray: true, description: 'Primary route first' })
   routes: RouteResponse[];
 }

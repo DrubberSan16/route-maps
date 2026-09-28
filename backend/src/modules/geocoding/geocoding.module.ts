@@ -5,19 +5,22 @@ import { GEOCODING_PROVIDER, GeocodingProvider } from './domain/geocoding-provid
 import { CompositeGeocodingProvider } from './infrastructure/composite-geocoding.provider';
 import { DisabledGeocodingProvider } from './infrastructure/disabled-geocoding.provider';
 import { NominatimGeocodingProvider } from './infrastructure/nominatim-geocoding.provider';
+import { NativeGeocodingProvider } from './infrastructure/native-geocoding.provider';
 import { WorldPlaceIndex } from './infrastructure/world-place-index';
 import { GeocodingController } from './presentation/geocoding.controller';
 
 const geocodingProviderFactory = (config: AppConfigService): GeocodingProvider => {
   const geocoding = config.get('geocoding');
   const detailed =
-    geocoding.provider === 'nominatim'
-      ? new NominatimGeocodingProvider({
-          baseUrl: geocoding.nominatimUrl,
-          timeoutMs: geocoding.timeoutMs,
-          defaultCountryCodes: geocoding.defaultCountryCodes,
-        })
-      : new DisabledGeocodingProvider();
+    geocoding.provider === 'native'
+      ? new NativeGeocodingProvider(geocoding.nativeDataPath)
+      : geocoding.provider === 'nominatim'
+        ? new NominatimGeocodingProvider({
+            baseUrl: geocoding.nominatimUrl,
+            timeoutMs: geocoding.timeoutMs,
+            defaultCountryCodes: geocoding.defaultCountryCodes,
+          })
+        : new DisabledGeocodingProvider();
   return new CompositeGeocodingProvider(detailed, new WorldPlaceIndex(geocoding.placesFile));
 };
 

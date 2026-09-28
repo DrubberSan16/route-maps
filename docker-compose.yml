@@ -3,17 +3,16 @@
 #   cp .env.example .env          # or: make init (generates random secrets)
 #   docker compose up -d --build
 #
-# Only Nginx publishes a port. PostgreSQL, Redis, the backend and the routing
-# engine live in the private network maps-network (internal: no Internet access
-# and no published ports).
+# Only Nginx publishes a port. PostgreSQL, Redis and the backend live in the
+# private network maps-network (internal: no Internet access or published ports).
 #
-# Region data (OSM extracts, PMTiles maps, routing graphs) lives in ./storage
+# Audited source snapshots and PMTiles maps live in ./storage
 # (STORAGE_PATH) and is prepared on demand with the data-tools image:
 #   make prepare-region REGION=guayaquil
 # Nothing is downloaded or processed during `docker compose up`.
 #
 # Production: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-# Geocoding (Nominatim, heavy, optional): docker compose --profile geocoding up -d
+# Legacy engines are optional migration aids and are never started by default.
 name: maps-platform
 
 x-logging: &logging
@@ -71,15 +70,12 @@ services:
       LOG_PRETTY: ${LOG_PRETTY:-false}
       RATE_LIMIT_TTL_MS: ${RATE_LIMIT_TTL_MS:-60000}
       RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-120}
-      ROUTING_PROVIDER: ${ROUTING_PROVIDER:-valhalla}
-      VALHALLA_URL: ${VALHALLA_URL:-http://routing:8002}
-      OSRM_URL: ${OSRM_URL:-}
-      OSRM_BICYCLE_URL: ${OSRM_BICYCLE_URL:-}
-      OSRM_FOOT_URL: ${OSRM_FOOT_URL:-}
+      ROUTING_PROVIDER: ${ROUTING_PROVIDER:-native}
       ROUTING_LANGUAGE: ${ROUTING_LANGUAGE:-es-ES}
       ROUTING_MAX_ALTERNATIVES: ${ROUTING_MAX_ALTERNATIVES:-2}
-      GEOCODING_PROVIDER: ${GEOCODING_PROVIDER:-none}
-      NOMINATIM_URL: ${NOMINATIM_URL:-http://nominatim:8080}
+      NATIVE_ROUTING_GRAPH_FILE: ${NATIVE_ROUTING_GRAPH_FILE:-/data/native/ecuador/roads.geojson}
+      GEOCODING_PROVIDER: ${GEOCODING_PROVIDER:-native}
+      NATIVE_DATA_PATH: ${NATIVE_DATA_PATH:-/data/native/ecuador}
       GEOCODING_COUNTRY_CODES: ${GEOCODING_COUNTRY_CODES:-}
       MAP_STORAGE_PATH: /data/maps
       ROUTING_STORAGE_PATH: /data/routing
@@ -94,6 +90,7 @@ services:
       # Region manifests and files (read-only: the data-tools image writes them).
       - ${STORAGE_PATH:-./storage}/maps:/data/maps:ro
       - ${STORAGE_PATH:-./storage}/routing:/data/routing:ro
+      - ${STORAGE_PATH:-./storage}/imports/native:/data/native:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -158,40 +155,15 @@ services:
     networks: [maps-network]
     logging: *logging
 
-  routing:
-    build:
-      context: ./infrastructure
-      dockerfile: valhalla/Dockerfile
-      args:
-        VALHALLA_IMAGE: ${VALHALLA_IMAGE:-ghcr.io/valhalla/valhalla:3.9.0}
-    image: ${IMAGE_PREFIX:-maps-platform}/routing:${IMAGE_TAG:-latest}
-    environment:
-      # Serves storage/routing/<ROUTING_REGION>/ built by `make prepare-region`.
-      ROUTING_REGION: ${ROUTING_REGION:-guayaquil}
-      VALHALLA_SERVER_THREADS: ${VALHALLA_SERVER_THREADS:-2}
-    volumes:
-      - ${STORAGE_PATH:-./storage}/routing:/data/routing:ro
-    healthcheck:
-      test: ["CMD", "routing-healthcheck.sh"]
-      interval: 15s
-      timeout: 5s
-      retries: 4
-      start_period: 60s
-    networks: [maps-network]
-    logging: *logging
-
   # ---- On demand: region data pipeline (make prepare-region REGION=...) ----
   data-tools:
     profiles: [tools]
     build:
       context: ./infrastructure
       dockerfile: data-tools/Dockerfile
-      args:
-        VALHALLA_IMAGE: ${VALHALLA_IMAGE:-ghcr.io/valhalla/valhalla:3.9.0}
     image: ${IMAGE_PREFIX:-maps-platform}/data-tools:${IMAGE_TAG:-latest}
     environment:
       TILEGEN_MEMORY: ${TILEGEN_MEMORY:-2g}
-      VALHALLA_BUILD_THREADS: ${VALHALLA_BUILD_THREADS:-}
       REGION_VERSION: ${REGION_VERSION:-}
     volumes:
       - ${STORAGE_PATH:-./storage}/imports:/data/imports
@@ -199,42 +171,6 @@ services:
       - ${STORAGE_PATH:-./storage}/routing:/data/routing
     # Needs Internet access to download extracts, nothing else.
     networks: [edge]
-    logging: *logging
-
-  # ---- Optional: geocoding (docker compose --profile geocoding up -d) ----
-  # Imports storage/imports/<NOMINATIM_REGION>.osm.pbf on the first start (download
-  # it first: make download-region REGION=...). Requirements in docs/routing.md.
-  nominatim:
-    profiles: [geocoding]
-    image: ${NOMINATIM_IMAGE:-mediagis/nominatim:5.1}
-    # Refuse to start without a password (the image would otherwise set an empty one).
-    entrypoint:
-      - /bin/bash
-      - -c
-      - '[ -n "$${NOMINATIM_PASSWORD}" ] || { echo "Set NOMINATIM_PASSWORD in .env" >&2; exit 1; }; exec /app/start.sh'
-    environment:
-      PBF_PATH: /data/imports/${NOMINATIM_REGION:-guayaquil}.osm.pbf
-      NOMINATIM_PASSWORD: ${NOMINATIM_PASSWORD:-}
-      IMPORT_STYLE: ${NOMINATIM_IMPORT_STYLE:-full}
-      THREADS: ${NOMINATIM_THREADS:-4}
-      GUNICORN_WORKERS: ${NOMINATIM_WORKERS:-2}
-      # Sized for a developer machine; the image defaults assume 32 GB+ of RAM.
-      POSTGRES_SHARED_BUFFERS: ${NOMINATIM_PG_SHARED_BUFFERS:-512MB}
-      POSTGRES_MAINTENANCE_WORK_MEM: ${NOMINATIM_PG_MAINTENANCE_WORK_MEM:-1GB}
-      POSTGRES_AUTOVACUUM_WORK_MEM: ${NOMINATIM_PG_AUTOVACUUM_WORK_MEM:-256MB}
-      POSTGRES_EFFECTIVE_CACHE_SIZE: ${NOMINATIM_PG_EFFECTIVE_CACHE_SIZE:-2GB}
-    volumes:
-      - nominatim_data:/var/lib/postgresql/16/main
-      - ${STORAGE_PATH:-./storage}/imports:/data/imports:ro
-    shm_size: 1g
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/status >/dev/null || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      # The first start imports the extract (minutes for a city, hours for a country).
-      start_period: 6h
-    networks: [maps-network]
     logging: *logging
 
 networks:
@@ -247,4 +183,3 @@ networks:
 volumes:
   postgres_data: {}
   redis_data: {}
-  nominatim_data: {}

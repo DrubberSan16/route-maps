@@ -112,8 +112,8 @@ flutter build apk --release --dart-define=API_BASE_URL=https://maps.example.com
 flutter build ipa --release --dart-define=API_BASE_URL=https://maps.example.com
 ```
 
-## Atribución
+## Procedencia
 
-Datos del mapa © OpenStreetMap contributors (ODbL). La app muestra la
-atribución sobre el mapa en todo momento. Tipografías Noto Sans bajo SIL Open
-Font License (`assets/fonts/OFL.txt`).
+La cartografía proviene del catálogo auditable de fuentes oficiales de la
+plataforma. La app no muestra marcas de motores internos. Tipografías Noto Sans
+bajo SIL Open Font License (`assets/fonts/OFL.txt`).

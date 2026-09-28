@@ -1,5 +1,5 @@
 {
-  "description": "Catalog of offline regions. A region is either downloaded from a legitimate OpenStreetMap extract provider (source.url) or clipped from its parent extract with a bounding box (source.parent + bbox, [minLng, minLat, maxLng, maxLat]). \"world\" is the world base map built from Natural Earth (source.naturalEarth, low zooms, no routing). Any Geofabrik extract id not listed here (peru, colombia, spain, ...) can be prepared too. mapDir is the folder under storage/maps.",
+  "description": "Catalog of offline regions. Detailed Ecuador maps are built only from the audited native source catalog (source.nativeRegion). World is a public-domain low-zoom base map. mapDir is the folder under storage/maps.",
   "regions": [
     {
       "code": "world",
@@ -15,8 +15,14 @@
       "name": "Ecuador",
       "country": "EC",
       "mapDir": "ecuador",
+      "bbox": [
+        -92.1,
+        -5.1,
+        -75.1,
+        1.7
+      ],
       "source": {
-        "url": "https://download.geofabrik.de/south-america/ecuador-latest.osm.pbf"
+        "nativeRegion": "ecuador"
       }
     },
     {
@@ -32,7 +38,7 @@
         -1.35
       ],
       "source": {
-        "parent": "ecuador"
+        "nativeRegion": "ecuador"
       }
     },
     {
@@ -49,7 +55,7 @@
         -2
       ],
       "source": {
-        "parent": "ecuador"
+        "nativeRegion": "ecuador"
       }
     },
     {
@@ -65,7 +71,7 @@
         0.35
       ],
       "source": {
-        "parent": "ecuador"
+        "nativeRegion": "ecuador"
       }
     },
     {
@@ -82,16 +88,7 @@
         0.05
       ],
       "source": {
-        "parent": "ecuador"
-      }
-    },
-    {
-      "code": "monaco",
-      "name": "Mónaco",
-      "country": "MC",
-      "mapDir": "europe",
-      "source": {
-        "url": "https://download.geofabrik.de/europe/monaco-latest.osm.pbf"
+        "nativeRegion": "ecuador"
       }
     }
   ]

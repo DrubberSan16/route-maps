@@ -1,0 +1,233 @@
+{
+  "schemaVersion": 1,
+  "description": "Registro auditable de fuentes no-OSM. Cada capa se descarga, valida y sirve desde la plataforma; las URL remotas solo se usan durante la ingesta.",
+  "regions": [
+    {
+      "code": "ecuador",
+      "name": "Ecuador",
+      "bbox": [-92.1, -5.1, -75.1, 1.7],
+      "coordinateReference": "EPSG:4326",
+      "layers": [
+        {
+          "id": "roads",
+          "title": "Red Vial Estatal nacional",
+          "role": "transportation",
+          "kind": "arcgis-feature-layer",
+          "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/RVE_ST/FeatureServer/0",
+          "maxAllowableOffset": 0.00001,
+          "required": true,
+          "expectedGeometry": ["LineString", "MultiLineString"],
+          "updateCadence": "monthly",
+          "method": "measured",
+          "organization": "Ministerio de Transporte y Obras Publicas / Secretaria Nacional de Gestion de Riesgos",
+          "license": {
+            "id": "CC-BY",
+            "attributionRequired": true,
+            "termsUrl": "https://www.datosabiertos.gob.ec/dataset/red-vial-estatal-ecuatoriana-en-kilometros"
+          }
+        },
+        {
+          "id": "places",
+          "title": "Localidades oficiales",
+          "role": "place",
+          "kind": "arcgis-feature-layer",
+          "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/LOCALIDADES_07072026/FeatureServer/0",
+          "required": true,
+          "expectedGeometry": ["Point"],
+          "updateCadence": "quarterly",
+          "method": "measured",
+          "organization": "Secretaria Nacional de Gestion de Riesgos",
+          "license": {
+            "id": "EC-public-information",
+            "attributionRequired": true,
+            "termsUrl": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/LOCALIDADES_07072026/FeatureServer/0"
+          }
+        },
+        {
+          "id": "boundary-province",
+          "title": "Limites provinciales 2026",
+          "role": "boundary",
+          "adminLevel": 4,
+          "kind": "arcgis-feature-layer",
+          "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/OT_PROVINCIAL_17072026/FeatureServer/0",
+          "maxAllowableOffset": 0.00005,
+          "required": true,
+          "expectedGeometry": ["Polygon", "MultiPolygon"],
+          "updateCadence": "quarterly",
+          "method": "measured",
+          "organization": "Comite Nacional de Limites Internos / Secretaria Nacional de Gestion de Riesgos",
+          "license": {
+            "id": "EC-free-access-cartography",
+            "attributionRequired": true,
+            "termsUrl": "https://www.geoportaligm.gob.ec/portal/index.php/descargas/cartografia-de-libre-acceso/registro/"
+          }
+        },
+        {
+          "id": "boundary-canton",
+          "title": "Limites cantonales 2026",
+          "role": "boundary",
+          "adminLevel": 6,
+          "kind": "arcgis-feature-layer",
+          "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/OT_CANTONAL_17072026/FeatureServer/0",
+          "maxAllowableOffset": 0.00003,
+          "required": true,
+          "expectedGeometry": ["Polygon", "MultiPolygon"],
+          "updateCadence": "quarterly",
+          "method": "measured",
+          "organization": "Comite Nacional de Limites Internos / Secretaria Nacional de Gestion de Riesgos",
+          "license": {
+            "id": "EC-free-access-cartography",
+            "attributionRequired": true,
+            "termsUrl": "https://www.geoportaligm.gob.ec/portal/index.php/descargas/cartografia-de-libre-acceso/registro/"
+          }
+        },
+        {
+          "id": "boundary-parish",
+          "title": "Limites parroquiales 2026",
+          "role": "boundary",
+          "adminLevel": 8,
+          "kind": "arcgis-feature-layer",
+          "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/OT_PARROQUIAL_17072026/FeatureServer/0",
+          "maxAllowableOffset": 0.00002,
+          "required": true,
+          "expectedGeometry": ["Polygon", "MultiPolygon"],
+          "updateCadence": "quarterly",
+          "method": "measured",
+          "organization": "Comite Nacional de Limites Internos / Secretaria Nacional de Gestion de Riesgos",
+          "license": {
+            "id": "EC-free-access-cartography",
+            "attributionRequired": true,
+            "termsUrl": "https://www.geoportaligm.gob.ec/portal/index.php/descargas/cartografia-de-libre-acceso/registro/"
+          }
+        },
+        {
+          "id": "poi-health",
+          "title": "Establecimientos de salud",
+          "role": "poi",
+          "category": "hospital",
+          "kind": "arcgis-feature-layer",
+          "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/CENTROS_DE_SALUD/FeatureServer/0",
+          "required": true,
+          "expectedGeometry": ["Point"],
+          "updateCadence": "monthly",
+          "method": "measured",
+          "organization": "Ministerio de Salud Publica / Secretaria Nacional de Gestion de Riesgos",
+          "license": {
+            "id": "EC-public-information",
+            "attributionRequired": true,
+            "termsUrl": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/CENTROS_DE_SALUD/FeatureServer/0"
+          }
+        },
+        {
+          "id": "poi-education",
+          "title": "Centros educativos",
+          "role": "poi",
+          "category": "school",
+          "kind": "arcgis-feature-layer",
+          "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/CENTROS_EDUCATIVOS/FeatureServer/0",
+          "required": true,
+          "expectedGeometry": ["Point"],
+          "updateCadence": "monthly",
+          "method": "measured",
+          "organization": "Ministerio de Educacion / Secretaria Nacional de Gestion de Riesgos",
+          "license": {
+            "id": "EC-public-information",
+            "attributionRequired": true,
+            "termsUrl": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/CENTROS_EDUCATIVOS/FeatureServer/0"
+          }
+        },
+        {
+          "id": "poi-tourism",
+          "title": "Atractivos turisticos",
+          "role": "poi",
+          "category": "attraction",
+          "kind": "arcgis-feature-layer",
+          "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/ATRACTIVOS_TURISTICOS_CORT_DIC_2023/FeatureServer/0",
+          "required": true,
+          "expectedGeometry": ["Point"],
+          "updateCadence": "quarterly",
+          "method": "measured",
+          "organization": "Ministerio de Turismo / Secretaria Nacional de Gestion de Riesgos",
+          "license": {
+            "id": "EC-public-information",
+            "attributionRequired": true,
+            "termsUrl": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/ATRACTIVOS_TURISTICOS_CORT_DIC_2023/FeatureServer/0"
+          }
+        },
+        {
+          "id": "water-areas",
+          "title": "Cuerpos de agua y rios en area",
+          "role": "water",
+          "kind": "arcgis-feature-layer",
+          "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/RIO_A/FeatureServer/0",
+          "maxAllowableOffset": 0.00002,
+          "required": true,
+          "expectedGeometry": ["Polygon", "MultiPolygon"],
+          "updateCadence": "yearly",
+          "method": "measured",
+          "organization": "Secretaria Nacional de Gestion de Riesgos",
+          "license": {
+            "id": "EC-public-information",
+            "attributionRequired": true,
+            "termsUrl": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/RIO_A/FeatureServer/0"
+          }
+        },
+        {
+          "id": "waterways",
+          "title": "Red hidrografica lineal",
+          "role": "waterway",
+          "kind": "arcgis-feature-layer",
+          "url": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/RIO_L/FeatureServer/0",
+          "maxAllowableOffset": 0.00002,
+          "required": false,
+          "large": true,
+          "expectedGeometry": ["LineString", "MultiLineString"],
+          "updateCadence": "yearly",
+          "method": "measured",
+          "organization": "Secretaria Nacional de Gestion de Riesgos",
+          "license": {
+            "id": "EC-public-information",
+            "attributionRequired": true,
+            "termsUrl": "https://sgrportal.gestionderiesgos.gob.ec/server/rest/services/Hosted/RIO_L/FeatureServer/0"
+          }
+        },
+        {
+          "id": "climate-precipitation-regions",
+          "title": "Regiones de precipitacion",
+          "role": "climate",
+          "kind": "wfs-geojson",
+          "url": "https://geoservicios.inamhi.gob.ec/geoserver/ows",
+          "typeName": "geonode:regiones_precip",
+          "required": true,
+          "expectedGeometry": ["Polygon", "MultiPolygon"],
+          "updateCadence": "monthly",
+          "method": "measured",
+          "organization": "Instituto Nacional de Meteorologia e Hidrologia",
+          "license": {
+            "id": "EC-open-hydrometeorological-data",
+            "attributionRequired": true,
+            "termsUrl": "https://geoservicios.inamhi.gob.ec/"
+          }
+        },
+        {
+          "id": "imagery-igm",
+          "title": "Ortofotos oficiales",
+          "role": "imagery",
+          "kind": "wms-catalog",
+          "url": "https://www.geoportaligm.gob.ec/geoportal-igm/",
+          "required": false,
+          "download": false,
+          "updateCadence": "source-defined",
+          "method": "measured",
+          "organization": "Instituto Geografico Militar",
+          "license": {
+            "id": "IGM-controlled-download",
+            "attributionRequired": true,
+            "termsUrl": "https://www.geoportaligm.gob.ec/portal/wp-content/uploads/2012/10/LEE-ME.pdf"
+          },
+          "note": "La imagen se incorpora solo por zona y despues de registrar/aceptar la licencia IGM; no se enlaza en tiempo de ejecucion."
+        }
+      ]
+    }
+  ]
+}

@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# Downloads and prepares an offline region into ./storage (STORAGE_PATH):
+# Downloads audited sources and prepares an offline region into ./storage:
 #
 #   ./infrastructure/scripts/download-region.sh <region> [--skip-routing] [--water-polygons] [--force-download]
 #
-#   1. downloads the region's .osm.pbf from Geofabrik (or clips it from its
-#      parent extract) into storage/imports and verifies it (MD5 + PBF check);
-#   2. builds the visual map        storage/maps/<dir>/<region>.pmtiles;
-#   3. prepares the routing graph   storage/routing/<region>/;
-#   4. writes the region manifest and registers the region in the backend.
+#   1. downloads and validates the region's official/public catalog;
+#   2. builds the visual map storage/maps/<dir>/<region>.pmtiles;
+#   3. writes the region manifest and registers it in the backend.
 #
 # Regions are defined in infrastructure/regions/regions.json (list them with
 # `make regions`). Everything runs inside the data-tools image: the host only
@@ -32,10 +30,4 @@ else
   echo "The backend is not running: the region is registered when it starts (make up)."
 fi
 
-served_region="$(docker compose exec -T routing printenv ROUTING_REGION 2>/dev/null | tr -d '\r' || true)"
-if [[ "$served_region" == "$REGION" && " $* " != *" --skip-routing "* ]]; then
-  echo "Restarting the routing service to load the new graph of $REGION..."
-  docker compose restart routing
-elif [[ " $* " != *" --skip-routing "* ]]; then
-  echo "The routing service serves '${served_region:-<not running>}'. To route in $REGION set ROUTING_REGION=$REGION in .env and run: docker compose up -d routing"
-fi
+echo "El backend nativo lee la red vial auditada directamente; no requiere un servicio de rutas separado."

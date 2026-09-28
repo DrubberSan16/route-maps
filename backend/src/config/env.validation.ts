@@ -39,11 +39,11 @@ class EnvironmentVariables {
   JWT_REFRESH_SECRET: string;
 
   @IsOptional()
-  @IsIn(['valhalla', 'osrm'])
+  @IsIn(['native', 'valhalla', 'osrm'])
   ROUTING_PROVIDER?: string;
 
   @IsOptional()
-  @IsIn(['nominatim', 'none'])
+  @IsIn(['native', 'nominatim', 'none'])
   GEOCODING_PROVIDER?: string;
 
   @IsOptional()

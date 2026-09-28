@@ -8,7 +8,7 @@
 #   - restart: unless-stopped and memory limits on every service;
 #   - Nginx publishes 80/443; TLS with NGINX_SERVER_CONF=./infrastructure/nginx/tls/https.conf
 #     and the certificates in TLS_CERTS_PATH (fullchain.pem + privkey.pem);
-#   - PostgreSQL, Redis, backend and routing stay in the internal network maps-network.
+#   - PostgreSQL, Redis and backend stay in the internal network maps-network.
 # Requires Docker Compose 2.24.4 or newer (!override).
 
 x-restart: &restart
@@ -54,17 +54,3 @@ services:
       resources:
         limits:
           memory: ${REDIS_MEMORY_LIMIT:-512m}
-
-  routing:
-    <<: *restart
-    deploy:
-      resources:
-        limits:
-          memory: ${ROUTING_MEMORY_LIMIT:-4g}
-
-  nominatim:
-    <<: *restart
-    deploy:
-      resources:
-        limits:
-          memory: ${NOMINATIM_MEMORY_LIMIT:-8g}

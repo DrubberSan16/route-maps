@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
-# Region data tools: downloads OpenStreetMap extracts, builds the visual map
-# (PMTiles, own vector tile schema) and the Valhalla routing graph, and writes the
+# Region data tools: downloads auditable public/official sources, builds the visual map
+# (PMTiles, own vector tile schema) and routing data, and writes the
 # region manifests that the backend registers. It only runs on demand
 # (`docker compose --profile tools run --rm data-tools ...`), never on `up`.
 #
@@ -9,7 +9,6 @@
 
 ARG MAVEN_IMAGE=maven:3.9-eclipse-temurin-21
 ARG JRE_IMAGE=eclipse-temurin:21-jre
-ARG VALHALLA_IMAGE=ghcr.io/valhalla/valhalla:3.9.0
 
 # ---------------------------------------------------------------- tilegen
 # Tile generator (Planetiler + the platform's vector tile profile). Unit tests run here.
@@ -26,29 +25,30 @@ RUN --mount=type=cache,target=/root/.m2 mvn -B -ntp package \
 FROM ${JRE_IMAGE} AS jre
 
 # ---------------------------------------------------------------- runtime
-# Valhalla image (graph builder binaries) + Java runtime + osmium.
-FROM ${VALHALLA_IMAGE}
+# Runtime only for audited downloads and the platform's Java tile generator.
+FROM ${JRE_IMAGE}
 USER root
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl jq osmium-tool unzip \
+ && apt-get install -y --no-install-recommends ca-certificates coreutils curl jq python3 unzip util-linux \
  && rm -rf /var/lib/apt/lists/*
 
 ENV JAVA_HOME=/opt/java/openjdk \
     LANG=C.UTF-8 \
     REGIONS_CATALOG=/etc/maps-platform/regions.json \
+    SOURCES_CATALOG=/etc/maps-platform/sources.json \
     TILEGEN_HOME=/opt/tilegen
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
-COPY --from=jre /opt/java/openjdk /opt/java/openjdk
 COPY --from=tilegen /out/ /opt/tilegen/
-COPY --chmod=755 valhalla/scripts/build-routing.sh /usr/local/bin/build-routing.sh
 COPY --chmod=755 data-tools/bin/region.sh /usr/local/bin/region.sh
+COPY --chmod=755 data-tools/bin/native-data.py /usr/local/bin/native-data
 COPY regions/regions.json /etc/maps-platform/regions.json
+COPY sources/sources.json /etc/maps-platform/sources.json
 
 RUN java -version \
- && osmium --version | head -n 1 \
- && command -v valhalla_build_tiles valhalla_build_extract valhalla_build_admins valhalla_build_config \
- && jq empty /etc/maps-platform/regions.json
+ && jq empty /etc/maps-platform/regions.json \
+ && jq empty /etc/maps-platform/sources.json \
+ && python3 -m py_compile /usr/local/bin/native-data
 
 WORKDIR /data
 ENTRYPOINT ["region.sh"]

@@ -50,7 +50,7 @@ void main() {
       ),
     );
     expect(basemap(style)['url'], 'pmtiles://${Uri.file(file.path)}');
-    expect(basemap(style)['attribution'], contains('© OpenStreetMap contributors'));
+    expect(basemap(style)['attribution'], isEmpty);
   });
 
   test('online the platform PMTiles are read with range requests', () async {

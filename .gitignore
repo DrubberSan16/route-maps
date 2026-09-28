@@ -39,6 +39,8 @@ mobile/ios/Flutter/flutter_export_environment.sh
 
 # Java (tile generator)
 infrastructure/maps/tilegen/target/
+__pycache__/
+*.pyc
 
 # GIS data: never commit large datasets or generated artefacts
 *.osm.pbf
@@ -53,6 +55,10 @@ storage/maps/**
 storage/routing/**
 storage/imports/**
 storage/nominatim/**
+storage/.state/**
+storage/.refresh-backups/**
+storage/.refresh.lock
+storage/imports/native/
 !storage/**/.gitkeep
 !storage/**/README.md
 

@@ -1,233 +1,46 @@
-# Routing
+# Rutas, tráfico y clima
 
-El cálculo de rutas es autohospedado: el backend habla con un motor propio
-(Valhalla por defecto, OSRM como alternativa) que corre en la red interna y
-nunca se expone a Internet. No se usa ningún servicio externo de rutas.
+La instalación usa `ROUTING_PROVIDER=native`. El backend carga
+`storage/imports/native/ecuador/roads.geojson`, construye un grafo dirigido en
+memoria y calcula el camino mínimo sin consultar servicios cartográficos en
+tiempo de ejecución.
 
-## Motor elegido: Valhalla
+## Cálculo
 
-| Criterio | Valhalla | OSRM |
-| --- | --- | --- |
-| Perfiles | auto, camión, moto, bicicleta y a pie en **un solo grafo** | un grafo y un proceso por perfil |
-| Indicaciones | narrativa propia en español (`es-ES`) | solo tipos de maniobra; el backend redacta las indicaciones en español |
-| Alternativas | sí (rutas de dos puntos) | sí (rutas de dos puntos) |
-| Evitar peajes, autopistas, ferris | sí, por perfil | con `exclude` si el perfil lo define |
-| Uso en el móvil (Modo 2) | el paquete `.valhalla.tar` sirve también en el dispositivo | — |
-| Consultas | rápidas | muy rápidas (MLD/CH) |
+`POST /api/v1/routes/calculate` acepta `origin`, `destination`, `waypoints` y
+los perfiles `CAR`, `TRUCK` y `MOTORCYCLE`. La respuesta incluye distancia,
+geometría, instrucciones y el bloque `conditions`.
 
-Valhalla cubre todos los perfiles que pide la plataforma con un único grafo por
-región, da indicaciones en español sin trabajo adicional y su paquete de
-teselas es el mismo que puede usar la app en el futuro para calcular rutas sin
-conexión. Por eso es el motor por defecto (`ROUTING_PROVIDER=valhalla`). El
-backend accede a los motores mediante una interfaz (`RoutingProvider`), así que
-cambiar de motor no afecta a la API ni a la app.
+El tiempo base se deriva del perfil. Después, la misma geometría se valida con:
 
-Imagen: `ghcr.io/valhalla/valhalla:3.9.0` (última versión publicada al momento
-de escribir esto; se cambia con `VALHALLA_IMAGE`).
+- tráfico propio: puntos GPS de los últimos 15 minutos a menos de 150 m de la
+  ruta; se requieren al menos 5 muestras y 3 viajes distintos;
+- clima local: regiones de precipitación del inventario nacional almacenadas en
+  `climate-precipitation-regions.geojson`.
 
-## Preparar el grafo
+Si hay tráfico suficiente, `adjustedDurationSeconds` incorpora el retraso
+observado, limitado a 2,5 veces el tiempo base. Sin muestra suficiente se
+devuelve `traffic.status=insufficient_data`; nunca se inventa congestión. El
+clima actual disponible es climatología anual, no una observación meteorológica
+en vivo, y se identifica como `climate.status=climatology`.
 
-```bash
-make prepare-region REGION=guayaquil   # extracto + mapa + grafo + manifiesto
-make build-routing REGION=guayaquil    # solo el grafo (el extracto ya debe existir)
-```
+## Tráfico por zona
 
-El grafo se construye en el contenedor `data-tools`
-(`infrastructure/valhalla/scripts/build-routing.sh`), nunca al arrancar los
-servicios:
+`GET /api/v1/tracking/traffic` requiere una caja `minLat`, `minLng`, `maxLat` y
+`maxLng`. Devuelve celdas de aproximadamente 0,001 grados únicamente cuando se
+cumple el umbral de privacidad de 5 muestras y 3 viajes. Los datos salen de los
+viajes de esta plataforma y no de un proveedor de tráfico.
 
-1. `valhalla_build_admins`: áreas administrativas (lado de conducción y reglas
-   de acceso por país). Si falla, continúa sin ellas.
-2. `valhalla_build_tiles`: teselas del grafo.
-3. `valhalla_build_extract`: empaqueta las teselas en
-   `storage/routing/<región>/<región>.valhalla.tar`.
-4. Escribe `valhalla.json` (configuración de ejecución) y reemplaza el grafo
-   anterior de forma atómica: el servicio nunca ve un grafo a medio escribir.
+## Geocodificación
 
-`VALHALLA_BUILD_THREADS` limita los hilos (por defecto, todos los núcleos).
+`GEOCODING_PROVIDER=native` indexa localidades, salud, educación y turismo desde
+`storage/imports/native/ecuador`. La búsqueda inversa devuelve el punto oficial
+más cercano dentro de 25 km. No hay un proceso externo de geocodificación.
 
-## Servir una región
+## Límites conocidos
 
-El servicio `routing` sirve la región de `ROUTING_REGION`:
-
-```bash
-# .env
-ROUTING_REGION=guayaquil
-```
-
-```bash
-docker compose up -d routing
-```
-
-- Si el grafo todavía no existe, el contenedor espera y lo revisa cada 30 s;
-  mientras tanto su healthcheck falla y la API responde
-  `503 ROUTING_PROVIDER_UNAVAILABLE`.
-- `make prepare-region` reinicia `routing` cuando reconstruye la región que
-  está sirviendo.
-- `VALHALLA_SERVER_THREADS` fija los hilos del servidor (2 por defecto).
-
-**Una región por servicio.** Para rutas en varias regiones hay dos opciones:
-preparar una región que las contenga a todas (por ejemplo `ecuador` en lugar de
-`guayaquil` y `quito`) o levantar un servicio de routing por región y enrutar
-cada petición al que corresponda (no incluido en esta versión).
-
-## API
-
-`POST /api/v1/routes/calculate` (público; con sesión se pueden guardar las
-rutas con `POST /api/v1/routes`).
-
-```json
-{
-  "origin": { "latitude": -2.1709, "longitude": -79.9224 },
-  "destination": { "latitude": -2.145, "longitude": -79.89 },
-  "waypoints": [],
-  "profile": "CAR",
-  "alternatives": true,
-  "language": "es-ES",
-  "options": { "avoidTolls": false, "avoidHighways": false, "avoidFerries": false }
-}
-```
-
-- `profile`: `CAR`, `TRUCK`, `MOTORCYCLE`, `BICYCLE` o `PEDESTRIAN`
-  (costings `auto`, `truck`, `motorcycle`, `bicycle`, `pedestrian`).
-- `waypoints`: hasta 23 paradas intermedias; con paradas no hay alternativas.
-- `alternatives`: `true` o un número; el servidor devuelve como máximo
-  `ROUTING_MAX_ALTERNATIVES` (2 por defecto, hasta 3).
-- `language`: idioma de las indicaciones (`ROUTING_LANGUAGE`, `es-ES` por
-  defecto).
-
-Respuesta (extracto real, Mónaco):
-
-```json
-{
-  "success": true,
-  "data": {
-    "routeId": "d951d5bb-42fd-4c78-a74a-8a274393d1bf",
-    "type": "PRIMARY",
-    "profile": "CAR",
-    "provider": "valhalla",
-    "distanceMeters": 2487,
-    "durationSeconds": 198,
-    "geometry": { "type": "LineString", "coordinates": [[7.424532, 43.738293], "…"] },
-    "bbox": ["…"],
-    "steps": [
-      {
-        "instruction": "Conduzca hacia el noroeste por Avenue de l'Hermitage.",
-        "distanceMeters": 20,
-        "durationSeconds": 2.1,
-        "maneuver": "DEPART",
-        "location": [7.424532, 43.738293],
-        "streetNames": ["Avenue de l'Hermitage"],
-        "geometryIndex": [0, 1]
-      }
-    ],
-    "routes": ["ruta principal", "alternativa (type: ALTERNATIVE)"]
-  }
-}
-```
-
-- La geometría es GeoJSON (`[longitud, latitud]`); cada paso indica con
-  `geometryIndex` el tramo de la geometría que recorre, para la navegación paso
-  a paso.
-- Las rutas se guardan en Redis 10 minutos (`ROUTING_CACHE_TTL_SECONDS`) por
-  perfil, puntos redondeados a 5 decimales (~1 m), idioma y opciones. Cada
-  respuesta lleva ids nuevos.
-
-Errores:
-
-| Código | HTTP | Causa |
-| --- | --- | --- |
-| `VALIDATION_ERROR` | 400 | Cuerpo inválido (perfil desconocido, latitud fuera de rango…) |
-| `INVALID_COORDINATES` | 400 | Coordenadas fuera de rango, origen igual a destino o puntos a más de 2.000 km |
-| `ROUTE_NOT_FOUND` | 404 / 422 | El motor no encontró ruta (puntos fuera de la región o sin calles cerca) |
-| `ROUTING_PROFILE_NOT_SUPPORTED` | 422 | El motor configurado no tiene ese perfil (OSRM sin grafo de bicicleta, por ejemplo) |
-| `ROUTING_PROVIDER_UNAVAILABLE` | 503 | El motor no responde (sin grafo, reiniciando) |
-
-La app usa las rutas guardadas cuando no hay conexión o el motor no está
-disponible ([offline-architecture.md](offline-architecture.md)).
-
-## Alternativa: OSRM
-
-El backend incluye un adaptador para OSRM. OSRM necesita un grafo y un proceso
-por perfil (auto, bicicleta, a pie; no tiene camión ni moto) y el algoritmo MLD
-requiere tres pasos de preparación:
-
-```bash
-REGION=guayaquil
-OSRM_IMAGE=ghcr.io/project-osrm/osrm-backend:v26.4.0
-DIR="$PWD/storage/routing/osrm/$REGION"
-mkdir -p "$DIR" && cp "storage/imports/$REGION.osm.pbf" "$DIR/"
-docker run --rm -v "$DIR:/data" $OSRM_IMAGE osrm-extract -p /opt/car.lua /data/$REGION.osm.pbf
-docker run --rm -v "$DIR:/data" $OSRM_IMAGE osrm-partition /data/$REGION.osrm
-docker run --rm -v "$DIR:/data" $OSRM_IMAGE osrm-customize /data/$REGION.osrm
-```
-
-`docker-compose.override.yml` (Docker Compose lo carga automáticamente y no se versiona; si ya
-lo usas para publicar puertos en desarrollo, agrega el servicio al mismo archivo):
-
-```yaml
-services:
-  osrm:
-    image: ghcr.io/project-osrm/osrm-backend:v26.4.0
-    command: osrm-routed --algorithm mld /data/guayaquil.osrm
-    volumes:
-      - ./storage/routing/osrm/guayaquil:/data:ro
-    networks: [maps-network]
-```
-
-`.env`:
-
-```bash
-ROUTING_PROVIDER=osrm
-OSRM_URL=http://osrm:5000
-# Opcionales, un servicio por perfil preparado con /opt/bicycle.lua y /opt/foot.lua:
-# OSRM_BICYCLE_URL=http://osrm-bicycle:5000
-# OSRM_FOOT_URL=http://osrm-foot:5000
-```
-
-Con OSRM el servicio `routing` (Valhalla) no se usa y se puede detener
-(`docker compose stop routing`). Los perfiles sin URL responden
-`ROUTING_PROFILE_NOT_SUPPORTED`.
-
-## Geocoding (Nominatim)
-
-La búsqueda de direcciones (`GET /api/v1/geocoding/search`,
-`GET /api/v1/geocoding/reverse`) es opcional y usa Nominatim autohospedado
-(`mediagis/nominatim:5.1`, perfil `geocoding`). Sin él, la API responde que el
-geocoding está desactivado y la app ofrece coordenadas, pulsación larga en el
-mapa y rutas guardadas.
-
-```bash
-make download-region REGION=guayaquil    # el extracto a importar
-# .env: GEOCODING_PROVIDER=nominatim, NOMINATIM_REGION=guayaquil, NOMINATIM_PASSWORD=<aleatoria>
-make geocoding-up
-docker compose up -d backend             # para que tome GEOCODING_PROVIDER
-```
-
-- El primer arranque importa el extracto: minutos para una ciudad, horas para
-  un país; el healthcheck espera hasta 6 h.
-- Requisitos orientativos: 2 GB de RAM para una ciudad; 8 GB o más para
-  Ecuador completo (límite en producción: `NOMINATIM_MEMORY_LIMIT`). Los
-  parámetros de PostgreSQL de Nominatim se ajustan con `NOMINATIM_PG_*`.
-- `GEOCODING_COUNTRY_CODES=ec` limita los resultados de Nominatim a Ecuador;
-  las búsquedas se sesgan hacia la posición del usuario cuando la app la conoce.
-- Los resultados se guardan en Redis 24 h.
-- Importar Ecuador completo (`NOMINATIM_REGION=ecuador`, extracto de 120 MB)
-  tarda del orden de una hora con `NOMINATIM_THREADS=8`.
-
-### Países y ciudades de todo el mundo
-
-Con el mapa base mundial preparado (`make prepare-region REGION=world`), la
-búsqueda también consulta `storage/maps/world/world.places.json` (países y
-~7.600 ciudades de Natural Earth, en memoria; `GEOCODING_PLACES_FILE` cambia la
-ruta). Así "Lima", "Madrid" o "Lima, Perú" dan resultado aunque Nominatim solo
-tenga importado Ecuador, e incluso con `GEOCODING_PROVIDER=none`:
-
-- los países, capitales y ciudades de más de un millón de habitantes cuyo
-  nombre empieza por la búsqueda van primero, después los resultados de
-  Nominatim y al final otras ciudades del mundo (sin duplicar el mismo lugar);
-- se ignoran mayúsculas y acentos ("sao paulo" encuentra São Paulo) y lo que va
-  tras una coma filtra por país o provincia ("Lima, Ohio");
-- la búsqueda inversa sigue siendo solo de Nominatim;
-- sin el archivo y sin Nominatim, la API responde
-  `GEOCODING_PROVIDER_UNAVAILABLE` como antes.
+La red disponible es la Red Vial Estatal publicada a nivel nacional. No incluye
+automáticamente cada calle municipal ni restricciones de giro que no estén en
+esa publicación. Las opciones `avoidTolls`, `avoidHighways` y `avoidFerries` se
+aceptan por compatibilidad, pero el grafo oficial actual no tiene atributos
+suficientes para garantizar esos filtros.

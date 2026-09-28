@@ -6,6 +6,7 @@ import com.mapsplatform.tilegen.layers.HousenumberLayer;
 import com.mapsplatform.tilegen.layers.LanduseLayer;
 import com.mapsplatform.tilegen.layers.Layer;
 import com.mapsplatform.tilegen.layers.NaturalEarth;
+import com.mapsplatform.tilegen.layers.NativeData;
 import com.mapsplatform.tilegen.layers.PlaceIndex;
 import com.mapsplatform.tilegen.layers.PlaceLayer;
 import com.mapsplatform.tilegen.layers.PoiLayer;
@@ -44,9 +45,10 @@ public final class MapsPlatformProfile implements Profile {
   private final NaturalEarth naturalEarth = new NaturalEarth(placeIndex);
   private final String tilesetName;
   private final boolean worldBaseMap;
+  private final boolean nativeMap;
 
   public MapsPlatformProfile() {
-    this(null, false);
+    this(null, false, false);
   }
 
   /**
@@ -54,8 +56,13 @@ public final class MapsPlatformProfile implements Profile {
    * @param worldBaseMap true for the world base map built from Natural Earth only (changes the attribution)
    */
   public MapsPlatformProfile(String tilesetName, boolean worldBaseMap) {
+    this(tilesetName, worldBaseMap, false);
+  }
+
+  public MapsPlatformProfile(String tilesetName, boolean worldBaseMap, boolean nativeMap) {
     this.tilesetName = tilesetName;
     this.worldBaseMap = worldBaseMap;
+    this.nativeMap = nativeMap;
     for (Layer layer : List.of(water, new WaterNameLayer(), new WaterwayLayer(), new LanduseLayer(),
       new BuildingLayer(), new TransportationLayer(), boundary, new PlaceLayer(), new PoiLayer(),
       new HousenumberLayer())) {
@@ -88,6 +95,10 @@ public final class MapsPlatformProfile implements Profile {
       naturalEarth.process(sourceFeature, features);
       return;
     }
+    if (NativeData.isSource(sourceFeature.getSource())) {
+      NativeData.process(sourceFeature, features);
+      return;
+    }
     for (Layer layer : layers.values()) {
       layer.processOsm(sourceFeature, features);
     }
@@ -102,7 +113,8 @@ public final class MapsPlatformProfile implements Profile {
 
   @Override
   public boolean caresAboutSource(String name) {
-    return OSM_SOURCE.equals(name) || WATER_POLYGONS_SOURCE.equals(name) || NaturalEarth.isSource(name);
+    return OSM_SOURCE.equals(name) || WATER_POLYGONS_SOURCE.equals(name) || NaturalEarth.isSource(name) ||
+      NativeData.isSource(name);
   }
 
   @Override
@@ -117,13 +129,16 @@ public final class MapsPlatformProfile implements Profile {
 
   @Override
   public String description() {
-    return worldBaseMap ? "World base map of the maps platform built from Natural Earth data" :
-      "Vector tiles of the maps platform built from OpenStreetMap data";
+    if (worldBaseMap) {
+      return "World base map of the maps platform built from public-domain data";
+    }
+    return nativeMap ? "Vector tiles built from the platform's audited official-data catalog" :
+      "Legacy vector tiles";
   }
 
   @Override
   public String attribution() {
-    return worldBaseMap ? NATURAL_EARTH_ATTRIBUTION : OSM_ATTRIBUTION;
+    return "";
   }
 
   @Override

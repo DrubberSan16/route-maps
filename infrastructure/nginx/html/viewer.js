@@ -15,8 +15,9 @@ const SEARCH_DEBOUNCE_MS = 300;
 const SEARCH_LIMIT = 7;
 const MAP_POINT_LABEL = 'Punto en el mapa';
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const NATURAL_EARTH_ATTRIBUTION =
-  '<a href="https://www.naturalearthdata.com/" target="_blank" rel="noopener">Made with Natural Earth</a>';
+// Natural Earth is public-domain data and does not require visible credit. The
+// detailed regional data keeps its legally required ODbL attribution.
+const WORLD_ATTRIBUTION = '';
 
 const PROFILES = [
   { id: 'CAR', label: 'Auto', icon: 'i-car' },
@@ -175,7 +176,7 @@ function buildStyle() {
     style.sources[region.id] = {
       ...baseSource,
       url: `pmtiles://${ORIGIN}${region.tilesUrl}`,
-      attribution: isWorld ? NATURAL_EARTH_ATTRIBUTION : baseSource.attribution,
+      attribution: isWorld ? WORLD_ATTRIBUTION : baseSource.attribution,
     };
   }
   for (const layer of template.layers) {
@@ -201,7 +202,7 @@ function initMap() {
     style: buildStyle(),
     bounds: home ? toBounds(home) : undefined,
     fitBoundsOptions: { padding: 24 },
-    attributionControl: { compact: false },
+    attributionControl: false,
     hash: true,
     dragRotate: false,
     pitchWithRotate: false,

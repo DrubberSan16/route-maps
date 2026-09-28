@@ -5,11 +5,12 @@
 #
 # Commands
 #   list                         regions of the catalog and what is already built
-#   download <region>            download (or clip from its parent) the .osm.pbf
+#   download <region>            download the audited sources required by the region
 #   map <region>                 build the visual map (PMTiles) with tilegen
 #   routing <region>             build the Valhalla routing graph
 #   manifest <region>            write the manifest read by the backend
 #   prepare <region>             download (if missing) + map + routing + manifest
+#   source-version <region>      print the upstream data fingerprint
 #
 # Options
 #   --force-download             download again even if the extract exists
@@ -18,13 +19,12 @@
 #                                (~1 GB download, kept in storage/imports)
 #
 # Regions
-#   Codes of infrastructure/regions/regions.json, or any Geofabrik extract id
-#   (countries, states, continents: peru, colombia, spain, ...). "world" is the
+#   Codes of infrastructure/regions/regions.json. "world" is the
 #   world base map built from Natural Earth (low zooms, no routing), with the
 #   index of countries and cities used by the place search.
 #
 # Files (Docker bind mounts of ./storage on the host)
-#   /data/imports/<region>.osm.pbf           OpenStreetMap extract (input)
+#   /data/imports/native/<region>/*.geojson  audited official/public inputs
 #   /data/imports/naturalearth/*.zip         Natural Earth shapefiles (world input)
 #   /data/maps/<dir>/<region>.pmtiles        visual map, vector tiles
 #   /data/maps/<dir>/<region>.region.json    manifest registered by the backend
@@ -83,8 +83,7 @@ region_json() {
   local code=$1
   [[ "$code" =~ $CODE_PATTERN ]] || die "invalid region code '$code'"
   jq -ce --arg code "$code" '.regions[] | select(.code == $code)' "$CATALOG" 2>/dev/null && return 0
-  geofabrik_region "$code" ||
-    die "region '$code' is neither in the catalog ($(jq -r '[.regions[].code] | join(", ")' "$CATALOG")) nor a Geofabrik extract id (https://download.geofabrik.de)"
+  die "region '$code' is not in the audited catalog ($(jq -r '[.regions[].code] | join(", ")' "$CATALOG"))"
 }
 
 # Any Geofabrik extract by its id (peru, colombia, spain, ...). The index is
@@ -109,6 +108,7 @@ field() { jq -r --arg name "$2" '.[$name] // empty' <<<"$1"; }
 
 # True for the world base map (Natural Earth, no OSM extract, no routing).
 is_natural_earth() { [[ $(jq -r '.source.naturalEarth // false' <<<"$1") == true ]]; }
+is_native() { [[ -n $(jq -r '.source.nativeRegion // empty' <<<"$1") ]]; }
 
 map_dir() {
   local dir
@@ -194,6 +194,14 @@ cmd_download() {
     download_natural_earth "$force"
     return 0
   fi
+  if is_native "$region"; then
+    local native_region
+    native_region=$(jq -r '.source.nativeRegion' <<<"$region")
+    local native_args=(download "$native_region")
+    [[ "$force" == true ]] && native_args+=(--force)
+    native-data "${native_args[@]}"
+    return 0
+  fi
   pbf="$IMPORTS_DIR/$code.osm.pbf"
   if [[ -s "$pbf" && "$force" != true ]]; then
     log "$pbf already exists (use --force-download to refresh it)"
@@ -217,6 +225,48 @@ cmd_download() {
   fi
   match_owner "$pbf" "$IMPORTS_DIR"
   log "Extract ready: $pbf ($(du -h "$pbf" | cut -f1))"
+}
+
+# A stable upstream fingerprint used by the unattended refresh job. Regions
+# clipped from a parent inherit the parent's fingerprint plus their bbox. The
+# world base map is deliberately manual: Natural Earth publishes several files
+# without one atomic release checksum.
+cmd_source_version() {
+  local code=$1 region url parent bbox expected headers etag modified
+  region=$(region_json "$code")
+  if is_natural_earth "$region"; then
+    echo "natural-earth:manual"
+    return 0
+  fi
+  if is_native "$region"; then
+    local native_region manifest
+    native_region=$(jq -r '.source.nativeRegion' <<<"$region")
+    manifest="$IMPORTS_DIR/native/$native_region/manifest.json"
+    [[ -s "$manifest" ]] || die "native source manifest not found: run 'download $code' first"
+    jq -Sc '[.layers[] | {id, sha256}] | sort_by(.id)' "$manifest" |
+      sha256sum | awk '{print "native-layers:" $1}'
+    return 0
+  fi
+  url=$(jq -r '.source.url // empty' <<<"$region")
+  parent=$(jq -r '.source.parent // empty' <<<"$region")
+  if [[ -n "$parent" ]]; then
+    bbox=$(jq -c '.bbox' <<<"$region")
+    echo "clip:$parent:$bbox:$(cmd_source_version "$parent")"
+    return 0
+  fi
+  [[ -n "$url" ]] || die "region '$code' has no upstream source"
+  expected=$(curl --fail --silent --location --retry 3 --user-agent "$USER_AGENT" "$url.md5" |
+    awk 'NR == 1 { print tolower($1) }') || expected=""
+  if [[ "$expected" =~ ^[0-9a-f]{32}$ ]]; then
+    echo "md5:$expected"
+    return 0
+  fi
+  headers=$(curl --fail --silent --show-error --location --head --retry 3 \
+    --user-agent "$USER_AGENT" "$url") || die "could not read source metadata for $url"
+  etag=$(awk 'BEGIN{IGNORECASE=1} /^etag:/ {sub(/^[^:]*:[[:space:]]*/, ""); gsub(/\r/, ""); print; exit}' <<<"$headers")
+  modified=$(awk 'BEGIN{IGNORECASE=1} /^last-modified:/ {sub(/^[^:]*:[[:space:]]*/, ""); gsub(/\r/, ""); print; exit}' <<<"$headers")
+  [[ -n "$etag$modified" ]] || die "source $url exposes neither MD5, ETag nor Last-Modified"
+  echo "http:etag=$etag:last-modified=$modified"
 }
 
 ensure_water_polygons() {
@@ -251,6 +301,14 @@ cmd_map() {
     [[ -s "$IMPORTS_DIR/naturalearth/ne_10m_ocean.zip" ]] || die "Natural Earth not found: run 'download $code' first"
     places="$dir/$code.places.json"
     args+=(--natural_earth="$IMPORTS_DIR/naturalearth" --gazetteer="$places.tmp" --maxzoom="$WORLD_MAX_ZOOM")
+  elif is_native "$region"; then
+    local native_region bbox
+    native_region=$(jq -r '.source.nativeRegion' <<<"$region")
+    [[ -s "$IMPORTS_DIR/native/$native_region/manifest.json" ]] ||
+      die "native sources not found: run 'download $code' first"
+    args+=(--native_data="$IMPORTS_DIR/native/$native_region")
+    bbox=$(jq -r '.bbox // empty | join(",")' <<<"$region")
+    [[ -n "$bbox" ]] && args+=(--bounds="$bbox")
   else
     pbf="$IMPORTS_DIR/$code.osm.pbf"
     [[ -s "$pbf" ]] || die "$pbf not found: run 'download $code' first"
@@ -290,6 +348,9 @@ cmd_routing() {
   if is_natural_earth "$region"; then
     die "$code is a base map: it has no routing graph"
   fi
+  if is_native "$region"; then
+    die "$code uses the native official-data graph; Valhalla/OSM routing packages are disabled"
+  fi
   build-routing.sh "$code"
   match_owner "$ROUTING_DIR/$code" "$ROUTING_DIR"
 }
@@ -315,15 +376,28 @@ cmd_manifest() {
   map_rel="$dir/$code.pmtiles"
   map_file="$MAPS_DIR/$map_rel"
   [[ -s "$map_file" ]] || die "$map_file not found: run 'map $code' first"
-  routing_rel="$code/$code.valhalla.tar"
-  routing_file="$ROUTING_DIR/$routing_rel"
+  if is_native "$region" || is_natural_earth "$region"; then
+    # Never let a stale legacy graph leak into a manifest generated from the
+    # official/native data pipeline.
+    routing_rel=""
+    routing_file=""
+  else
+    routing_rel="$code/$code.valhalla.tar"
+    routing_file="$ROUTING_DIR/$routing_rel"
+  fi
 
   header=$(pmtiles_header "$map_file")
   bbox=$(jq -c '.bbox // empty' <<<"$region")
   [[ -n "$bbox" ]] || bbox=$(jq -c '.bbox' <<<"$header")
   version="${REGION_VERSION:-$(date -u +%Y.%m.%d.%H%M)}"
   data_time=""
-  if [[ -s "$IMPORTS_DIR/$code.osm.pbf" ]]; then
+  if is_native "$region"; then
+    local native_region
+    native_region=$(jq -r '.source.nativeRegion' <<<"$region")
+    if [[ -s "$IMPORTS_DIR/native/$native_region/manifest.json" ]]; then
+      data_time=$(jq -r '.generatedAt // empty' "$IMPORTS_DIR/native/$native_region/manifest.json")
+    fi
+  elif [[ -s "$IMPORTS_DIR/$code.osm.pbf" ]]; then
     data_time=$(osmium fileinfo --no-progress -g header.option.osmosis_replication_timestamp \
       "$IMPORTS_DIR/$code.osm.pbf" 2>/dev/null || true)
   fi
@@ -331,10 +405,10 @@ cmd_manifest() {
   log "Computing checksums for $code"
   local map_sha routing_sha=""
   map_sha=$(sha256sum "$map_file" | cut -d' ' -f1)
-  if [[ -s "$routing_file" ]]; then
+  if [[ -n "$routing_file" && -s "$routing_file" ]]; then
     routing_sha=$(sha256sum "$routing_file" | cut -d' ' -f1)
   else
-    log "No routing package for $code ($routing_file); the manifest only lists the map"
+    log "No distributable routing package for $code; the manifest only lists the map"
     routing_rel=""
   fi
 
@@ -352,8 +426,9 @@ cmd_manifest() {
       mapFile: $mapFile, mapChecksum: $mapChecksum,
       routingFile: (if $routingFile == "" then null else $routingFile end),
       routingChecksum: (if $routingChecksum == "" then null else $routingChecksum end),
-      source: ($region.source.url // (if $region.source.parent then "clipped from " + $region.source.parent
-               else "Natural Earth" end)),
+      source: (if $region.source.nativeRegion then "native-catalog:" + $region.source.nativeRegion
+               else ($region.source.url // (if $region.source.parent then "legacy:" + $region.source.parent
+               else "public-domain-world" end)) end),
       dataTimestamp: (if $dataTimestamp == "" then null else $dataTimestamp end),
       generatedAt: $generatedAt
     } | with_entries(select(.value != null))' >"$manifest.tmp"
@@ -370,7 +445,7 @@ cmd_prepare() {
   region=$(region_json "$code")
   cmd_download "$code" "$force"
   cmd_map "$code" "$water"
-  if [[ "$skip_routing" != true ]] && ! is_natural_earth "$region"; then
+  if [[ "$skip_routing" != true ]] && ! is_natural_earth "$region" && ! is_native "$region"; then
     cmd_routing "$code"
   fi
   cmd_manifest "$code" >/dev/null
@@ -381,7 +456,8 @@ cmd_prepare() {
 cmd_list() {
   printf '%-12s %-24s %-8s %-8s %-8s %s\n' CODE NAME EXTRACT MAP ROUTING SOURCE
   jq -r '.regions[] | [.code, .name, (.mapDir // .code),
-      (.source.url // (if .source.parent then "clip of " + .source.parent else "Natural Earth" end))] | @tsv' "$CATALOG" |
+      (if .source.nativeRegion then "native:" + .source.nativeRegion else
+       (.source.url // (if .source.parent then "legacy:" + .source.parent else "public-domain-world" end)) end)] | @tsv' "$CATALOG" |
     while IFS=$'\t' read -r code name dir source; do
       local extract=no map=no routing=no
       [[ -s "$IMPORTS_DIR/$code.osm.pbf" ]] && extract=yes
@@ -391,7 +467,7 @@ cmd_list() {
       printf '%-12s %-24s %-8s %-8s %-8s %s\n' "$code" "$name" "$extract" "$map" "$routing" "$source"
     done
   echo
-  echo "Any Geofabrik extract id also works (peru, colombia, spain, ...): https://download.geofabrik.de"
+  echo "Only regions backed by the audited source catalog are accepted."
 }
 
 # ------------------------------------------------------------------ main
@@ -417,6 +493,7 @@ main() {
   done
   case "$command" in
   list) cmd_list ;;
+  source-version) cmd_source_version "${code:?region required}" ;;
   download) cmd_download "${code:?region required}" "$force" ;;
   map) cmd_map "${code:?region required}" "$water" ;;
   routing) cmd_routing "${code:?region required}" ;;

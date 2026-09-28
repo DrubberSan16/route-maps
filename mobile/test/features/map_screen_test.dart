@@ -104,7 +104,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('shows the map with search, the three actions and the OSM credit', (tester) async {
+  testWidgets('shows the map with search and the three main actions', (tester) async {
     await pumpMap(tester);
 
     expect(find.byKey(const Key('fake-map')), findsOneWidget);
@@ -112,7 +112,6 @@ void main() {
     expect(find.text('📍 Mi ubicación'), findsOneWidget);
     expect(find.text('🗺 Trazar ruta'), findsOneWidget);
     expect(find.text('📥 Mapas offline'), findsOneWidget);
-    expect(find.text('© OpenStreetMap contributors'), findsOneWidget);
     expect(find.text('Sin mapa base: descarga una región'), findsOneWidget);
     // Opens where the user was last seen.
     expect(mapView.props!.initialCenter, _home);

@@ -41,7 +41,7 @@ final destinationSearchProvider =
     );
 
 /// Destination search: coordinates and saved routes on the device, addresses
-/// through the API (Nominatim) when there is connection.
+/// through the platform's local official-data index when there is connection.
 class DestinationSearchController extends Notifier<SearchState> {
   static const debounce = Duration(milliseconds: 400);
   static const minimumLength = 3;
