@@ -130,15 +130,16 @@ for pass in data manifest; do
 done
 cd "$ROOT"
 rm -rf "$STAGING"
-sudo docker compose restart backend
+# This script arrives through stdin: commands that read it (docker compose exec) get /dev/null.
+sudo docker compose restart backend </dev/null
 for _ in $(seq 1 60); do
   if sudo docker compose exec -T backend node -e \
     "fetch('http://127.0.0.1:3000/health/live').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))" \
-    >/dev/null 2>&1; then
+    </dev/null >/dev/null 2>&1; then
     break
   fi
   sleep 3
 done
-sudo docker compose exec -T backend node dist/src/cli/sync-regions.js
+sudo docker compose exec -T backend node dist/src/cli/sync-regions.js </dev/null
 echo "Publicación completada. Archivos reemplazados en $BACKUP"
 REMOTE
