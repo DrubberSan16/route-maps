@@ -52,10 +52,11 @@ export class MapRegionResponse {
   @ApiPropertyOptional({ example: '/api/v1/maps/regions/guayaquil/routing/download' })
   routingDownloadUrl: string | null;
   @ApiProperty({
-    example: '/maps/ecuador/guayaquil.pmtiles?v=2026.09.30.1200',
+    example: '/maps/ecuador/guayaquil.pmtiles?v=3f5a0c9d1e2b4a67',
     description:
-      'Range-readable PMTiles URL for online rendering (pmtiles:// protocol). The version in the ' +
-      'query string changes with the data, so the file can be cached for good.',
+      'Range-readable PMTiles URL for online rendering (pmtiles:// protocol). The query string ' +
+      'is the start of the SHA-256 of the file: it changes with the data, so the file can be ' +
+      'cached for good.',
   })
   tilesUrl: string;
   @ApiProperty({
@@ -68,9 +69,14 @@ export class MapRegionResponse {
   @ApiProperty() updatedAt: Date;
 }
 
-/** Public URL of a map file, with the data version so that caches never serve an older copy. */
-const versionedTilesUrl = (base: string, file: string, version: string): string =>
-  `${base.replace(/\/$/, '')}/${file}?v=${encodeURIComponent(version)}`;
+/**
+ * Public URL of a map file named by its content (start of the SHA-256), so that it can be cached
+ * for good: a rebuilt file always gets a new URL, even when only one of its archives changed.
+ */
+const versionedTilesUrl = (base: string, file: string, checksum: string, version: string): string =>
+  `${base.replace(/\/$/, '')}/${file}?v=${
+    /^[0-9a-f]{16}/.test(checksum) ? checksum.slice(0, 16) : encodeURIComponent(version)
+  }`;
 
 const toAssetResponse = (
   region: MapRegion,
@@ -83,7 +89,7 @@ const toAssetResponse = (
   maxZoom: asset.maxZoom,
   size: asset.size,
   checksum: asset.checksum,
-  tilesUrl: versionedTilesUrl(publicTilesBaseUrl, asset.file, region.version),
+  tilesUrl: versionedTilesUrl(publicTilesBaseUrl, asset.file, asset.checksum, region.version),
   downloadUrl: `/api/v1/maps/regions/${region.code}/assets/${asset.kind}/download`,
 });
 
@@ -108,7 +114,7 @@ export const toRegionResponse = (
   routingDownloadUrl: region.routingFile
     ? `/api/v1/maps/regions/${region.code}/routing/download`
     : null,
-  tilesUrl: versionedTilesUrl(publicTilesBaseUrl, region.fileName, region.version),
+  tilesUrl: versionedTilesUrl(publicTilesBaseUrl, region.fileName, region.checksum, region.version),
   assets: region.assets.map((asset) => toAssetResponse(region, asset, publicTilesBaseUrl)),
   enabled: region.enabled,
   updatedAt: region.updatedAt,

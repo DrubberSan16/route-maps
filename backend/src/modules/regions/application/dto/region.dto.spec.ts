@@ -36,10 +36,10 @@ const REGION: MapRegion = {
 };
 
 describe('toRegionResponse', () => {
-  it('versions the tile URLs so that a new build is never hidden by a cache', () => {
+  it('names the tile URLs by content so that a new build is never hidden by a cache', () => {
     const response = toRegionResponse(REGION, '/maps/');
 
-    expect(response.tilesUrl).toBe('/maps/ecuador/guayaquil.pmtiles?v=2026.09.30.1200');
+    expect(response.tilesUrl).toBe(`/maps/ecuador/guayaquil.pmtiles?v=${'a'.repeat(16)}`);
     expect(response.assets).toEqual([
       {
         kind: 'satellite',
@@ -48,9 +48,15 @@ describe('toRegionResponse', () => {
         maxZoom: 14,
         size: 5422330,
         checksum: 'b'.repeat(64),
-        tilesUrl: '/maps/ecuador/guayaquil.satellite.pmtiles?v=2026.09.30.1200',
+        tilesUrl: `/maps/ecuador/guayaquil.satellite.pmtiles?v=${'b'.repeat(16)}`,
         downloadUrl: '/api/v1/maps/regions/guayaquil/assets/satellite/download',
       },
     ]);
+  });
+
+  it('falls back to the region version for a checksum that is not a SHA-256', () => {
+    const response = toRegionResponse({ ...REGION, checksum: 'pending' }, '/maps');
+
+    expect(response.tilesUrl).toBe('/maps/ecuador/guayaquil.pmtiles?v=2026.09.30.1200');
   });
 });

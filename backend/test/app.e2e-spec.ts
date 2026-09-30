@@ -279,7 +279,7 @@ describe('Maps Platform API (e2e)', () => {
         mapDownloadUrl: `/api/v1/maps/regions/${REGION}/download`,
         routingChecksum: sha256(ROUTING_BYTES),
         bbox: [-80.1, -2.35, -79.75, -1.95],
-        tilesUrl: `/maps/ecuador/${REGION}.pmtiles?v=2026.09.25.1830`,
+        tilesUrl: `/maps/ecuador/${REGION}.pmtiles?v=${sha256(MAP_BYTES).slice(0, 16)}`,
         assets: [
           {
             kind: 'satellite',
@@ -288,7 +288,7 @@ describe('Maps Platform API (e2e)', () => {
             maxZoom: 14,
             size: SATELLITE_BYTES.length,
             checksum: sha256(SATELLITE_BYTES),
-            tilesUrl: `/maps/ecuador/${REGION}.satellite.pmtiles?v=2026.09.25.1830`,
+            tilesUrl: `/maps/ecuador/${REGION}.satellite.pmtiles?v=${sha256(SATELLITE_BYTES).slice(0, 16)}`,
             downloadUrl: `/api/v1/maps/regions/${REGION}/assets/satellite/download`,
           },
         ],

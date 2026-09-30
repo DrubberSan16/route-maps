@@ -1,14 +1,16 @@
 // Map viewer of the platform: the world base map (Natural Earth) with the prepared regions on top
-// (PMTiles, own style), place search (GET /geocoding/search) and routes with stops
-// (POST /routes/calculate). No build step: MapLibre GL JS and PMTiles are vendored by the image.
+// (PMTiles, own style), satellite and relief views, traffic, place search (GET /geocoding/search)
+// and routes with stops (POST /routes/calculate). No build step: MapLibre GL JS and PMTiles are
+// vendored by the image; the style logic is shared with the SDK (sdk/map-style.js).
 import * as maplibregl from './vendor/maplibre-gl.mjs';
 import { registerPoiIcons } from './sdk/map-icons.js';
+import {
+  buildStyle, containsBox, mapTypes, parseTemplate, setMapType, setOverlay, tilesets as regionTilesets,
+  TrafficLayer, WORLD_MAX_VISIBLE_ZOOM,
+} from './sdk/map-style.js';
 
 const API = '/api/v1';
 const ORIGIN = window.location.origin;
-const WORLD_REGION = 'world';
-/** The world base map has tiles up to zoom 7 and is drawn up to here; regions add the detail. */
-const WORLD_MAX_VISIBLE_ZOOM = 8;
 /** Origin, up to 23 stops and destination: the limit of POST /routes/calculate. */
 const MAX_POINTS = 25;
 const SEARCH_MIN_LENGTH = 3;
@@ -16,10 +18,10 @@ const SEARCH_DEBOUNCE_MS = 300;
 const SEARCH_LIMIT = 7;
 const MAP_POINT_LABEL = 'Punto en el mapa';
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const WORLD_ATTRIBUTION = '';
 /** Mainland Ecuador: the first view when the address bar has no position. */
 const HOME_BOUNDS = [-81.1, -5.05, -75.2, 1.5];
 const LAYERS_KEY = 'route-maps:layers';
+const MAP_TYPE_KEY = 'route-maps:map-type';
 
 const PROFILES = [
   { id: 'CAR', label: 'Auto', icon: 'i-car' },
@@ -55,7 +57,8 @@ const canLocate = window.isSecureContext && 'geolocation' in navigator;
 let map;
 let mapReady = false;
 let regions = [];
-let styleTemplate = '';
+let template = null;
+let traffic = null;
 let profile = 'CAR';
 let nextStopId = 1;
 const newStop = () => ({ id: nextStopId++, point: null, label: '' });
@@ -131,9 +134,6 @@ function formatDuration(seconds) {
   return minutes % 60 ? `${hours} h ${minutes % 60} min` : `${hours} h`;
 }
 
-const area = ([minLng, minLat, maxLng, maxLat]) => (maxLng - minLng) * (maxLat - minLat);
-const containsBox = (outer, inner) =>
-  outer[0] <= inner[0] && outer[1] <= inner[1] && outer[2] >= inner[2] && outer[3] >= inner[3];
 const insideBox = (box, { lng, lat }) => lng >= box[0] && lng <= box[2] && lat >= box[1] && lat <= box[3];
 const toBounds = ([minLng, minLat, maxLng, maxLat]) => [[minLng, minLat], [maxLng, maxLat]];
 const coordinate = ({ lat, lng }) => ({ latitude: lat, longitude: lng });
@@ -152,49 +152,13 @@ function showAppError(message) {
 
 // ---------------------------------------------------------------- regions and style
 
-/** World base map below, then the prepared regions; a region inside a bigger one adds nothing. */
-function tilesets() {
-  const world = regions.find((region) => region.id === WORLD_REGION) ?? null;
-  const detailed = regions
-    .filter((region) => region.id !== WORLD_REGION && region.bbox)
-    .sort((a, b) => area(b.bbox) - area(a.bbox));
-  const drawn = detailed.filter(
-    (region, index) => !detailed.slice(0, index).some((bigger) => containsBox(bigger.bbox, region.bbox)),
-  );
-  return { world, detailed, drawn };
-}
+const tilesets = () => regionTilesets(regions);
 
-/**
- * One copy of every style layer per tileset, the same layer of each tileset next to each other, so
- * the detailed regions cover the world base map and labels stay above every fill.
- */
-function buildStyle() {
-  const template = JSON.parse(styleTemplate.replaceAll('__GLYPHS_URL__', `${ORIGIN}/maps/fonts`));
-  const baseSource = Object.values(template.sources)[0];
+/** World base map below, then the prepared regions; a region inside a bigger one adds nothing. */
+function styleForRegions() {
   const { world, drawn } = tilesets();
-  const sets = [...(world ? [{ region: world, isWorld: true }] : []),
-    ...drawn.map((region) => ({ region, isWorld: false }))];
-  const style = { ...template, sources: {}, layers: [] };
-  for (const { region, isWorld } of sets) {
-    style.sources[region.id] = {
-      ...baseSource,
-      url: `pmtiles://${ORIGIN}${region.tilesUrl}`,
-      attribution: isWorld ? WORLD_ATTRIBUTION : baseSource.attribution,
-    };
-  }
-  for (const layer of template.layers) {
-    if (!layer.source) {
-      style.layers.push(layer);
-      continue;
-    }
-    for (const { region, isWorld } of sets) {
-      if (isWorld && (layer.minzoom ?? 0) >= WORLD_MAX_VISIBLE_ZOOM) continue;
-      const copy = { ...layer, id: `${region.id}/${layer.id}`, source: region.id };
-      if (isWorld) copy.maxzoom = Math.min(layer.maxzoom ?? 24, WORLD_MAX_VISIBLE_ZOOM);
-      style.layers.push(copy);
-    }
-  }
-  return style;
+  return buildStyle(template, ORIGIN, [...(world ? [{ region: world, isWorld: true }] : []),
+    ...drawn.map((region) => ({ region, isWorld: false }))]);
 }
 
 function initMap() {
@@ -203,30 +167,37 @@ function initMap() {
   const home = ecuador ? HOME_BOUNDS : drawn[0]?.bbox ?? world?.bbox;
   map = new maplibregl.Map({
     container: 'map',
-    style: buildStyle(),
+    style: styleForRegions(),
     bounds: home ? toBounds(home) : undefined,
     fitBoundsOptions: { padding: 24 },
-    attributionControl: false,
+    // Imagery and elevation carry the citation their licences ask for.
+    attributionControl: { compact: true, customAttribution: '<a href="/fuentes.html">Fuentes de datos</a>' },
     hash: true,
     dragRotate: false,
     pitchWithRotate: false,
   });
   map.touchZoomRotate.disableRotation();
-  registerPoiIcons(map, JSON.parse(styleTemplate).metadata?.['maps-platform:poi-colors'] ?? {});
+  registerPoiIcons(map, template.metadata?.['maps-platform:poi-colors'] ?? {});
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
   map.addControl(new LayersControl(), 'top-right');
   map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
+  traffic = new TrafficLayer(map, template, {
+    fetchFlow: (bbox) => api(`/traffic/flow?bbox=${bbox}`),
+    onStatus: (text) => setLayerStatus('traffic', text),
+  });
   map.on('load', () => {
     mapReady = true;
-    addOverlaySources();
+    traffic.install();
+    addActivityLayer();
     addRouteLayers();
     drawRoutes();
     updateNotice();
+    applyMapType();
     applyLayers();
   });
   map.on('moveend', () => {
     updateNotice();
-    refreshLiveLayers();
+    refreshActivity();
   });
   map.on('click', onMapClick);
   window.__viewer = { map };
@@ -244,14 +215,22 @@ function updateNotice() {
   }
 }
 
-// ---------------------------------------------------------------- layers (traffic, climate, heat maps)
+// ---------------------------------------------------------------- map type and layers
+
+const MAP_TYPE_ICONS = { map: 'i-map', satellite: 'i-satellite', relief: 'i-mountain' };
+const MAP_TYPE_NOTES = {
+  map: 'Calles, lugares y límites.',
+  satellite: 'Imágenes de satélite con las calles y los nombres encima.',
+  relief: 'Montañas sombreadas y colores por altitud.',
+};
 
 const LAYER_OPTIONS = [
   {
-    id: 'traffic', label: 'Tráfico en vivo', icon: 'i-traffic',
-    legend: [['--color-traffic-free', 'Fluido'], ['--color-traffic-moderate', 'Moderado'],
+    id: 'traffic', label: 'Tráfico', icon: 'i-traffic',
+    legend: [['--color-traffic-free', 'Sin demoras'], ['--color-traffic-moderate', 'Moderado'],
       ['--color-traffic-slow', 'Lento'], ['--color-traffic-jammed', 'Detenido']],
-    note: 'Velocidades de los últimos 15 minutos medidas por los recorridos de la app.',
+    note: 'Vías principales en verde mientras no haya demoras reportadas. Los tramos medidos por los recorridos ' +
+      'de la app se colorean en vivo (15 min) o, más tenues, con lo habitual a esta hora.',
   },
   {
     id: 'precipitation', label: 'Lluvia anual', icon: 'i-rain',
@@ -277,9 +256,26 @@ const LAYER_OPTIONS = [
   },
 ];
 
+// Per browser: the choice survives reloads (private mode: this visit only).
+function readStored(key, fallback) {
+  try {
+    return window.localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function store(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Private mode: the choice lasts for this visit only.
+  }
+}
+
 function readLayers() {
   try {
-    const saved = JSON.parse(window.localStorage.getItem(LAYERS_KEY) ?? '[]');
+    const saved = JSON.parse(readStored(LAYERS_KEY, '[]'));
     return new Set(Array.isArray(saved) ? saved.filter((id) => LAYER_OPTIONS.some((o) => o.id === id)) : []);
   } catch {
     return new Set();
@@ -287,30 +283,49 @@ function readLayers() {
 }
 
 const activeLayers = readLayers();
+let mapType = readStored(MAP_TYPE_KEY, 'map');
+const layerStatus = new Map();
 
-function saveLayers() {
-  try {
-    window.localStorage.setItem(LAYERS_KEY, JSON.stringify([...activeLayers]));
-  } catch {
-    // Private mode: the choice lasts for this visit only.
-  }
+function setLayerStatus(kind, text) {
+  if (text) layerStatus.set(kind, text);
+  else layerStatus.delete(kind);
+  const status = $('layers-status');
+  if (status) status.textContent = [...layerStatus.values()].join(' ');
 }
 
 class LayersControl {
   onAdd() {
     this.container = el('div', { class: 'maplibregl-ctrl maplibregl-ctrl-group layers-control' });
     const button = el('button', {
-      type: 'button', class: 'layers-control__button', 'aria-label': 'Capas del mapa', title: 'Capas del mapa',
-      'aria-expanded': 'false', 'aria-controls': 'layers-panel',
+      type: 'button', class: 'layers-control__button', 'aria-label': 'Tipo de mapa y capas',
+      title: 'Tipo de mapa y capas', 'aria-expanded': 'false', 'aria-controls': 'layers-panel',
     }, icon('i-layers'));
-    const panel = el('div', { class: 'layers-panel', id: 'layers-panel', role: 'group', 'aria-label': 'Capas', hidden: true });
-    panel.append(el('p', { class: 'layers-panel__title' }, 'Capas'));
+    const panel = el('div', { class: 'layers-panel', id: 'layers-panel', role: 'group', 'aria-label': 'Tipo de mapa y capas',
+      hidden: true });
+
+    const types = mapTypes(template, regions);
+    if (!types.some((type) => type.id === mapType && type.available)) mapType = 'map';
+    const typeGroup = el('fieldset', { class: 'map-types' }, el('legend', { class: 'layers-panel__title' }, 'Tipo de mapa'));
+    for (const type of types) {
+      const input = el('input', { type: 'radio', name: 'map-type', value: type.id, class: 'sr-only',
+        checked: type.id === mapType, disabled: !type.available });
+      input.addEventListener('change', () => {
+        mapType = type.id;
+        store(MAP_TYPE_KEY, mapType);
+        applyMapType();
+      });
+      const note = type.available ? MAP_TYPE_NOTES[type.id] ?? '' : 'Aún no está preparado en los mapas publicados.';
+      typeGroup.append(el('label', { class: 'map-type', title: note }, input, icon(MAP_TYPE_ICONS[type.id] ?? 'i-layers'),
+        el('span', {}, type.label)));
+    }
+    panel.append(typeGroup, el('p', { class: 'layers-panel__title' }, 'Capas'));
+
     for (const option of LAYER_OPTIONS) {
       const input = el('input', { type: 'checkbox', value: option.id, checked: activeLayers.has(option.id) });
       input.addEventListener('change', () => {
         if (input.checked) activeLayers.add(option.id);
         else activeLayers.delete(option.id);
-        saveLayers();
+        store(LAYERS_KEY, JSON.stringify([...activeLayers]));
         applyLayers();
       });
       const legend = el('span', { class: 'layers-legend', 'aria-hidden': 'true' },
@@ -336,41 +351,31 @@ class LayersControl {
   }
 }
 
-function overlayLayerIds(kind) {
-  return map.getStyle().layers.map((layer) => layer.id).filter((id) => id.endsWith(`/overlay-${kind}`));
+/** Satellite and relief read their own archives, only while shown. */
+function applyMapType() {
+  if (!mapReady) return;
+  if (!setMapType(map, template, regions, ORIGIN, mapType)) {
+    mapType = 'map';
+    setMapType(map, template, regions, ORIGIN, mapType);
+  }
+  for (const input of document.querySelectorAll('input[name="map-type"]')) input.checked = input.value === mapType;
 }
 
 function applyLayers() {
   if (!mapReady) return;
   for (const kind of ['precipitation', 'temperature', 'population']) {
-    for (const id of overlayLayerIds(kind)) {
-      map.setLayoutProperty(id, 'visibility', activeLayers.has(kind) ? 'visible' : 'none');
-    }
+    setOverlay(map, template, kind, activeLayers.has(kind));
   }
-  for (const [kind, layers] of [['traffic', ['traffic-casing', 'traffic-line']], ['activity', ['activity-heat']]]) {
-    for (const id of layers) {
-      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', activeLayers.has(kind) ? 'visible' : 'none');
-    }
+  if (traffic.visible !== activeLayers.has('traffic')) traffic.setVisible(activeLayers.has('traffic'));
+  if (map.getLayer('activity-heat')) {
+    map.setLayoutProperty('activity-heat', 'visibility', activeLayers.has('activity') ? 'visible' : 'none');
   }
-  refreshLiveLayers();
+  refreshActivity();
 }
 
-function addOverlaySources() {
-  const empty = { type: 'FeatureCollection', features: [] };
-  map.addSource('traffic', { type: 'geojson', data: empty });
-  map.addSource('activity', { type: 'geojson', data: empty });
+function addActivityLayer() {
   const firstLabel = map.getStyle().layers.find((layer) => layer.type === 'symbol')?.id;
-  const status = ['match', ['get', 'status'], 'free', token('--color-traffic-free'),
-    'moderate', token('--color-traffic-moderate'), 'slow', token('--color-traffic-slow'),
-    token('--color-traffic-jammed')];
-  // ["zoom"] may only feed a top-level interpolate: the casing gets its own, 2 px wider.
-  const widths = (extra) => ['interpolate', ['linear'], ['zoom'], 11, 2 + extra, 14, 4 + extra, 17, 8 + extra];
-  const width = widths(0);
-  map.addLayer({ id: 'traffic-casing', type: 'line', source: 'traffic', layout: { visibility: 'none',
-    'line-cap': 'round', 'line-join': 'round' },
-  paint: { 'line-color': token('--color-card'), 'line-width': widths(2) } }, firstLabel);
-  map.addLayer({ id: 'traffic-line', type: 'line', source: 'traffic', layout: { visibility: 'none',
-    'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': status, 'line-width': width } }, firstLabel);
+  map.addSource('activity', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addLayer({ id: 'activity-heat', type: 'heatmap', source: 'activity', layout: { visibility: 'none' },
     paint: {
       'heatmap-weight': ['interpolate', ['linear'], ['get', 'trips'], 3, 0.3, 30, 1],
@@ -379,46 +384,31 @@ function addOverlaySources() {
     } }, firstLabel);
 }
 
-let liveRequest = 0;
-async function refreshLiveLayers() {
-  const status = $('layers-status');
-  const wanted = ['traffic', 'activity'].filter((kind) => activeLayers.has(kind));
-  if (!map || wanted.length === 0) {
-    if (status) status.textContent = '';
+let activityRequest = 0;
+async function refreshActivity() {
+  if (!map || !activeLayers.has('activity')) {
+    setLayerStatus('activity', '');
     return;
   }
   const bounds = map.getBounds();
   const span = Math.max(bounds.getEast() - bounds.getWest(), bounds.getNorth() - bounds.getSouth());
   if (map.getZoom() < 10 || span > 2.5) {
-    if (status) status.textContent = 'Acércate a una ciudad para ver el tráfico y la actividad.';
+    setLayerStatus('activity', 'Actividad: acércate a una ciudad para verla.');
     return;
   }
   const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()]
     .map((value) => value.toFixed(4)).join(',');
-  const request = ++liveRequest;
-  const messages = [];
-  await Promise.all(wanted.map(async (kind) => {
-    try {
-      const data = await api(`/traffic/${kind === 'traffic' ? 'flow' : 'activity'}?bbox=${bbox}`);
-      if (request !== liveRequest) return;
-      map.getSource(kind)?.setData(data);
-      if (kind === 'traffic') {
-        messages.push(data.features.length > 0
-          ? `Tráfico: ${data.features.length} tramos con datos de los últimos ${data.windowMinutes} minutos.`
-          : 'Tráfico: aún no hay recorridos recientes en esta zona.');
-      } else if (data.features.length === 0) {
-        messages.push('Actividad: sin recorridos suficientes en las últimas 24 horas.');
-      }
-    } catch (error) {
-      messages.push(error.message);
-    }
-  }));
-  if (request === liveRequest && status) status.textContent = messages.join(' ');
+  const request = ++activityRequest;
+  try {
+    const data = await api(`/traffic/activity?bbox=${bbox}`);
+    if (request !== activityRequest) return;
+    map.getSource('activity')?.setData(data);
+    setLayerStatus('activity', data.features.length === 0
+      ? 'Actividad: sin recorridos suficientes en las últimas 24 horas.' : '');
+  } catch (error) {
+    if (request === activityRequest) setLayerStatus('activity', error.message);
+  }
 }
-
-setInterval(() => {
-  if (!document.hidden && activeLayers.has('traffic')) refreshLiveLayers();
-}, 60_000);
 
 function renderCoverage() {
   const { world, detailed } = tilesets();
@@ -1075,13 +1065,16 @@ async function main() {
   renderStops();
   wireControls();
   try {
-    [regions, styleTemplate] = await Promise.all([
+    // Both were preloaded by index.html while the scripts downloaded.
+    let styleText;
+    [regions, styleText] = await Promise.all([
       api('/maps/regions'),
       fetch('/maps/style/style.json').then((response) => {
         if (!response.ok) throw new Error(`style.json: HTTP ${response.status}`);
         return response.text();
       }),
     ]);
+    template = parseTemplate(styleText, ORIGIN);
   } catch (error) {
     showAppError(`No se pudo cargar el mapa: ${error.message}`);
     return;
