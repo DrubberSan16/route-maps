@@ -1,5 +1,5 @@
 {
-  "description": "Catalog of offline regions. Detailed Ecuador maps are built only from the audited native source catalog (source.nativeRegion). World is a public-domain low-zoom base map. mapDir is the folder under storage/maps.",
+  "description": "Catalog of offline regions. Detailed Ecuador maps are built only from the audited native source catalog (source.nativeRegion). World is a public-domain low-zoom base map. mapDir is the folder under storage/maps. rasters sets the highest zoom of the relief (terrain) and satellite layers built with raster-data from the open sources of sources.json.",
   "regions": [
     {
       "code": "world",
@@ -23,6 +23,14 @@
       ],
       "source": {
         "nativeRegion": "ecuador"
+      },
+      "rasters": {
+        "terrain": {
+          "maxZoom": 11
+        },
+        "satellite": {
+          "maxZoom": 12
+        }
       }
     },
     {
@@ -39,6 +47,14 @@
       ],
       "source": {
         "nativeRegion": "ecuador"
+      },
+      "rasters": {
+        "terrain": {
+          "maxZoom": 12
+        },
+        "satellite": {
+          "maxZoom": 13
+        }
       }
     },
     {
@@ -56,6 +72,14 @@
       ],
       "source": {
         "nativeRegion": "ecuador"
+      },
+      "rasters": {
+        "terrain": {
+          "maxZoom": 12
+        },
+        "satellite": {
+          "maxZoom": 14
+        }
       }
     },
     {
@@ -72,6 +96,14 @@
       ],
       "source": {
         "nativeRegion": "ecuador"
+      },
+      "rasters": {
+        "terrain": {
+          "maxZoom": 12
+        },
+        "satellite": {
+          "maxZoom": 13
+        }
       }
     },
     {
@@ -89,6 +121,14 @@
       ],
       "source": {
         "nativeRegion": "ecuador"
+      },
+      "rasters": {
+        "terrain": {
+          "maxZoom": 12
+        },
+        "satellite": {
+          "maxZoom": 14
+        }
       }
     }
   ]
