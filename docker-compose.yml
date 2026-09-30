@@ -82,6 +82,7 @@ services:
       ROUTING_STORAGE_PATH: /data/routing
       PUBLIC_TILES_BASE_URL: ${PUBLIC_TILES_BASE_URL:-/maps}
       MAP_DOWNLOAD_ACCEL_REDIRECT: "true"
+      TRAFFIC_TIME_ZONE: ${TRAFFIC_TIME_ZONE:-America/Guayaquil}
       REGIONS_SYNC_ON_STARTUP: "true"
       RUN_MIGRATIONS: "true"
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}

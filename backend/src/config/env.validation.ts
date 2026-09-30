@@ -7,6 +7,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsTimeZone,
   Max,
   Min,
   MinLength,
@@ -49,6 +50,10 @@ class EnvironmentVariables {
   @IsOptional()
   @IsString()
   GEOCODING_PLACES_FILE?: string;
+
+  @IsOptional()
+  @IsTimeZone({ message: 'TRAFFIC_TIME_ZONE must be an IANA time zone, e.g. America/Guayaquil' })
+  TRAFFIC_TIME_ZONE?: string;
 }
 
 /** Validates the environment at bootstrap so misconfiguration fails fast. */

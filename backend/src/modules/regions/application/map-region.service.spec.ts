@@ -53,6 +53,7 @@ class InMemoryRegions implements MapRegionRepository {
       routingFile: data.routingFile ?? null,
       routingFileSize: data.routingFileSize ?? null,
       routingChecksum: data.routingChecksum ?? null,
+      assets: data.assets ?? [],
     };
     this.regions.set(data.code, region);
     return Promise.resolve(region);
@@ -256,6 +257,110 @@ describe('MapRegionService', () => {
 
       expect(report.disabled).toEqual(['guayaquil']);
       expect(regions.regions.get('guayaquil')?.enabled).toBe(false);
+    });
+
+    describe('assets (relief, satellite, overlays)', () => {
+      const TERRAIN = 'south-america/ecuador/guayaquil.terrain.pmtiles';
+      const SATELLITE = 'south-america/ecuador/guayaquil.satellite.pmtiles';
+
+      beforeEach(() => {
+        storage.put('map', TERRAIN, 'terrain v1');
+        storage.put('map', SATELLITE, 'satellite v1');
+        storage.manifests = [
+          {
+            ...GUAYAQUIL,
+            assets: [
+              { kind: 'terrain', file: TERRAIN, minZoom: 0, maxZoom: 12, format: 'webp' },
+              {
+                kind: 'satellite',
+                file: SATELLITE,
+                checksum: sha256('satellite v1'),
+                minZoom: 0,
+                maxZoom: 14,
+                format: 'WEBP',
+              },
+            ],
+          },
+        ];
+      });
+
+      it('registers them with sizes and checksums', async () => {
+        await service.syncFromStorage();
+
+        expect(regions.regions.get('guayaquil')?.assets).toEqual([
+          {
+            kind: 'terrain',
+            file: TERRAIN,
+            size: 'terrain v1'.length,
+            checksum: sha256('terrain v1'),
+            minZoom: 0,
+            maxZoom: 12,
+            format: 'webp',
+          },
+          {
+            kind: 'satellite',
+            file: SATELLITE,
+            size: 'satellite v1'.length,
+            checksum: sha256('satellite v1'),
+            minZoom: 0,
+            maxZoom: 14,
+            format: 'webp',
+          },
+        ]);
+        await expect(service.getAsset('guayaquil', 'satellite')).resolves.toMatchObject({
+          asset: { kind: 'satellite', file: SATELLITE },
+        });
+      });
+
+      it('does not hash them again on restart', async () => {
+        await service.syncFromStorage();
+        storage.hashed = [];
+
+        const report = await service.syncFromStorage();
+
+        expect(report.unchanged).toEqual(['guayaquil']);
+        expect(storage.hashed).toEqual([]);
+      });
+
+      it('registers a region again when an asset is added later', async () => {
+        const [withAssets] = storage.manifests;
+        storage.manifests = [{ ...withAssets, assets: [] }];
+        await service.syncFromStorage();
+        storage.manifests = [withAssets];
+
+        const report = await service.syncFromStorage();
+
+        expect(report.registered).toEqual(['guayaquil']);
+        expect(regions.regions.get('guayaquil')?.assets).toHaveLength(2);
+      });
+
+      it('leaves out an asset whose file is missing', async () => {
+        storage.files.delete(`map:${TERRAIN}`);
+        jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+        await service.syncFromStorage();
+
+        expect(regions.regions.get('guayaquil')?.assets.map((asset) => asset.kind)).toEqual([
+          'satellite',
+        ]);
+        const error = await service.getAsset('guayaquil', 'terrain').catch((e: unknown) => e);
+        expect((error as AppException).code).toBe(ErrorCode.MAP_REGION_FILE_NOT_AVAILABLE);
+      });
+
+      it.each([
+        [
+          'a checksum that does not match',
+          { kind: 'terrain', file: TERRAIN, checksum: sha256('other') },
+          `Checksum of ${TERRAIN} does not match its manifest`,
+        ],
+        ['an unknown kind', { kind: 'lidar', file: TERRAIN }, 'Unknown asset kind "lidar"'],
+      ])('refuses %s', async (_label, asset, message) => {
+        storage.manifests = [{ ...GUAYAQUIL, assets: [asset] }];
+
+        const report = await service.syncFromStorage();
+
+        expect(report.errors).toEqual([{ code: 'guayaquil', message }]);
+      });
     });
 
     it('re-enables a region disabled by an administrator when it is synced again', async () => {

@@ -11,8 +11,25 @@ import {
   Length,
   ValidateNested,
 } from 'class-validator';
-import { MapRegion } from '../../domain/map-region.entity';
+import { MapRegion, REGION_ASSET_KINDS, RegionAsset } from '../../domain/map-region.entity';
 import { toBoolean } from '../../../../common/dto/transforms';
+
+export class RegionAssetResponse {
+  @ApiProperty({ enum: REGION_ASSET_KINDS, example: 'satellite' }) kind: string;
+  @ApiProperty({ example: 'webp', description: 'Tile format: webp, png, jpg or pbf' })
+  format: string;
+  @ApiProperty({ example: 0 }) minZoom: number;
+  @ApiProperty({ example: 14 }) maxZoom: number;
+  @ApiProperty({ example: 5422330, description: 'Size in bytes' }) size: number;
+  @ApiProperty({ example: 'sha256 hex' }) checksum: string;
+  @ApiProperty({
+    example: '/maps/ecuador/guayaquil.satellite.pmtiles?v=2026.09.30.1200',
+    description: 'Range-readable PMTiles URL for online rendering (pmtiles:// protocol)',
+  })
+  tilesUrl: string;
+  @ApiProperty({ example: '/api/v1/maps/regions/guayaquil/assets/satellite/download' })
+  downloadUrl: string;
+}
 
 export class MapRegionResponse {
   @ApiProperty({ example: 'guayaquil', description: 'Public region identifier (code)' })
@@ -35,13 +52,40 @@ export class MapRegionResponse {
   @ApiPropertyOptional({ example: '/api/v1/maps/regions/guayaquil/routing/download' })
   routingDownloadUrl: string | null;
   @ApiProperty({
-    example: '/maps/ecuador/guayaquil.pmtiles',
-    description: 'Range-readable PMTiles URL for online rendering (pmtiles:// protocol)',
+    example: '/maps/ecuador/guayaquil.pmtiles?v=2026.09.30.1200',
+    description:
+      'Range-readable PMTiles URL for online rendering (pmtiles:// protocol). The version in the ' +
+      'query string changes with the data, so the file can be cached for good.',
   })
   tilesUrl: string;
+  @ApiProperty({
+    type: RegionAssetResponse,
+    isArray: true,
+    description: 'Relief (terrain), satellite imagery and overlays of the region, when built',
+  })
+  assets: RegionAssetResponse[];
   @ApiProperty() enabled: boolean;
   @ApiProperty() updatedAt: Date;
 }
+
+/** Public URL of a map file, with the data version so that caches never serve an older copy. */
+const versionedTilesUrl = (base: string, file: string, version: string): string =>
+  `${base.replace(/\/$/, '')}/${file}?v=${encodeURIComponent(version)}`;
+
+const toAssetResponse = (
+  region: MapRegion,
+  asset: RegionAsset,
+  publicTilesBaseUrl: string,
+): RegionAssetResponse => ({
+  kind: asset.kind,
+  format: asset.format,
+  minZoom: asset.minZoom,
+  maxZoom: asset.maxZoom,
+  size: asset.size,
+  checksum: asset.checksum,
+  tilesUrl: versionedTilesUrl(publicTilesBaseUrl, asset.file, region.version),
+  downloadUrl: `/api/v1/maps/regions/${region.code}/assets/${asset.kind}/download`,
+});
 
 export const toRegionResponse = (
   region: MapRegion,
@@ -64,7 +108,8 @@ export const toRegionResponse = (
   routingDownloadUrl: region.routingFile
     ? `/api/v1/maps/regions/${region.code}/routing/download`
     : null,
-  tilesUrl: `${publicTilesBaseUrl.replace(/\/$/, '')}/${region.fileName}`,
+  tilesUrl: versionedTilesUrl(publicTilesBaseUrl, region.fileName, region.version),
+  assets: region.assets.map((asset) => toAssetResponse(region, asset, publicTilesBaseUrl)),
   enabled: region.enabled,
   updatedAt: region.updatedAt,
 });
