@@ -80,6 +80,10 @@ la región publica el archivo que necesita (`assets` del catálogo):
 - **Relieve**: Copernicus DEM GLO-30 (~30 m), modelo de superficie: incluye edificios y vegetación; el mar
   se toma como altura 0. Zoom máximo 11-12.
 
+Donde se superponen regiones (país, provincia y ciudad), el visor y la app dibujan la imagen satélite de
+todas, la de la región más pequeña encima: en una ciudad se ve la de más zoom. El relieve se toma solo de
+la región exterior, porque sombrear dos veces las mismas laderas las oscurece.
+
 Ambas fuentes son abiertas, se descargan una vez (`storage/imports/raster/`) y se sirven desde la propia
 instalación con la cita que pide su licencia (control de atribución del mapa y `/fuentes.html`).
 

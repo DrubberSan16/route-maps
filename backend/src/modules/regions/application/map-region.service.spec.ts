@@ -202,6 +202,21 @@ describe('MapRegionService', () => {
       });
     });
 
+    it('hashes the map again when its manifest checksum changes', async () => {
+      storage.manifests = [{ ...GUAYAQUIL, mapChecksum: sha256('pmtiles v1') }];
+      await service.syncFromStorage();
+      storage.hashed = [];
+      // Rebuilt with the same name, size and version: only the manifest checksum tells.
+      storage.put('map', GUAYAQUIL.mapFile, 'pmtiles v9');
+      storage.manifests = [{ ...GUAYAQUIL, mapChecksum: sha256('pmtiles v9') }];
+
+      const report = await service.syncFromStorage();
+
+      expect(report).toMatchObject({ registered: ['guayaquil'], errors: [] });
+      expect(storage.hashed).toEqual([`map:${GUAYAQUIL.mapFile}`]);
+      expect(regions.regions.get('guayaquil')?.checksum).toBe(sha256('pmtiles v9'));
+    });
+
     it('refuses a file whose checksum does not match its manifest', async () => {
       storage.manifests = [{ ...GUAYAQUIL, mapChecksum: sha256('something else') }];
 
@@ -320,6 +335,30 @@ describe('MapRegionService', () => {
 
         expect(report.unchanged).toEqual(['guayaquil']);
         expect(storage.hashed).toEqual([]);
+      });
+
+      it('hashes an asset again when its manifest checksum changes', async () => {
+        await service.syncFromStorage();
+        storage.hashed = [];
+        // Rebuilt with the same name, size and region version: only the manifest checksum tells.
+        storage.put('map', SATELLITE, 'satellite v2');
+        const [manifest] = storage.manifests;
+        storage.manifests = [
+          {
+            ...manifest,
+            assets: manifest.assets?.map((asset) =>
+              asset.kind === 'satellite' ? { ...asset, checksum: sha256('satellite v2') } : asset,
+            ),
+          },
+        ];
+
+        const report = await service.syncFromStorage();
+
+        expect(report).toMatchObject({ registered: ['guayaquil'], errors: [] });
+        expect(storage.hashed).toEqual([`map:${SATELLITE}`]);
+        expect(
+          regions.regions.get('guayaquil')?.assets.find((asset) => asset.kind === 'satellite'),
+        ).toMatchObject({ checksum: sha256('satellite v2') });
       });
 
       it('registers a region again when an asset is added later', async () => {

@@ -8,6 +8,7 @@ import 'package:maps_platform/domain/services/offline_storage_service.dart';
 import 'package:maps_platform/services/map/map_style_service.dart';
 
 import '../helpers/database.dart';
+import '../helpers/pmtiles.dart';
 import '../helpers/regions.dart';
 
 void main() {
@@ -29,26 +30,24 @@ void main() {
   Map<String, Object?> basemap(Map<String, Object?> style) =>
       (style['sources']! as Map<String, Object?>)['basemap']! as Map<String, Object?>;
 
+  LocalMapSource downloaded(File file) => LocalMapSource(
+    region: DownloadedRegion(
+      code: 'guayaquil',
+      name: 'Guayaquil',
+      version: '2026.09.20',
+      checksum: 'aa',
+      sizeBytes: 1,
+      relativePath: 'regions/guayaquil/2026.09.20/guayaquil.pmtiles',
+      minZoom: 0,
+      maxZoom: 14,
+      downloadedAt: DateTime.utc(2026, 9, 20),
+    ),
+    file: file,
+  );
+
   test('a downloaded region is read from its local PMTiles file', () async {
     final file = File('${root.path}/offline/regions/guayaquil/2026.09.20/guayaquil.pmtiles');
-    final style = decode(
-      await styles.styleFor(
-        LocalMapSource(
-          region: DownloadedRegion(
-            code: 'guayaquil',
-            name: 'Guayaquil',
-            version: '2026.09.20',
-            checksum: 'aa',
-            sizeBytes: 1,
-            relativePath: 'regions/guayaquil/2026.09.20/guayaquil.pmtiles',
-            minZoom: 0,
-            maxZoom: 14,
-            downloadedAt: DateTime.utc(2026, 9, 20),
-          ),
-          file: file,
-        ),
-      ),
-    );
+    final style = decode(await styles.styleFor(downloaded(file)));
     expect(basemap(style)['url'], 'pmtiles://${Uri.file(file.path)}');
     expect(basemap(style)['attribution'], isEmpty);
   });
@@ -76,7 +75,10 @@ void main() {
     final online = RemoteMapSource(
       region: region('guayaquil'),
       url: Uri.parse('https://maps.example.com/maps/ec/guayaquil.pmtiles'),
-      assets: {'satellite': satellite, 'terrain': terrain},
+      assets: {
+        'satellite': [satellite],
+        'terrain': [terrain],
+      },
     );
 
     List<String> ids(Map<String, Object?> style) => [
@@ -137,6 +139,31 @@ void main() {
       expect((layer(style, 'landuse-natural')['layout']! as Map)['visibility'], 'none');
     });
 
+    test('the imagery of every region over the map is drawn, the most detailed on top', () async {
+      final country = Uri.parse('https://maps.example.com/maps/ec/ecuador.satellite.pmtiles');
+      final style = decode(
+        await styles.styleFor(
+          RemoteMapSource(
+            region: region('ecuador'),
+            url: Uri.parse('https://maps.example.com/maps/ec/ecuador.pmtiles'),
+            assets: {
+              'satellite': [country, satellite],
+            },
+          ),
+          mapType: MapTypeOption.satellite,
+        ),
+      );
+      final sources = style['sources']! as Map<String, Object?>;
+      expect((sources['satellite']! as Map)['url'], 'pmtiles://$country');
+      expect((sources['satellite-2']! as Map)['url'], 'pmtiles://$satellite');
+
+      final order = ids(style);
+      final roads = order.indexOf('road-path');
+      expect(order.sublist(roads - 2, roads), ['satellite', 'satellite-2']);
+      expect(layer(style, 'satellite-2')['source'], 'satellite-2');
+      expect(layer(style, 'satellite-2')['type'], 'raster');
+    });
+
     test('without the imagery the plain map is drawn', () async {
       final style = decode(
         await styles.styleFor(
@@ -157,12 +184,58 @@ void main() {
         RemoteMapSource(
           region: region('guayaquil'),
           url: Uri.parse('https://maps.example.com/maps/ec/guayaquil.pmtiles'),
-          assets: {'overlays': overlays},
+          assets: {
+            'overlays': [overlays],
+          },
         ),
       ),
     );
     final source = (style['sources']! as Map<String, Object?>)['overlays']! as Map;
     expect(source['url'], 'pmtiles://$overlays');
+  });
+
+  group('overlays (climate, population)', () {
+    final online = Uri.parse('https://maps.example.com/maps/ec/guayaquil.pmtiles');
+
+    test('the platform has them in their own archive or inside the map', () async {
+      final withArchive = RemoteMapSource(
+        region: region('guayaquil'),
+        url: online,
+        assets: {
+          'overlays': [Uri.parse('https://maps.example.com/maps/ec/guayaquil.overlays.pmtiles')],
+        },
+      );
+      expect(await styles.overlaysAvailable(withArchive), isTrue);
+      // A map built before the overlays had their own archive.
+      expect(
+        await styles.overlaysAvailable(RemoteMapSource(region: region('guayaquil'), url: online)),
+        isTrue,
+      );
+      // The world overview has none.
+      expect(
+        await styles.overlaysAvailable(
+          RemoteMapSource(region: region('world', maxZoom: 7), url: online),
+        ),
+        isFalse,
+      );
+      expect(await styles.overlaysAvailable(const NoMapSource()), isFalse);
+    });
+
+    test('a downloaded map only has them if it was built with them inside', () async {
+      final old = await writePmtiles(
+        File('${root.path}/old.pmtiles'),
+        vectorLayers: ['transportation', 'population', 'climate'],
+      );
+      final current = await writePmtiles(
+        File('${root.path}/current.pmtiles'),
+        vectorLayers: ['transportation', 'building'],
+      );
+      expect(await styles.overlaysAvailable(downloaded(old)), isTrue);
+      expect(await styles.overlaysAvailable(downloaded(current)), isFalse);
+      // Unreadable metadata: still offered.
+      final broken = File('${root.path}/broken.pmtiles')..writeAsStringSync('?');
+      expect(await styles.overlaysAvailable(downloaded(broken)), isTrue);
+    });
   });
 
   test('the measured traffic has its hidden layers under the labels', () async {

@@ -11,10 +11,11 @@ sealed class MapSource {
   /// to be rebuilt when it changes.
   String get id;
 
-  /// PMTiles of the region's extra layers that can be drawn now, by kind
-  /// ([RegionAsset.terrain], [RegionAsset.satellite], [RegionAsset.overlays]):
-  /// read from the platform, so only while there is connection.
-  final Map<String, Uri> assets;
+  /// PMTiles of the extra layers that can be drawn now, by kind
+  /// ([RegionAsset.terrain], [RegionAsset.satellite], [RegionAsset.overlays]),
+  /// in drawing order: the widest region first, so that a more detailed one is
+  /// drawn on top. Read from the platform, so only while there is connection.
+  final Map<String, List<Uri>> assets;
 }
 
 /// A downloaded PMTiles file: renders with no connection.
@@ -51,6 +52,7 @@ class NoMapSource extends MapSource {
 abstract class MapRepository {
   /// Local region covering [around] if there is one; otherwise the server's
   /// PMTiles when [online]; otherwise any downloaded region. When [online],
-  /// the source also lists the region's relief, satellite and overlay archives.
+  /// the source also lists the region's overlays and the relief and satellite
+  /// archives published over it.
   Future<MapSource> resolveSource({Coordinate? around, required bool online});
 }

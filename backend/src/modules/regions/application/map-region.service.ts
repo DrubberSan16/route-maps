@@ -180,7 +180,9 @@ export class MapRegionService {
       existing.version === manifest.version &&
       existing.fileName === manifest.mapFile &&
       existing.fileSize === mapFile.size &&
-      existing.checksum.length === 64;
+      existing.checksum.length === 64 &&
+      // A rebuild of the same size under the same version: only its manifest checksum tells.
+      (!manifest.mapChecksum || manifest.mapChecksum === existing.checksum);
     const routingUnchanged =
       !force &&
       existing !== null &&
@@ -257,7 +259,8 @@ export class MapRegionService {
         previous &&
         existing?.version === manifest.version &&
         previous.file === item.file &&
-        previous.size === file.size
+        previous.size === file.size &&
+        (!item.checksum || item.checksum === previous.checksum)
           ? previous.checksum
           : await this.storage.sha256('map', item.file);
       if (item.checksum && item.checksum !== checksum) {

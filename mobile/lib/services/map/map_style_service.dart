@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 
 import '../../domain/repositories/map_repository.dart';
 import '../../domain/services/offline_storage_service.dart';
+import 'pmtiles_metadata.dart';
 
 /// A way of drawing the map ("Mapa", "Satélite", "Relieve"), from the style
 /// metadata (`maps-platform:map-types`).
@@ -33,8 +34,9 @@ class MapTypeOption {
 /// * the climate and population overlays (hidden until switched on) are read
 ///   from the region's overlays archive, or from the map for maps built before
 ///   it existed;
-/// * the satellite and relief types add the region's imagery or elevation
-///   (read from the platform) and restyle the base layers as the metadata says;
+/// * the satellite and relief types add the imagery or elevation published
+///   over the map (read from the platform, the most detailed on top) and
+///   restyle the base layers as the metadata says;
 /// * the measured traffic is an empty GeoJSON source with its (hidden) layers
 ///   under the labels, filled and shown by the map view;
 /// * label glyphs are always read from files on the device, so text renders
@@ -71,7 +73,7 @@ class MapStyleService {
         MapTypeOption(
           id: id,
           label: spec['label'] as String? ?? id,
-          available: id == MapTypeOption.map || _assetUrl(spec, source) != null,
+          available: id == MapTypeOption.map || _assetUrls(spec, source).isNotEmpty,
         ),
     ];
   }
@@ -96,18 +98,35 @@ class MapStyleService {
         layers.removeWhere((layer) => const {_basemap, _overlays}.contains(layer['source']));
     }
     if (sources[_overlays] case final Map<String, Object?> overlays) {
-      overlays['url'] = switch (source.assets[_overlays]) {
+      overlays['url'] = switch (source.assets[_overlays]?.firstOrNull) {
         final Uri url => 'pmtiles://$url',
         null => basemap['url'],
       };
     }
     if (source is! NoMapSource) _addTraffic(style, layers);
     if (_mapTypeSpecs(template)[mapType] case final spec? when mapType != MapTypeOption.map) {
-      if (_assetUrl(spec, source) case final url?) _applyMapType(spec, url, sources, layers);
+      final urls = _assetUrls(spec, source);
+      if (urls.isNotEmpty) _applyMapType(spec, urls, sources, layers);
     }
     style['layers'] = layers;
     style['glyphs'] = '${await glyphsBaseUri()}{fontstack}/{range}.pbf';
     return jsonEncode(style);
+  }
+
+  /// Whether [source] can draw the overlays (climate, population): from their
+  /// own archive, or from the map itself where it was built before they had
+  /// one. A downloaded file tells by its metadata; the platform's maps are
+  /// taken to have them, except the world overview.
+  Future<bool> overlaysAvailable(MapSource source) async {
+    if (source.assets[_overlays]?.isNotEmpty ?? false) return true;
+    return switch (source) {
+      LocalMapSource(:final file) => _hasOverlays(
+        await pmtilesVectorLayers(file),
+        await _loadTemplate(),
+      ),
+      RemoteMapSource(:final region) => region.isDetailed,
+      NoMapSource() => false,
+    };
   }
 
   /// Directory (as a `file://` URI ending in `/`) holding the glyphs, copied
@@ -134,29 +153,48 @@ class MapStyleService {
     return types.map((id, spec) => MapEntry(id, spec! as Map<String, Object?>));
   }
 
-  /// URL of the archive a map type needs, if [source] has it.
-  static Uri? _assetUrl(Map<String, Object?> spec, MapSource source) {
+  /// Archives a map type needs that [source] has, in drawing order.
+  static List<Uri> _assetUrls(Map<String, Object?> spec, MapSource source) {
     final asset = spec['asset'] as String?;
-    return asset == null ? null : source.assets[asset];
+    return asset == null ? const [] : source.assets[asset] ?? const [];
   }
 
+  /// Whether a map with [vectorLayers] has the data of the overlay layers
+  /// (unreadable metadata counts as yes: the overlays stay on offer).
+  static bool _hasOverlays(Set<String>? vectorLayers, Map<String, Object?> template) =>
+      vectorLayers == null ||
+      (template['layers']! as List<Object?>).cast<Map<String, Object?>>().any(
+        (layer) => layer['source'] == _overlays && vectorLayers.contains(layer['source-layer']),
+      );
+
   /// Adds the imagery or elevation of a map type below the layers its
-  /// metadata names, hides the base layers it replaces and restyles the rest.
+  /// metadata names (a source and a copy of its layers per archive, the later
+  /// ones on top), hides the base layers it replaces and restyles the rest.
   static void _applyMapType(
     Map<String, Object?> spec,
-    Uri url,
+    List<Uri> urls,
     Map<String, Object?> sources,
     List<Map<String, Object?>> layers,
   ) {
-    final sourceId = spec['asset']! as String;
-    sources[sourceId] = {...?spec['source'] as Map<String, Object?>?, 'url': 'pmtiles://$url'};
+    final asset = spec['asset']! as String;
+    // The first archive keeps the template's ids: `satellite`, then `satellite-2`...
+    String numbered(String id, int index) => index == 0 ? id : '$id-${index + 1}';
+    for (final (index, url) in urls.indexed) {
+      sources[numbered(asset, index)] = {
+        ...?spec['source'] as Map<String, Object?>?,
+        'url': 'pmtiles://$url',
+      };
+    }
     for (final added
         in (spec['layers'] as List<Object?>? ?? const []).cast<Map<String, Object?>>()) {
-      final layer = {...added}..remove('before');
-      layer['source'] = sourceId;
-      var index = layers.indexWhere((existing) => existing['id'] == added['before']);
-      if (index < 0) index = _firstSymbol(layers);
-      layers.insert(index, layer);
+      for (var index = 0; index < urls.length; index++) {
+        final layer = {...added}..remove('before');
+        layer['id'] = numbered(added['id']! as String, index);
+        layer['source'] = numbered(asset, index);
+        var position = layers.indexWhere((existing) => existing['id'] == added['before']);
+        if (position < 0) position = _firstSymbol(layers);
+        layers.insert(position, layer);
+      }
     }
     final hide = (spec['hide'] as List<Object?>? ?? const []).toSet();
     final paint = spec['paint'] as Map<String, Object?>? ?? const {};

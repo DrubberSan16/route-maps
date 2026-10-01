@@ -123,6 +123,13 @@ final mapTypeOptionsProvider = FutureProvider<List<MapTypeOption>>((ref) async {
   return ref.watch(mapStyleServiceProvider).mapTypes(source);
 });
 
+/// Whether the current map source has the data of the overlays (climate,
+/// population): a map downloaded without them only shows them with connection.
+final overlaysAvailableProvider = FutureProvider<bool>((ref) async {
+  final source = await ref.watch(mapSourceProvider.future);
+  return ref.watch(mapStyleServiceProvider).overlaysAvailable(source);
+});
+
 // ---------------------------------------------------------------- traffic
 
 /// Reads the measured traffic of `minLng,minLat,maxLng,maxLat` (`GET /traffic/flow`):

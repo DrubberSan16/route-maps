@@ -42,7 +42,7 @@ class MapRepositoryImpl implements MapRepository {
         return RemoteMapSource(
           region: region,
           url: _config.resolve(region.tilesUrl),
-          assets: _assets(region),
+          assets: _assets(region, catalog),
         );
       }
     }
@@ -64,15 +64,51 @@ class MapRepositoryImpl implements MapRepository {
       return LocalMapSource(
         region: region,
         file: file,
-        assets: published == null ? const {} : _assets(published),
+        assets: published == null ? const {} : _assets(published, catalog),
       );
     }
     return null;
   }
 
-  Map<String, Uri> _assets(MapRegion region) => {
-    for (final asset in region.assets) asset.kind: _config.resolve(asset.tilesUrl),
-  };
+  /// The extra layers to draw over the map of [region], as the web viewer
+  /// does: its own overlays; the imagery of every region over it, the widest
+  /// first so that a city's (more zoom levels) is drawn over the country's;
+  /// and the elevation of the outermost ones only, since slopes shaded twice
+  /// would come out darker. The world overview, shown far from every detailed
+  /// map, only gets its own.
+  Map<String, List<Uri>> _assets(MapRegion region, List<MapRegion> catalog) {
+    final box = region.isDetailed ? region.bbox : null;
+    final over = [
+      for (final other in catalog)
+        if (other.code == region.code || (box != null && (other.bbox?.intersects(box) ?? false)))
+          other,
+    ]..sort((a, b) => _area(b.bbox).compareTo(_area(a.bbox)));
+    final withTerrain = [
+      for (final other in over)
+        if (other.asset(RegionAsset.terrain) != null) other,
+    ];
+    final outermost = [
+      for (final (index, other) in withTerrain.indexed)
+        if (!withTerrain.take(index).any((wider) => _inside(other.bbox, wider.bbox))) other,
+    ];
+    final assets = {
+      RegionAsset.overlays: _urls([region], RegionAsset.overlays),
+      RegionAsset.satellite: _urls(over, RegionAsset.satellite),
+      RegionAsset.terrain: _urls(outermost, RegionAsset.terrain),
+    };
+    return {
+      for (final MapEntry(:key, :value) in assets.entries)
+        if (value.isNotEmpty) key: value,
+    };
+  }
+
+  List<Uri> _urls(Iterable<MapRegion> regions, String kind) => [
+    for (final region in regions)
+      if (region.asset(kind) case final asset?) _config.resolve(asset.tilesUrl),
+  ];
+
+  static bool _inside(BoundingBox? inner, BoundingBox? outer) =>
+      inner != null && outer != null && outer.containsBox(inner);
 
   static double _area(BoundingBox? bbox) => bbox?.area ?? 0;
 }

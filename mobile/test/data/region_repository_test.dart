@@ -192,9 +192,9 @@ void main() {
       ];
       await regions.refreshCatalog();
       final expected = {
-        'terrain': Uri.parse('https://maps.example.com/maps/ec/guayaquil.terrain.pmtiles'),
-        'satellite': Uri.parse('https://maps.example.com/maps/ec/guayaquil.satellite.pmtiles'),
-        'overlays': Uri.parse('https://maps.example.com/maps/ec/guayaquil.overlays.pmtiles'),
+        'overlays': [Uri.parse('https://maps.example.com/maps/ec/guayaquil.overlays.pmtiles')],
+        'satellite': [Uri.parse('https://maps.example.com/maps/ec/guayaquil.satellite.pmtiles')],
+        'terrain': [Uri.parse('https://maps.example.com/maps/ec/guayaquil.terrain.pmtiles')],
       };
 
       final remote = await maps.resolveSource(around: guayaquilCenter, online: true);
@@ -207,6 +207,63 @@ void main() {
       expect(local, isA<LocalMapSource>());
       expect(local.assets, expected);
       expect((await maps.resolveSource(around: guayaquilCenter, online: false)).assets, isEmpty);
+    });
+
+    test('the imagery of the regions inside the map is drawn over it, as on the web', () async {
+      const quitoBox = BoundingBox(west: -78.65, south: -0.40, east: -78.35, north: 0.05);
+      const all = [RegionAsset.terrain, RegionAsset.satellite, RegionAsset.overlays];
+      catalog = [
+        region('ecuador', name: 'Ecuador', bbox: ecuadorBox, assets: all),
+        region(
+          'guayaquil',
+          name: 'Guayaquil',
+          bbox: guayaquilBox,
+          version: '2026.09.20',
+          assets: all,
+        ),
+        region('quito', name: 'Quito', bbox: quitoBox, assets: [RegionAsset.satellite]),
+      ];
+      await regions.refreshCatalog();
+      Uri url(String code, String kind) =>
+          Uri.parse('https://maps.example.com/maps/ec/$code.$kind.pmtiles');
+
+      // In Guayaquil the country's map is shown: the cities' imagery (more zoom
+      // levels) goes over the country's, and the country's relief shades it all once.
+      final remote = await maps.resolveSource(around: guayaquilCenter, online: true);
+      expect(remote.id, 'remote:ecuador:2026.09.01');
+      expect(remote.assets, {
+        'overlays': [url('ecuador', 'overlays')],
+        'satellite': [
+          url('ecuador', 'satellite'),
+          url('guayaquil', 'satellite'),
+          url('quito', 'satellite'),
+        ],
+        'terrain': [url('ecuador', 'terrain')],
+      });
+
+      // A downloaded city map: the imagery of the regions over the city only.
+      await storeFile(catalog[1]);
+      final local = await maps.resolveSource(around: guayaquilCenter, online: true);
+      expect(local.id, 'local:guayaquil:2026.09.20');
+      expect(local.assets, {
+        'overlays': [url('guayaquil', 'overlays')],
+        'satellite': [url('ecuador', 'satellite'), url('guayaquil', 'satellite')],
+        'terrain': [url('ecuador', 'terrain')],
+      });
+
+      // Far from every detailed map, the world overview offers none.
+      catalog.add(
+        region(
+          'world',
+          name: 'Mundo',
+          bbox: const BoundingBox(west: -180, south: -85, east: 180, north: 85),
+          maxZoom: 7,
+        ),
+      );
+      await regions.refreshCatalog();
+      final atMadrid = await maps.resolveSource(around: const Coordinate(40.4, -3.7), online: true);
+      expect(atMadrid.id, 'remote:world:2026.09.01');
+      expect(atMadrid.assets, isEmpty);
     });
   });
 

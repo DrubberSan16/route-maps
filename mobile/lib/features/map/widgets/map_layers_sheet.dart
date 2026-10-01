@@ -116,12 +116,16 @@ class MapLayersSheet extends ConsumerWidget {
         ref.watch(mapTypeOptionsProvider).value ??
         const [MapTypeOption(id: MapTypeOption.map, label: 'Mapa', available: true)];
     final offline = ref.watch(connectivityStatusProvider).value == ConnectivityStatus.offline;
+    final overlaysAvailable = ref.watch(overlaysAvailableProvider).value ?? true;
     final controller = ref.read(mapLayersProvider.notifier);
     final current = effectiveMapType(layers.mapType, options);
+    final unavailableReason = offline ? 'Necesita conexión' : 'Sin datos en esta zona';
     bool isOn(String id) => id == trafficLayerId ? layers.traffic : layers.overlays.contains(id);
+    // The choice of an overlay is kept while its data is missing, but not shown.
+    bool canShow(String id) => id == trafficLayerId || overlaysAvailable;
     final active = [
       for (final option in layerOptions)
-        if (isOn(option.id)) option,
+        if (isOn(option.id) && canShow(option.id)) option,
     ];
 
     return SafeArea(
@@ -140,7 +144,7 @@ class MapLayersSheet extends ConsumerWidget {
                     child: _MapTypeTile(
                       option: option,
                       selected: option.id == current,
-                      unavailableReason: offline ? 'Necesita conexión' : 'Sin datos en esta zona',
+                      unavailableReason: unavailableReason,
                       onTap: () => controller.setMapType(option.id),
                     ),
                   ),
@@ -156,7 +160,9 @@ class MapLayersSheet extends ConsumerWidget {
                   Expanded(
                     child: _LayerTile(
                       option: option,
-                      selected: isOn(option.id),
+                      selected: isOn(option.id) && canShow(option.id),
+                      available: canShow(option.id),
+                      unavailableReason: unavailableReason,
                       onTap: () => option.id == trafficLayerId
                           ? controller.setTraffic(!layers.traffic)
                           : controller.setOverlay(option.id, !isOn(option.id)),
@@ -259,10 +265,18 @@ class _MapTypeTile extends StatelessWidget {
 }
 
 class _LayerTile extends StatelessWidget {
-  const _LayerTile({required this.option, required this.selected, required this.onTap});
+  const _LayerTile({
+    required this.option,
+    required this.selected,
+    required this.available,
+    required this.unavailableReason,
+    required this.onTap,
+  });
 
   final LayerOption option;
   final bool selected;
+  final bool available;
+  final String unavailableReason;
   final VoidCallback onTap;
 
   @override
@@ -271,41 +285,51 @@ class _LayerTile extends StatelessWidget {
     final scheme = theme.colorScheme;
     return Semantics(
       toggled: selected,
-      child: InkWell(
-        key: Key('layer-${option.id}'),
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Column(
-            children: [
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: selected ? scheme.primaryContainer : scheme.surfaceContainer,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: selected ? scheme.primary : Colors.transparent,
-                    width: 2,
+      enabled: available,
+      child: Opacity(
+        opacity: available ? 1 : 0.45,
+        child: InkWell(
+          key: Key('layer-${option.id}'),
+          borderRadius: BorderRadius.circular(16),
+          onTap: available ? onTap : null,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Column(
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: selected ? scheme.primaryContainer : scheme.surfaceContainer,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: selected ? scheme.primary : Colors.transparent,
+                      width: 2,
+                    ),
+                  ),
+                  child: Icon(
+                    option.icon,
+                    color: selected ? scheme.primary : scheme.onSurfaceVariant,
                   ),
                 ),
-                child: Icon(
-                  option.icon,
-                  color: selected ? scheme.primary : scheme.onSurfaceVariant,
+                const SizedBox(height: 6),
+                Text(
+                  option.label,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: selected ? scheme.primary : scheme.onSurface,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                option.label,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: selected ? scheme.primary : scheme.onSurface,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
+                if (!available)
+                  Text(
+                    unavailableReason,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+              ],
+            ),
           ),
         ),
       ),

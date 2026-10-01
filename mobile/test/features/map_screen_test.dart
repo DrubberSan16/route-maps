@@ -81,6 +81,7 @@ void main() {
     List<MapTypeOption> mapTypes = const [
       MapTypeOption(id: MapTypeOption.map, label: 'Mapa', available: true),
     ],
+    bool overlaysAvailable = true,
   }) async {
     await tester.pumpWidget(
       ProviderScope(
@@ -99,6 +100,7 @@ void main() {
           }),
           mapStyleProvider.overrideWith((ref) async => (source: source, style: _emptyStyle)),
           mapTypeOptionsProvider.overrideWith((ref) async => mapTypes),
+          overlaysAvailableProvider.overrideWith((ref) async => overlaysAvailable),
           mapViewBuilderProvider.overrideWithValue(mapView.build),
           recordingProvider.overrideWith(
             (ref) => recording ?? Stream.value(const RecordingState()),
@@ -172,6 +174,29 @@ void main() {
     await tester.tap(find.byKey(const Key('map-type-relief')));
     await tester.pumpAndSettle();
     expect(MapLayers.parse(settings.values['map.layers']).mapType, 'satellite');
+  });
+
+  testWidgets('offline, overlays the downloaded map lacks cannot be picked and say why', (
+    tester,
+  ) async {
+    connectivity.status = ConnectivityStatus.offline;
+    settings.values['map.layers'] = '{"overlays":["population"]}';
+    await pumpMap(tester, overlaysAvailable: false);
+    await tester.tap(find.byKey(const Key('layers-button')));
+    await tester.pumpAndSettle();
+
+    // Population, rain and climate: each one says it needs a connection.
+    expect(find.text('Necesita conexión'), findsNWidgets(3));
+    expect(find.text('Mapa de calor de la malla censal de 1 km².'), findsNothing);
+    await tester.tap(find.byKey(const Key('layer-precipitation')));
+    await tester.pumpAndSettle();
+    // The choice made before is kept for when the data is there again.
+    expect(MapLayers.parse(settings.values['map.layers']).overlays, {'population'});
+
+    // Traffic does not depend on the map file.
+    await tester.tap(find.byKey(const Key('layer-traffic')));
+    await tester.pumpAndSettle();
+    expect(MapLayers.parse(settings.values['map.layers']).traffic, isTrue);
   });
 
   testWidgets('with traffic on, the legend shows and city views ask for the measured segments', (
