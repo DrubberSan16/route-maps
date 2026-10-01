@@ -35,6 +35,7 @@
 #   /data/imports/naturalearth/*.zip         Natural Earth shapefiles (world input)
 #   /data/imports/raster/                    elevation tiles and satellite composites (raster layers)
 #   /data/maps/<dir>/<region>.pmtiles        visual map, vector tiles
+#   /data/maps/<dir>/<region>.overlays.pmtiles   population and climate (hidden until shown)
 #   /data/maps/<dir>/<region>.terrain.pmtiles    relief: elevation tiles (Terrarium, WebP)
 #   /data/maps/<dir>/<region>.satellite.pmtiles  satellite view: colour tiles (WebP)
 #   /data/maps/<dir>/<region>.region.json    manifest registered by the backend
@@ -301,14 +302,53 @@ ensure_water_polygons() {
 
 # ------------------------------------------------------------------ build steps
 
+# Runs tilegen with the given arguments, writing to $1. Planetiler's scratch files live on the
+# container filesystem: random I/O on bind mounts from Windows/macOS hosts is very slow.
+run_tilegen() {
+  local output=$1 workdir status=0
+  shift
+  mkdir -p "$TILEGEN_TMPDIR"
+  workdir=$(mktemp -d "$TILEGEN_TMPDIR/tilegen-XXXXXX")
+  # shellcheck disable=SC2086 # TILEGEN_ARGS holds several options
+  java -Xmx"$TILEGEN_MEMORY" -jar "$TILEGEN_HOME/tilegen.jar" "$@" --output="$output" --tmpdir="$workdir" \
+    ${TILEGEN_ARGS:-} || status=$?
+  rm -rf "$workdir"
+  return "$status"
+}
+
+# Population and climate of a native map, in <region>.overlays.pmtiles: the clients show them only
+# on demand, so they are read only then instead of weighing on every map tile. Up to zoom 12, the
+# last level with overlay features (the clients enlarge it further in).
+build_overlays() {
+  local code=$1 dir=$2 data=$3 out tmp
+  shift 3
+  out="$dir/$code.overlays.pmtiles"
+  tmp="$dir/.$code.overlays.building.pmtiles"
+  if [[ ! -s "$data/map-population.geojson" && ! -s "$data/climate-precipitation-regions.geojson" &&
+        ! -s "$data/climate-temperature-regions.geojson" ]]; then
+    rm -f "$out"
+    log "No population or climate layers for $code: no overlays archive"
+    return 0
+  fi
+  log "Building overlay tiles for $code"
+  if ! run_tilegen "$tmp" --native_data="$data" --native_layers=overlays --maxzoom=12 "$@"; then
+    rm -f "$tmp"
+    die "overlay tile generation failed for $code"
+  fi
+  mv -f "$tmp" "$out"
+  chmod 644 "$out"
+  match_owner "$out" "$MAPS_DIR"
+  log "Overlays ready: $out ($(du -h "$out" | cut -f1))"
+}
+
 cmd_map() {
   local code=$1 water=$2
-  local region pbf dir out tmp workdir places=""
+  local region pbf dir out tmp places="" native_data=""
   region=$(region_json "$code")
   dir="$MAPS_DIR/$(map_dir "$region")"
   out="$dir/$code.pmtiles"
   tmp="$dir/.$code.building.pmtiles"
-  local args=(--name="$(field "$region" name)")
+  local args=(--name="$(field "$region" name)") shared=()
   if is_natural_earth "$region"; then
     [[ -s "$IMPORTS_DIR/naturalearth/ne_10m_ocean.zip" ]] || die "Natural Earth not found: run 'download $code' first"
     places="$dir/$code.places.json"
@@ -316,11 +356,13 @@ cmd_map() {
   elif is_native "$region"; then
     local native_region bbox
     native_region=$(jq -r '.source.nativeRegion' <<<"$region")
-    [[ -s "$IMPORTS_DIR/native/$native_region/build.json" ]] ||
-      die "native map layers not found: run 'build $code' first"
-    args+=(--native_data="$IMPORTS_DIR/native/$native_region")
+    native_data="$IMPORTS_DIR/native/$native_region"
+    [[ -s "$native_data/build.json" ]] || die "native map layers not found: run 'build $code' first"
+    # The overlays (population, climate) get their own archive, built below.
+    args+=(--native_data="$native_data" --native_layers=map)
     bbox=$(jq -r '.bbox // empty | join(",")' <<<"$region")
-    [[ -n "$bbox" ]] && args+=(--bounds="$bbox")
+    shared=(--name="$(field "$region" name)")
+    [[ -n "$bbox" ]] && shared+=(--bounds="$bbox") && args+=(--bounds="$bbox")
   else
     pbf="$IMPORTS_DIR/$code.osm.pbf"
     [[ -s "$pbf" ]] || die "$pbf not found: run 'download $code' first"
@@ -330,17 +372,11 @@ cmd_map() {
     fi
   fi
   mkdir -p "$dir"
-  # Planetiler's scratch files live on the container filesystem: random I/O on
-  # bind mounts from Windows/macOS hosts is very slow.
-  mkdir -p "$TILEGEN_TMPDIR"
-  workdir=$(mktemp -d "$TILEGEN_TMPDIR/tilegen-$code-XXXXXX")
-  args+=(--output="$tmp" --tmpdir="$workdir")
   log "Building map tiles for $code"
-  if ! java -Xmx"$TILEGEN_MEMORY" -jar "$TILEGEN_HOME/tilegen.jar" "${args[@]}" ${TILEGEN_ARGS:-}; then
-    rm -rf "$workdir" "$tmp" ${places:+"$places.tmp"}
+  if ! run_tilegen "$tmp" "${args[@]}"; then
+    rm -f "$tmp" ${places:+"$places.tmp"}
     die "tile generation failed for $code"
   fi
-  rm -rf "$workdir"
   mv -f "$tmp" "$out"
   chmod 644 "$out"
   match_owner "$out" "$MAPS_DIR"
@@ -350,8 +386,9 @@ cmd_map() {
     match_owner "$places" "$MAPS_DIR"
     log "Place index ready: $places ($(jq '.places | length' "$places") places)"
   fi
-  match_owner "$dir" "$MAPS_DIR"
   log "Map ready: $out ($(du -h "$out" | cut -f1))"
+  [[ -n "$native_data" ]] && build_overlays "$code" "$dir" "$native_data" "${shared[@]}"
+  match_owner "$dir" "$MAPS_DIR"
 }
 
 cmd_build() {
