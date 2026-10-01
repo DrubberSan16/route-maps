@@ -27,7 +27,8 @@ export class TrafficController {
   @Get('flow')
   @ApiOperation({
     summary:
-      'Live traffic of the last 15 minutes by road segment (GeoJSON), from anonymous trip fixes',
+      'Traffic by road segment (GeoJSON) from anonymous trip fixes: live (last 15 minutes) and, ' +
+      'where there is no live data, typical for this day type and hour (last 4 weeks)',
   })
   @ApiQuery({ name: 'bbox', example: '-79.95,-2.25,-79.85,-2.1' })
   flow(@Query('bbox') bbox?: string) {

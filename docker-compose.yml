@@ -34,6 +34,9 @@ services:
       # authorised by the backend (X-Accel-Redirect). Read-only.
       - ${STORAGE_PATH:-./storage}/maps:/data/maps:ro
       - ${STORAGE_PATH:-./storage}/routing:/data/routing:ro
+      # Android app offered by the viewer's "Instalar app" button (/descargas/),
+      # published with infrastructure/scripts/publish-app.py.
+      - ${STORAGE_PATH:-./storage}/app:/data/app:ro
     depends_on:
       backend:
         condition: service_healthy
@@ -82,6 +85,7 @@ services:
       ROUTING_STORAGE_PATH: /data/routing
       PUBLIC_TILES_BASE_URL: ${PUBLIC_TILES_BASE_URL:-/maps}
       MAP_DOWNLOAD_ACCEL_REDIRECT: "true"
+      TRAFFIC_TIME_ZONE: ${TRAFFIC_TIME_ZONE:-America/Guayaquil}
       REGIONS_SYNC_ON_STARTUP: "true"
       RUN_MIGRATIONS: "true"
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}

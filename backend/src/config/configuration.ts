@@ -60,6 +60,10 @@ export interface AppConfig {
     accelMapsPrefix: string;
     accelRoutingPrefix: string;
   };
+  traffic: {
+    /** IANA time zone whose weekday and hour pick the historical ("typical") traffic. */
+    timeZone: string;
+  };
   rateLimit: { ttlMs: number; limit: number };
 }
 
@@ -147,6 +151,9 @@ export const loadConfiguration = (): AppConfig => {
       accelRedirect: bool(env.MAP_DOWNLOAD_ACCEL_REDIRECT, false),
       accelMapsPrefix: env.MAP_DOWNLOAD_ACCEL_MAPS_PREFIX ?? '/_protected/maps/',
       accelRoutingPrefix: env.MAP_DOWNLOAD_ACCEL_ROUTING_PREFIX ?? '/_protected/routing/',
+    },
+    traffic: {
+      timeZone: optional(env.TRAFFIC_TIME_ZONE) ?? 'America/Guayaquil',
     },
     rateLimit: {
       ttlMs: int(env.RATE_LIMIT_TTL_MS, 60000),

@@ -1,14 +1,17 @@
 // Map viewer of the platform: the world base map (Natural Earth) with the prepared regions on top
-// (PMTiles, own style), place search (GET /geocoding/search) and routes with stops
-// (POST /routes/calculate). No build step: MapLibre GL JS and PMTiles are vendored by the image.
+// (PMTiles, own style), satellite and relief views, traffic, place search (GET /geocoding/search)
+// and routes with stops (POST /routes/calculate). It installs as a web app (manifest.webmanifest,
+// sw.js) and offers the Android app published on the same server. No build step: MapLibre GL JS
+// and PMTiles are vendored by the image; the style logic is shared with the SDK (sdk/map-style.js).
 import * as maplibregl from './vendor/maplibre-gl.mjs';
 import { registerPoiIcons } from './sdk/map-icons.js';
+import {
+  buildStyle, containsBox, mapTypes, parseTemplate, pmtilesLoader, setMapType, setOverlay,
+  tilesets as regionTilesets, TrafficLayer, WORLD_MAX_VISIBLE_ZOOM,
+} from './sdk/map-style.js';
 
 const API = '/api/v1';
 const ORIGIN = window.location.origin;
-const WORLD_REGION = 'world';
-/** The world base map has tiles up to zoom 7 and is drawn up to here; regions add the detail. */
-const WORLD_MAX_VISIBLE_ZOOM = 8;
 /** Origin, up to 23 stops and destination: the limit of POST /routes/calculate. */
 const MAX_POINTS = 25;
 const SEARCH_MIN_LENGTH = 3;
@@ -16,10 +19,12 @@ const SEARCH_DEBOUNCE_MS = 300;
 const SEARCH_LIMIT = 7;
 const MAP_POINT_LABEL = 'Punto en el mapa';
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const WORLD_ATTRIBUTION = '';
 /** Mainland Ecuador: the first view when the address bar has no position. */
 const HOME_BOUNDS = [-81.1, -5.05, -75.2, 1.5];
 const LAYERS_KEY = 'route-maps:layers';
+const MAP_TYPE_KEY = 'route-maps:map-type';
+/** Description of the Android app published on this server (infrastructure/scripts/publish-app.py). */
+const ANDROID_RELEASE = '/descargas/android.json';
 
 const PROFILES = [
   { id: 'CAR', label: 'Auto', icon: 'i-car' },
@@ -40,8 +45,7 @@ const ERROR_MESSAGES = {
   HTTP_429: 'Demasiadas solicitudes seguidas. Espera un momento.',
 };
 
-const protocol = new pmtiles.Protocol();
-maplibregl.addProtocol('pmtiles', protocol.tile);
+maplibregl.addProtocol('pmtiles', pmtilesLoader(pmtiles));
 
 const $ = (id) => document.getElementById(id);
 const theme = getComputedStyle(document.documentElement);
@@ -49,13 +53,19 @@ const token = (name) => theme.getPropertyValue(name).trim();
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const animation = (ms) => (reducedMotion.matches ? 0 : ms);
 const canLocate = window.isSecureContext && 'geolocation' in navigator;
+/** Same breakpoint as viewer.css: below it the cards become a bottom sheet. */
+const phone = window.matchMedia('(max-width: 767px)');
+const installed = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 // ---------------------------------------------------------------- state
 
 let map;
 let mapReady = false;
 let regions = [];
-let styleTemplate = '';
+let template = null;
+let traffic = null;
 let profile = 'CAR';
 let nextStopId = 1;
 const newStop = () => ({ id: nextStopId++, point: null, label: '' });
@@ -78,11 +88,18 @@ class ApiError extends Error {
   }
 }
 
+const OFFLINE_MESSAGE = 'Sin conexión con el servidor. Revisa tu conexión e inténtalo de nuevo.';
+
 async function api(path, options = {}) {
-  const response = await fetch(`${API}${path}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) },
-  });
+  let response;
+  try {
+    response = await fetch(`${API}${path}`, {
+      ...options,
+      headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) },
+    });
+  } catch {
+    throw new ApiError('OFFLINE', OFFLINE_MESSAGE);
+  }
   const body = await response.json().catch(() => null);
   if (!response.ok || !body?.success) {
     const error = body?.error ?? { code: `HTTP_${response.status}`, message: response.statusText };
@@ -131,9 +148,6 @@ function formatDuration(seconds) {
   return minutes % 60 ? `${hours} h ${minutes % 60} min` : `${hours} h`;
 }
 
-const area = ([minLng, minLat, maxLng, maxLat]) => (maxLng - minLng) * (maxLat - minLat);
-const containsBox = (outer, inner) =>
-  outer[0] <= inner[0] && outer[1] <= inner[1] && outer[2] >= inner[2] && outer[3] >= inner[3];
 const insideBox = (box, { lng, lat }) => lng >= box[0] && lng <= box[2] && lat >= box[1] && lat <= box[3];
 const toBounds = ([minLng, minLat, maxLng, maxLat]) => [[minLng, minLat], [maxLng, maxLat]];
 const coordinate = ({ lat, lng }) => ({ latitude: lat, longitude: lng });
@@ -148,53 +162,68 @@ function showAppError(message) {
   const status = $('app-status');
   status.textContent = message;
   status.hidden = false;
+  $('map-loading').hidden = true;
+  updateSheet();
+}
+
+// ---------------------------------------------------------------- cards and bottom sheet
+
+/** The cards (place, directions, errors) show only with content; on phones they are a bottom sheet. */
+function updateSheet({ expand = false } = {}) {
+  const sheet = $('sheet');
+  sheet.hidden = $('place-card').hidden && $('directions').hidden && $('app-status').hidden;
+  if (sheet.hidden || expand) setSheetCollapsed(false);
+  updateSheetOffset();
+}
+
+function setSheetCollapsed(collapsed) {
+  $('sheet').classList.toggle('sheet--collapsed', collapsed);
+  $('sheet-toggle').setAttribute('aria-expanded', String(!collapsed));
+  $('sheet-toggle').setAttribute('aria-label', collapsed ? 'Expandir el panel' : 'Minimizar el panel');
+}
+
+/** Map controls and the traffic legend stay above the bottom sheet. */
+function updateSheetOffset() {
+  const sheet = $('sheet');
+  const offset = phone.matches && !sheet.hidden ? sheet.getBoundingClientRect().height : 0;
+  document.documentElement.style.setProperty('--sheet-offset', `${Math.round(offset)}px`);
+}
+
+/** Camera padding that keeps what is shown clear of the search bar and the cards. */
+function cameraPadding(base) {
+  const padding = { top: base + 64, right: base, bottom: base, left: base };
+  const sheet = $('sheet');
+  if (!sheet.hidden) {
+    const box = sheet.getBoundingClientRect();
+    if (phone.matches) padding.bottom += Math.min(box.height, window.innerHeight * 0.5);
+    else padding.left += box.right;
+  }
+  // Small or landscape screens: the padding never takes more than two thirds of the map.
+  const shrink = (a, b, size) => {
+    const scale = Math.min(1, (size * 2) / 3 / (padding[a] + padding[b]));
+    padding[a] = Math.floor(padding[a] * scale);
+    padding[b] = Math.floor(padding[b] * scale);
+  };
+  shrink('top', 'bottom', window.innerHeight);
+  shrink('left', 'right', window.innerWidth);
+  return padding;
+}
+
+/** Offset of the camera centre with the same effect as cameraPadding, for flyTo. */
+function cameraOffset() {
+  const padding = cameraPadding(0);
+  return [(padding.left - padding.right) / 2, (padding.top - padding.bottom) / 2];
 }
 
 // ---------------------------------------------------------------- regions and style
 
-/** World base map below, then the prepared regions; a region inside a bigger one adds nothing. */
-function tilesets() {
-  const world = regions.find((region) => region.id === WORLD_REGION) ?? null;
-  const detailed = regions
-    .filter((region) => region.id !== WORLD_REGION && region.bbox)
-    .sort((a, b) => area(b.bbox) - area(a.bbox));
-  const drawn = detailed.filter(
-    (region, index) => !detailed.slice(0, index).some((bigger) => containsBox(bigger.bbox, region.bbox)),
-  );
-  return { world, detailed, drawn };
-}
+const tilesets = () => regionTilesets(regions);
 
-/**
- * One copy of every style layer per tileset, the same layer of each tileset next to each other, so
- * the detailed regions cover the world base map and labels stay above every fill.
- */
-function buildStyle() {
-  const template = JSON.parse(styleTemplate.replaceAll('__GLYPHS_URL__', `${ORIGIN}/maps/fonts`));
-  const baseSource = Object.values(template.sources)[0];
+/** World base map below, then the prepared regions; a region inside a bigger one adds nothing. */
+function styleForRegions() {
   const { world, drawn } = tilesets();
-  const sets = [...(world ? [{ region: world, isWorld: true }] : []),
-    ...drawn.map((region) => ({ region, isWorld: false }))];
-  const style = { ...template, sources: {}, layers: [] };
-  for (const { region, isWorld } of sets) {
-    style.sources[region.id] = {
-      ...baseSource,
-      url: `pmtiles://${ORIGIN}${region.tilesUrl}`,
-      attribution: isWorld ? WORLD_ATTRIBUTION : baseSource.attribution,
-    };
-  }
-  for (const layer of template.layers) {
-    if (!layer.source) {
-      style.layers.push(layer);
-      continue;
-    }
-    for (const { region, isWorld } of sets) {
-      if (isWorld && (layer.minzoom ?? 0) >= WORLD_MAX_VISIBLE_ZOOM) continue;
-      const copy = { ...layer, id: `${region.id}/${layer.id}`, source: region.id };
-      if (isWorld) copy.maxzoom = Math.min(layer.maxzoom ?? 24, WORLD_MAX_VISIBLE_ZOOM);
-      style.layers.push(copy);
-    }
-  }
-  return style;
+  return buildStyle(template, ORIGIN, [...(world ? [{ region: world, isWorld: true }] : []),
+    ...drawn.map((region) => ({ region, isWorld: false }))]);
 }
 
 function initMap() {
@@ -203,30 +232,53 @@ function initMap() {
   const home = ecuador ? HOME_BOUNDS : drawn[0]?.bbox ?? world?.bbox;
   map = new maplibregl.Map({
     container: 'map',
-    style: buildStyle(),
+    style: styleForRegions(),
     bounds: home ? toBounds(home) : undefined,
-    fitBoundsOptions: { padding: 24 },
-    attributionControl: false,
+    fitBoundsOptions: { padding: cameraPadding(24) },
+    // Imagery and elevation carry the citation their licences ask for.
+    attributionControl: { compact: true, customAttribution: '<a href="/fuentes.html">Fuentes de datos</a>' },
     hash: true,
     dragRotate: false,
     pitchWithRotate: false,
   });
   map.touchZoomRotate.disableRotation();
-  registerPoiIcons(map, JSON.parse(styleTemplate).metadata?.['maps-platform:poi-colors'] ?? {});
-  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
-  map.addControl(new LayersControl(), 'top-right');
-  map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
+  registerPoiIcons(map, template.metadata?.['maps-platform:poi-colors'] ?? {});
+  map.addControl(new InstallControl(), 'top-right');
+  // Bottom corners stack upwards: scale, zoom and "my location" above the attribution.
+  map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+  if (canLocate) {
+    map.addControl(new maplibregl.GeolocateControl({
+      positionOptions: { enableHighAccuracy: true },
+      fitBoundsOptions: { maxZoom: 16 },
+    }), 'bottom-right');
+  }
+  layersControl = new LayersControl();
+  map.addControl(layersControl, 'bottom-left');
+  traffic = new TrafficLayer(map, template, {
+    fetchFlow: (bbox) => api(`/traffic/flow?bbox=${bbox}`),
+    onStatus: (text) => setLayerStatus('traffic', text),
+  });
   map.on('load', () => {
     mapReady = true;
-    addOverlaySources();
+    traffic.install();
+    addActivityLayer();
     addRouteLayers();
     drawRoutes();
     updateNotice();
+    applyMapType();
     applyLayers();
+    // The first frame is on screen; the chip goes once the visible tiles are in (or soon after).
+    setTimeout(() => { $('map-loading').hidden = true; }, 4000);
+  });
+  map.once('idle', () => {
+    $('map-loading').hidden = true;
+    // Only now, so the web app files do not compete with the first tiles.
+    registerServiceWorker();
   });
   map.on('moveend', () => {
     updateNotice();
-    refreshLiveLayers();
+    refreshActivity();
   });
   map.on('click', onMapClick);
   window.__viewer = { map };
@@ -244,42 +296,72 @@ function updateNotice() {
   }
 }
 
-// ---------------------------------------------------------------- layers (traffic, climate, heat maps)
+// ---------------------------------------------------------------- map type and layers
+
+/** Thumbnails of the map types, rendered from the platform's own tiles (icons/). */
+const MAP_TYPE_THUMBS = {
+  map: 'icons/map-type-map.webp',
+  satellite: 'icons/map-type-satellite.webp',
+  relief: 'icons/map-type-relief.webp',
+};
+const MAP_TYPE_NOTES = {
+  map: 'Calles, lugares y límites.',
+  satellite: 'Imágenes de satélite con las calles y los nombres encima.',
+  relief: 'Montañas sombreadas y colores por altitud.',
+};
 
 const LAYER_OPTIONS = [
   {
-    id: 'traffic', label: 'Tráfico en vivo', icon: 'i-traffic',
-    legend: [['--color-traffic-free', 'Fluido'], ['--color-traffic-moderate', 'Moderado'],
+    id: 'traffic', label: 'Tráfico', short: 'Tráfico', icon: 'i-traffic',
+    legend: [['--color-traffic-free', 'Sin demoras'], ['--color-traffic-moderate', 'Moderado'],
       ['--color-traffic-slow', 'Lento'], ['--color-traffic-jammed', 'Detenido']],
-    note: 'Velocidades de los últimos 15 minutos medidas por los recorridos de la app.',
+    note: 'Vías principales en verde mientras no haya demoras reportadas. Los tramos medidos por los recorridos ' +
+      'de la app se colorean en vivo (15 min) o, más tenues, con lo habitual a esta hora.',
   },
   {
-    id: 'precipitation', label: 'Lluvia anual', icon: 'i-rain',
+    id: 'precipitation', label: 'Lluvia anual', short: 'Lluvia', icon: 'i-rain',
     legend: [['--color-rain-1', '< 500 mm'], ['--color-rain-3', '1000–2000 mm'], ['--color-rain-5', '3000–4000 mm'],
       ['--color-rain-6', '> 4000 mm']],
     note: 'Regiones de precipitación anual (climatología oficial).',
   },
   {
-    id: 'temperature', label: 'Pisos climáticos', icon: 'i-thermometer',
+    id: 'temperature', label: 'Pisos climáticos', short: 'Clima', icon: 'i-thermometer',
     legend: [['--color-temp-1', 'Muy frío'], ['--color-temp-3', 'Templado frío'], ['--color-temp-4', 'Templado'],
       ['--color-temp-6', 'Cálido']],
     note: 'Termotipos por altitud (climatología oficial).',
   },
   {
-    id: 'population', label: 'Densidad de población', icon: 'i-flame',
+    id: 'population', label: 'Densidad de población', short: 'Población', icon: 'i-flame',
     legend: [['--color-heat-low', 'Baja'], ['--color-heat-mid', 'Media'], ['--color-heat-high', 'Alta']],
     note: 'Mapa de calor de la malla censal de 1 km².',
   },
   {
-    id: 'activity', label: 'Actividad de la app (24 h)', icon: 'i-activity',
+    id: 'activity', label: 'Actividad de la app (24 h)', short: 'Actividad', icon: 'i-activity',
     legend: [['--color-heat-low', 'Poca'], ['--color-heat-high', 'Mucha']],
     note: 'Zonas por donde pasaron al menos 3 recorridos distintos en las últimas 24 horas.',
   },
 ];
 
+// Per browser: the choice survives reloads (private mode: this visit only).
+function readStored(key, fallback) {
+  try {
+    return window.localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function store(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Private mode: the choice lasts for this visit only.
+  }
+}
+
 function readLayers() {
   try {
-    const saved = JSON.parse(window.localStorage.getItem(LAYERS_KEY) ?? '[]');
+    const saved = JSON.parse(readStored(LAYERS_KEY, '[]'));
     return new Set(Array.isArray(saved) ? saved.filter((id) => LAYER_OPTIONS.some((o) => o.id === id)) : []);
   } catch {
     return new Set();
@@ -287,47 +369,128 @@ function readLayers() {
 }
 
 const activeLayers = readLayers();
+let mapType = readStored(MAP_TYPE_KEY, 'map');
+const layerStatus = new Map();
 
-function saveLayers() {
-  try {
-    window.localStorage.setItem(LAYERS_KEY, JSON.stringify([...activeLayers]));
-  } catch {
-    // Private mode: the choice lasts for this visit only.
-  }
+function setLayerStatus(kind, text) {
+  if (text) layerStatus.set(kind, text);
+  else layerStatus.delete(kind);
+  const status = $('layers-status');
+  if (status) status.textContent = [...layerStatus.values()].join(' ');
 }
 
+/**
+ * "Capas": a thumbnail of the other map type opens the panel with the map types (thumbnails) and
+ * the map details (traffic, climate, population, activity) with the legend of those switched on.
+ */
 class LayersControl {
   onAdd() {
-    this.container = el('div', { class: 'maplibregl-ctrl maplibregl-ctrl-group layers-control' });
-    const button = el('button', {
-      type: 'button', class: 'layers-control__button', 'aria-label': 'Capas del mapa', title: 'Capas del mapa',
+    this.container = el('div', { class: 'maplibregl-ctrl layers-control' });
+    this.thumb = el('img', { alt: '', width: 72, height: 72, decoding: 'async' });
+    this.button = el('button', {
+      type: 'button', class: 'layers-button', 'aria-label': 'Tipo de mapa y capas', title: 'Tipo de mapa y capas',
       'aria-expanded': 'false', 'aria-controls': 'layers-panel',
-    }, icon('i-layers'));
-    const panel = el('div', { class: 'layers-panel', id: 'layers-panel', role: 'group', 'aria-label': 'Capas', hidden: true });
-    panel.append(el('p', { class: 'layers-panel__title' }, 'Capas'));
+    }, this.thumb, el('span', { class: 'layers-button__label', 'aria-hidden': 'true' }, icon('i-layers'), 'Capas'));
+    this.panel = el('div', { class: 'layers-panel', id: 'layers-panel', role: 'dialog',
+      'aria-labelledby': 'layers-title', hidden: true });
+
+    const close = iconButton('i-x', 'Cerrar capas', () => {
+      this.setOpen(false);
+      this.button.focus();
+    });
+    this.panel.append(el('div', { class: 'layers-panel__header' },
+      el('h2', { class: 'layers-panel__title', id: 'layers-title' }, 'Tipo de mapa'), close));
+
+    const types = mapTypes(template, regions);
+    if (!types.some((type) => type.id === mapType && type.available)) mapType = 'map';
+    this.available = new Set(types.filter((type) => type.available).map((type) => type.id));
+    const typeGroup = el('fieldset', { class: 'map-types' }, el('legend', { class: 'sr-only' }, 'Tipo de mapa'));
+    for (const type of types) {
+      const input = el('input', { type: 'radio', name: 'map-type', value: type.id, class: 'sr-only',
+        checked: type.id === mapType, disabled: !type.available });
+      input.addEventListener('change', () => {
+        mapType = type.id;
+        store(MAP_TYPE_KEY, mapType);
+        applyMapType();
+      });
+      const note = type.available ? MAP_TYPE_NOTES[type.id] ?? '' : 'Aún no está preparado en los mapas publicados.';
+      typeGroup.append(el('label', { class: 'map-type', title: note }, input,
+        el('img', { class: 'map-type__thumb', src: MAP_TYPE_THUMBS[type.id], alt: '', width: 96, height: 96,
+          loading: 'lazy', decoding: 'async' }),
+        el('span', {}, type.label)));
+    }
+    this.panel.append(typeGroup, el('p', { class: 'layers-panel__title' }, 'Detalles del mapa'));
+
+    const tiles = el('fieldset', { class: 'layer-tiles' }, el('legend', { class: 'sr-only' }, 'Detalles del mapa'));
     for (const option of LAYER_OPTIONS) {
-      const input = el('input', { type: 'checkbox', value: option.id, checked: activeLayers.has(option.id) });
+      const input = el('input', { type: 'checkbox', value: option.id, class: 'sr-only',
+        checked: activeLayers.has(option.id) });
       input.addEventListener('change', () => {
         if (input.checked) activeLayers.add(option.id);
         else activeLayers.delete(option.id);
-        saveLayers();
+        store(LAYERS_KEY, JSON.stringify([...activeLayers]));
         applyLayers();
       });
-      const legend = el('span', { class: 'layers-legend', 'aria-hidden': 'true' },
-        ...option.legend.map(([color, text]) =>
-          el('span', { class: 'layers-legend__item' },
-            el('span', { class: 'layers-legend__swatch', style: `background: var(${color})` }), text)));
-      panel.append(el('label', { class: 'layers-option' }, input, icon(option.icon),
-        el('span', { class: 'layers-option__text' }, el('span', { class: 'layers-option__name' }, option.label),
-          el('span', { class: 'layers-option__note' }, option.note), legend)));
+      tiles.append(el('label', { class: 'layer-tile', title: option.note }, input,
+        el('span', { class: 'layer-tile__icon' }, icon(option.icon)),
+        el('span', {}, option.short)));
     }
-    panel.append(el('p', { class: 'layers-panel__status', id: 'layers-status', role: 'status' }));
-    button.addEventListener('click', () => {
-      const open = panel.hidden;
-      panel.hidden = !open;
-      button.setAttribute('aria-expanded', String(open));
+    this.panel.append(tiles,
+      el('div', { class: 'layers-legends', id: 'layers-legends' }),
+      el('p', { class: 'layers-panel__status', id: 'layers-status', role: 'status' }));
+
+    this.button.addEventListener('click', () => this.setOpen(this.panel.hidden));
+    this.panel.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      this.setOpen(false);
+      this.button.focus();
     });
-    this.container.append(button, panel);
+    // A click on the map (or anywhere else) closes the panel, like a menu.
+    this.onOutside = (event) => {
+      if (!this.container.contains(event.target) && !this.panel.contains(event.target)) this.setOpen(false);
+    };
+    document.addEventListener('pointerdown', this.onOutside);
+    this.container.append(this.button);
+    // Outside the map controls (they are transformed): on phones the panel is a bottom sheet.
+    document.body.append(this.panel);
+    this.update();
+    return this.container;
+  }
+
+  setOpen(open) {
+    if (open === !this.panel.hidden) return;
+    this.panel.hidden = !open;
+    this.button.setAttribute('aria-expanded', String(open));
+    if (open) {
+      const first = this.panel.querySelector('input[name="map-type"]:checked') ?? this.panel.querySelector('input');
+      first?.focus({ preventScroll: true });
+    }
+  }
+
+  /** The thumbnail shows where one click in the panel takes you: satellite from the map, else the map. */
+  update() {
+    const next = mapType === 'map' && this.available.has('satellite') ? 'satellite' : 'map';
+    this.thumb.src = MAP_TYPE_THUMBS[next];
+  }
+
+  onRemove() {
+    document.removeEventListener('pointerdown', this.onOutside);
+    this.panel.remove();
+    this.container.remove();
+  }
+}
+
+/** Opens the install dialog: the Android app of this server and the web app. */
+class InstallControl {
+  onAdd() {
+    this.container = el('div', { class: 'maplibregl-ctrl install-control' });
+    const button = el('button', { type: 'button', class: 'install-button', 'aria-haspopup': 'dialog',
+      'aria-label': 'Instalar la app', title: 'Instalar la app' }, icon('i-download'), el('span', {}, 'Instalar app'));
+    button.addEventListener('click', () => openInstall());
+    this.container.append(button);
+    // Already running as the installed web app: the menu still offers the Android app.
+    this.container.hidden = installed();
     return this.container;
   }
 
@@ -336,41 +499,49 @@ class LayersControl {
   }
 }
 
-function overlayLayerIds(kind) {
-  return map.getStyle().layers.map((layer) => layer.id).filter((id) => id.endsWith(`/overlay-${kind}`));
+let layersControl = null;
+
+/** Legend and explanation of each map detail that is switched on. */
+function renderLegends() {
+  const blocks = LAYER_OPTIONS.filter((option) => activeLayers.has(option.id)).map((option) =>
+    el('div', { class: 'layers-legend-block' },
+      el('p', { class: 'layers-legend-block__name' }, option.label),
+      el('p', { class: 'layers-legend-block__note' }, option.note),
+      el('span', { class: 'layers-legend', 'aria-hidden': 'true' },
+        ...option.legend.map(([color, text]) =>
+          el('span', { class: 'layers-legend__item' },
+            el('span', { class: 'layers-legend__swatch', style: `background: var(${color})` }), text)))));
+  $('layers-legends')?.replaceChildren(...blocks);
+  $('traffic-legend').hidden = !activeLayers.has('traffic');
+}
+
+/** Satellite and relief read their own archives, only while shown. */
+function applyMapType() {
+  if (!mapReady) return;
+  if (!setMapType(map, template, regions, ORIGIN, mapType)) {
+    mapType = 'map';
+    setMapType(map, template, regions, ORIGIN, mapType);
+  }
+  for (const input of document.querySelectorAll('input[name="map-type"]')) input.checked = input.value === mapType;
+  layersControl?.update();
 }
 
 function applyLayers() {
+  renderLegends();
   if (!mapReady) return;
   for (const kind of ['precipitation', 'temperature', 'population']) {
-    for (const id of overlayLayerIds(kind)) {
-      map.setLayoutProperty(id, 'visibility', activeLayers.has(kind) ? 'visible' : 'none');
-    }
+    setOverlay(map, template, kind, activeLayers.has(kind));
   }
-  for (const [kind, layers] of [['traffic', ['traffic-casing', 'traffic-line']], ['activity', ['activity-heat']]]) {
-    for (const id of layers) {
-      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', activeLayers.has(kind) ? 'visible' : 'none');
-    }
+  if (traffic.visible !== activeLayers.has('traffic')) traffic.setVisible(activeLayers.has('traffic'));
+  if (map.getLayer('activity-heat')) {
+    map.setLayoutProperty('activity-heat', 'visibility', activeLayers.has('activity') ? 'visible' : 'none');
   }
-  refreshLiveLayers();
+  refreshActivity();
 }
 
-function addOverlaySources() {
-  const empty = { type: 'FeatureCollection', features: [] };
-  map.addSource('traffic', { type: 'geojson', data: empty });
-  map.addSource('activity', { type: 'geojson', data: empty });
+function addActivityLayer() {
   const firstLabel = map.getStyle().layers.find((layer) => layer.type === 'symbol')?.id;
-  const status = ['match', ['get', 'status'], 'free', token('--color-traffic-free'),
-    'moderate', token('--color-traffic-moderate'), 'slow', token('--color-traffic-slow'),
-    token('--color-traffic-jammed')];
-  // ["zoom"] may only feed a top-level interpolate: the casing gets its own, 2 px wider.
-  const widths = (extra) => ['interpolate', ['linear'], ['zoom'], 11, 2 + extra, 14, 4 + extra, 17, 8 + extra];
-  const width = widths(0);
-  map.addLayer({ id: 'traffic-casing', type: 'line', source: 'traffic', layout: { visibility: 'none',
-    'line-cap': 'round', 'line-join': 'round' },
-  paint: { 'line-color': token('--color-card'), 'line-width': widths(2) } }, firstLabel);
-  map.addLayer({ id: 'traffic-line', type: 'line', source: 'traffic', layout: { visibility: 'none',
-    'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': status, 'line-width': width } }, firstLabel);
+  map.addSource('activity', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addLayer({ id: 'activity-heat', type: 'heatmap', source: 'activity', layout: { visibility: 'none' },
     paint: {
       'heatmap-weight': ['interpolate', ['linear'], ['get', 'trips'], 3, 0.3, 30, 1],
@@ -379,54 +550,41 @@ function addOverlaySources() {
     } }, firstLabel);
 }
 
-let liveRequest = 0;
-async function refreshLiveLayers() {
-  const status = $('layers-status');
-  const wanted = ['traffic', 'activity'].filter((kind) => activeLayers.has(kind));
-  if (!map || wanted.length === 0) {
-    if (status) status.textContent = '';
+let activityRequest = 0;
+async function refreshActivity() {
+  if (!map || !activeLayers.has('activity')) {
+    setLayerStatus('activity', '');
     return;
   }
   const bounds = map.getBounds();
   const span = Math.max(bounds.getEast() - bounds.getWest(), bounds.getNorth() - bounds.getSouth());
   if (map.getZoom() < 10 || span > 2.5) {
-    if (status) status.textContent = 'Acércate a una ciudad para ver el tráfico y la actividad.';
+    setLayerStatus('activity', 'Actividad: acércate a una ciudad para verla.');
     return;
   }
   const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()]
     .map((value) => value.toFixed(4)).join(',');
-  const request = ++liveRequest;
-  const messages = [];
-  await Promise.all(wanted.map(async (kind) => {
-    try {
-      const data = await api(`/traffic/${kind === 'traffic' ? 'flow' : 'activity'}?bbox=${bbox}`);
-      if (request !== liveRequest) return;
-      map.getSource(kind)?.setData(data);
-      if (kind === 'traffic') {
-        messages.push(data.features.length > 0
-          ? `Tráfico: ${data.features.length} tramos con datos de los últimos ${data.windowMinutes} minutos.`
-          : 'Tráfico: aún no hay recorridos recientes en esta zona.');
-      } else if (data.features.length === 0) {
-        messages.push('Actividad: sin recorridos suficientes en las últimas 24 horas.');
-      }
-    } catch (error) {
-      messages.push(error.message);
-    }
-  }));
-  if (request === liveRequest && status) status.textContent = messages.join(' ');
+  const request = ++activityRequest;
+  try {
+    const data = await api(`/traffic/activity?bbox=${bbox}`);
+    if (request !== activityRequest) return;
+    map.getSource('activity')?.setData(data);
+    setLayerStatus('activity', data.features.length === 0
+      ? 'Actividad: sin recorridos suficientes en las últimas 24 horas.' : '');
+  } catch (error) {
+    if (request === activityRequest) setLayerStatus('activity', error.message);
+  }
 }
-
-setInterval(() => {
-  if (!document.hidden && activeLayers.has('traffic')) refreshLiveLayers();
-}, 60_000);
 
 function renderCoverage() {
   const { world, detailed } = tilesets();
   const item = (name, meta, bbox) => {
     const button = el('button', { type: 'button', class: 'coverage__item' },
       el('span', {}, name), el('span', { class: 'coverage__meta' }, meta));
-    button.addEventListener('click', () =>
-      map.fitBounds(toBounds(bbox), { padding: 24, duration: animation(900) }));
+    button.addEventListener('click', () => {
+      $('menu').close();
+      map.fitBounds(toBounds(bbox), { padding: cameraPadding(24), duration: animation(900) });
+    });
     return el('li', {}, button);
   };
   const items = detailed.map((region) => item(region.name, formatSize(region.mapSize), region.bbox));
@@ -619,7 +777,17 @@ function showPlace(next, { move = true } = {}) {
   placeMarker = new maplibregl.Marker({
     element: markerElement('place', '', next.name), anchor: 'bottom', offset: [0, -6],
   }).setLngLat(next.point).addTo(map);
+  updateSheet({ expand: true });
   if (move) moveToPlace(next);
+  else revealPoint(next.point);
+}
+
+/** Phones: a point tapped behind where the bottom sheet opens is brought into view. */
+function revealPoint(point) {
+  if (!phone.matches || $('sheet').hidden) return;
+  if (map.project(point).y > $('sheet').getBoundingClientRect().top - 48) {
+    map.easeTo({ center: point, offset: cameraOffset(), duration: animation(400) });
+  }
 }
 
 function moveToPlace({ point, bbox, type }) {
@@ -628,11 +796,11 @@ function moveToPlace({ point, bbox, type }) {
   const maxZoom = detailed ? 16 : WORLD_MAX_VISIBLE_ZOOM - 1;
   const box = bbox && bbox[2] - bbox[0] > 0.0005 && bbox[3] - bbox[1] > 0.0005 ? bbox : null;
   if (box) {
-    map.fitBounds(toBounds(box), { padding: 48, maxZoom, duration: animation(900) });
+    map.fitBounds(toBounds(box), { padding: cameraPadding(48), maxZoom, duration: animation(900) });
     return;
   }
   const zoom = type === 'country' ? 5 : ['capital', 'city', 'town'].includes(type) ? 11 : 16;
-  map.flyTo({ center: point, zoom: Math.min(zoom, maxZoom), duration: animation(900) });
+  map.flyTo({ center: point, zoom: Math.min(zoom, maxZoom), offset: cameraOffset(), duration: animation(900) });
 }
 
 function hidePlace() {
@@ -640,6 +808,7 @@ function hidePlace() {
   $('place-card').hidden = true;
   placeMarker?.remove();
   placeMarker = null;
+  updateSheet();
 }
 
 const placeFromResult = (result) => ({ point: pointOf(result), ...describe(result), bbox: result.bbox, type: result.type });
@@ -804,6 +973,7 @@ function openDirections({ focus = true } = {}) {
   $('directions').hidden = false;
   $('place-stop').hidden = !place;
   renderStops();
+  updateSheet({ expand: true });
   if (focus) focusStop(stops.find((stop) => !stop.point)?.id ?? activeStopId);
 }
 
@@ -813,6 +983,7 @@ function closeDirections() {
   stops = [newStop(), newStop()];
   activeStopId = stops[0].id;
   update();
+  updateSheet();
   $('open-directions').focus();
 }
 
@@ -948,7 +1119,7 @@ function renderSteps() {
 
 function fitRoute() {
   const bbox = routes[selectedRoute]?.bbox;
-  if (bbox) map.fitBounds(toBounds(bbox), { padding: 64, maxZoom: 16, duration: animation(700) });
+  if (bbox) map.fitBounds(toBounds(bbox), { padding: cameraPadding(48), maxZoom: 16, duration: animation(700) });
 }
 
 function addRouteLayers() {
@@ -1023,9 +1194,150 @@ function distanceMeters(point, [lng, lat]) {
   return Math.hypot((point.lng - lng) * kx, (point.lat - lat) * 111_195);
 }
 
+// ---------------------------------------------------------------- install: Android app and web app
+
+/** The browser's offer to install the viewer (Chrome, Edge, Samsung Internet…), used by our buttons. */
+let installPrompt = null;
+let webInstalled = false;
+/** android.json of this server; androidState: idle → loading → ready | none | error. */
+let androidRelease = null;
+let androidState = 'idle';
+
+window.addEventListener('beforeinstallprompt', (event) => {
+  // Offered by the "Instalar app" button and the menu instead of the browser's own banner.
+  event.preventDefault();
+  installPrompt = event;
+  renderInstall();
+});
+window.addEventListener('appinstalled', () => {
+  installPrompt = null;
+  webInstalled = true;
+  renderInstall();
+});
+
+function openInstall() {
+  renderInstall();
+  if (!$('install').open) $('install').showModal();
+  if (!isIos) loadAndroidRelease();
+}
+
+async function loadAndroidRelease() {
+  if (['loading', 'ready', 'none'].includes(androidState)) return;
+  androidState = 'loading';
+  renderInstall();
+  try {
+    const response = await fetch(ANDROID_RELEASE, { cache: 'no-cache' });
+    if (response.status === 404) {
+      androidState = 'none';
+    } else if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    } else {
+      androidRelease = await response.json();
+      androidState = androidRelease?.url && androidRelease?.version ? 'ready' : 'none';
+    }
+  } catch {
+    androidState = 'error'; // asked again the next time the dialog opens
+  }
+  renderInstall();
+}
+
+function renderInstall() {
+  const standalone = installed();
+  $('install-done').hidden = !standalone;
+
+  // The Android app, as published by infrastructure/scripts/publish-app.py (not for iPhone or iPad).
+  $('install-android').hidden = isIos;
+  const apk = $('install-apk');
+  apk.hidden = androidState !== 'ready';
+  if (androidState === 'ready') {
+    const { version, size, minAndroid, url, file } = androidRelease;
+    apk.href = url;
+    if (file) apk.setAttribute('download', file);
+    $('install-android-detail').textContent = [`Versión ${version}`, size ? formatSize(size) : null,
+      minAndroid ? `Android ${minAndroid} o superior` : null].filter(Boolean).join(' · ');
+    $('install-android-note').textContent = 'Si Android lo pide, permite instalar apps de este origen.';
+  } else {
+    $('install-android-detail').textContent = 'Mapas sin conexión, recorridos y rutas guardadas.';
+    $('install-android-note').textContent = {
+      idle: '',
+      loading: 'Buscando la última versión…',
+      none: 'La app para Android todavía no está publicada en este servidor.',
+      error: 'No se pudo consultar la app para Android. Inténtalo de nuevo en un momento.',
+    }[androidState];
+  }
+
+  // The viewer itself, installed from the browser.
+  $('install-web').hidden = standalone;
+  $('install-pwa').hidden = !installPrompt;
+  const note = $('install-web-note');
+  if (webInstalled) {
+    note.replaceChildren('Listo: Route Maps quedó en tu pantalla de inicio.');
+  } else if (installPrompt) {
+    note.replaceChildren();
+  } else if (!window.isSecureContext) {
+    note.replaceChildren('Para instalarla desde el navegador, abre esta página con https://.');
+  } else if (isIos) {
+    note.replaceChildren('En Safari, toca ', icon('i-share'), ' Compartir y luego «Agregar a inicio».');
+  } else {
+    note.replaceChildren('En el menú del navegador, elige «Instalar app» o «Agregar a la pantalla de inicio».');
+  }
+}
+
+async function installWebApp() {
+  const prompt = installPrompt;
+  if (!prompt) return;
+  installPrompt = null; // an offer can be used only once
+  try {
+    await prompt.prompt();
+    if ((await prompt.userChoice).outcome === 'accepted') webInstalled = true;
+  } catch {
+    // The browser withdrew the offer: its menu still has "Instalar".
+  }
+  renderInstall();
+}
+
+/** Keeps the viewer files for the next visits (sw.js); the map works the same without it. */
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
 // ---------------------------------------------------------------- start
 
+function wireDialogs() {
+  // Close buttons, a click on the backdrop and Escape (native) close the menu and the dialogs.
+  for (const dialog of document.querySelectorAll('dialog')) {
+    for (const button of dialog.querySelectorAll('[data-close]')) {
+      button.addEventListener('click', () => dialog.close());
+    }
+    dialog.addEventListener('click', (event) => {
+      if (event.target !== dialog) return;
+      const box = dialog.getBoundingClientRect();
+      const inside = event.clientX >= box.left && event.clientX <= box.right &&
+        event.clientY >= box.top && event.clientY <= box.bottom;
+      if (!inside) dialog.close();
+    });
+  }
+  $('open-menu').addEventListener('click', () => $('menu').showModal());
+  $('menu-install').addEventListener('click', () => {
+    $('menu').close();
+    openInstall();
+  });
+  $('install-pwa').addEventListener('click', installWebApp);
+}
+
+function wireSheet() {
+  $('sheet-toggle').addEventListener('click', () => {
+    setSheetCollapsed(!$('sheet').classList.contains('sheet--collapsed'));
+    updateSheetOffset();
+  });
+  new ResizeObserver(() => updateSheetOffset()).observe($('sheet'));
+  phone.addEventListener('change', () => updateSheetOffset());
+}
+
 function wireControls() {
+  wireDialogs();
+  wireSheet();
   createCombobox($('search-input'), $('search-results'), {
     onSelect: (result) => showPlace(placeFromResult(result)),
   });
@@ -1075,15 +1387,24 @@ async function main() {
   renderStops();
   wireControls();
   try {
-    [regions, styleTemplate] = await Promise.all([
+    // Both were preloaded by index.html while the scripts downloaded.
+    let styleText;
+    [regions, styleText] = await Promise.all([
       api('/maps/regions'),
       fetch('/maps/style/style.json').then((response) => {
         if (!response.ok) throw new Error(`style.json: HTTP ${response.status}`);
         return response.text();
       }),
     ]);
+    template = parseTemplate(styleText, ORIGIN);
   } catch (error) {
-    showAppError(`No se pudo cargar el mapa: ${error.message}`);
+    if (error.code === 'OFFLINE' || error instanceof TypeError) {
+      // The installed app opens without a connection: the map comes as soon as there is one.
+      showAppError('Sin conexión con el servidor. El mapa se cargará cuando vuelva la conexión.');
+      window.addEventListener('online', () => window.location.reload(), { once: true });
+    } else {
+      showAppError(`No se pudo cargar el mapa: ${error.message}`);
+    }
     return;
   }
   if (regions.length === 0) {
@@ -1093,6 +1414,15 @@ async function main() {
   }
   initMap();
   renderCoverage();
+  // "Cómo llegar" shortcut of the installed app (manifest.webmanifest): once, not on every reload.
+  const params = new URLSearchParams(window.location.search);
+  if (params.has('ruta')) {
+    params.delete('ruta');
+    const query = params.toString();
+    window.history.replaceState(window.history.state, '',
+      `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`);
+    openDirections();
+  }
 }
 
 main();

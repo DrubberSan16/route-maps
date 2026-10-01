@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../presentation/theme.dart';
 import '../map_controller.dart';
 import 'stops_list.dart';
 
@@ -36,7 +37,7 @@ class DestinationCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                const Icon(Icons.place, color: Color(0xFFD93025)),
+                const Icon(Icons.place, color: BrandColors.destination),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -55,7 +56,7 @@ class DestinationCard extends StatelessWidget {
             ),
             Row(
               children: [
-                const Icon(Icons.trip_origin, size: 18, color: Color(0xFF188038)),
+                const Icon(Icons.trip_origin, size: 18, color: BrandColors.origin),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -73,9 +74,12 @@ class DestinationCard extends StatelessWidget {
               onRemove: onRemoveStop,
               enabled: !state.isRouting,
             ),
-            Align(
-              alignment: Alignment.centerRight,
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
               child: FilledButton.icon(
+                key: const Key('route-button'),
+                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
                 onPressed: state.isRouting ? null : onRoute,
                 icon: state.isRouting
                     ? const SizedBox.square(
@@ -83,7 +87,7 @@ class DestinationCard extends StatelessWidget {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.directions),
-                label: const Text('Trazar ruta'),
+                label: Text(state.isRouting ? 'Calculando la ruta…' : 'Trazar ruta'),
               ),
             ),
           ],

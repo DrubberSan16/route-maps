@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:drift/drift.dart';
 
 import '../../core/utils/time.dart';
@@ -193,6 +195,7 @@ class RegionRepositoryImpl implements RegionRepository {
         tilesUrl: region.tilesUrl,
         updatedAt: utcMillis(region.updatedAt),
         fetchedAt: fetchedAt,
+        assets: Value(jsonEncode([for (final asset in region.assets) asset.toJson()])),
       );
 
   static BoundingBox? _bbox(double? west, double? south, double? east, double? north) =>
@@ -218,7 +221,21 @@ class RegionRepositoryImpl implements RegionRepository {
     routingDownloadUrl: row.routingDownloadUrl,
     tilesUrl: row.tilesUrl,
     updatedAt: row.updatedAt,
+    assets: _assets(row.assets),
   );
+
+  static List<RegionAsset> _assets(String? json) {
+    if (json == null) return const [];
+    try {
+      return [
+        for (final asset in jsonDecode(json) as List<Object?>)
+          RegionAsset.fromJson(asset! as Map<String, Object?>),
+      ];
+    } on Object {
+      // A damaged row only loses its extra layers; the next refresh rewrites it.
+      return const [];
+    }
+  }
 
   static DownloadedRegion _toDownloaded(DownloadedRegionRow row) => DownloadedRegion(
     code: row.code,

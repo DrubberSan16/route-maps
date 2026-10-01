@@ -11,7 +11,9 @@ import '../../domain/entities/offline_route.dart';
 import '../../domain/repositories/map_repository.dart';
 import '../../domain/services/location_service.dart';
 import '../../presentation/providers.dart';
+import '../../presentation/theme.dart';
 import '../../presentation/widgets/connection_banner.dart';
+import '../../services/map/map_style_service.dart';
 import '../../services/regions/region_download_service.dart';
 import '../account/account_screen.dart';
 import '../offline_maps/offline_maps_screen.dart';
@@ -19,8 +21,10 @@ import '../routes/saved_routes_screen.dart';
 import '../search/search_screen.dart';
 import '../trips/trips_screen.dart';
 import 'map_controller.dart';
+import 'map_layers_controller.dart';
 import 'map_view.dart';
 import 'widgets/destination_card.dart';
+import 'widgets/map_layers_sheet.dart';
 import 'widgets/recording_banner.dart';
 import 'widgets/region_suggestion_card.dart';
 import 'widgets/route_panel.dart';
@@ -84,6 +88,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final recording = ref.watch(recordingProvider).value;
     final position = ref.watch(positionProvider);
     final source = ref.watch(mapStyleProvider).value?.source;
+    final traffic = ref.watch(trafficProvider);
+    final panel = _buildPanel(state);
 
     return Scaffold(
       body: Stack(
@@ -91,25 +97,31 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           Positioned.fill(child: _buildMap(context, state)),
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _SearchBarButton(onTap: _openSearch, onMenu: _openMenu),
                   const SizedBox(height: 8),
                   const ClipRRect(
-                    borderRadius: BorderRadius.all(Radius.circular(12)),
+                    borderRadius: BorderRadius.all(Radius.circular(MapChrome.radius)),
                     child: ConnectionBanner(
                       message: 'Sin conexión: usas los mapas descargados y tus rutas guardadas.',
                     ),
                   ),
-                  if (source != null) ...[
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: _MapSourceChip(source: source),
+                  if (source != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: _MapSourceChip(source: source),
+                      ),
                     ),
-                  ],
+                  if (traffic.visible)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: _TrafficLegend(status: traffic.status),
+                    ),
                   if (position.error case final AppException error) ...[
                     const SizedBox(height: 8),
                     _LocationProblem(error: error, onFix: () => _fixLocation(error)),
@@ -126,20 +138,35 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             alignment: Alignment.bottomCenter,
             child: SafeArea(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    ?_buildPanel(state),
-                    const SizedBox(height: 8),
-                    _ActionButtons(
-                      isRouting: state.isRouting,
-                      onMyLocation: _centerOnUser,
-                      onRoute: _controller.calculateRoute,
-                      onOfflineMaps: () => _push(const OfflineMapsScreen()),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        _LayersButton(onTap: () => MapLayersSheet.show(context)),
+                        const Spacer(),
+                        FloatingActionButton(
+                          key: const Key('my-location-button'),
+                          heroTag: null,
+                          tooltip: 'Mi ubicación',
+                          onPressed: _centerOnUser,
+                          child: const Icon(Icons.my_location),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 12),
+                    // The destination and route panels carry their own actions.
+                    ?panel,
+                    if (panel is RegionSuggestionCard) const SizedBox(height: 8),
+                    if (panel == null || panel is RegionSuggestionCard)
+                      _ActionButtons(
+                        isRouting: state.isRouting,
+                        onRoute: _controller.calculateRoute,
+                        onOfflineMaps: () => _push(const OfflineMapsScreen()),
+                      ),
                   ],
                 ),
               ),
@@ -162,9 +189,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final styleValue = style.value;
     final cameraValue = camera.value;
     if (styleValue == null || cameraValue == null) {
-      return const Center(child: CircularProgressIndicator());
+      return const ColoredBox(
+        color: BrandColors.background,
+        child: Center(child: CircularProgressIndicator()),
+      );
     }
     final route = state.route;
+    final layers = ref.watch(mapLayersProvider).value ?? const MapLayers();
+    final traffic = ref.watch(trafficProvider);
     return ref.watch(mapViewBuilderProvider)(
       context,
       MapViewProps(
@@ -180,6 +212,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         origin: state.origin,
         stops: [for (final stop in state.stops) stop.coordinate],
         destination: state.destination,
+        trafficVisible: traffic.visible,
+        trafficFlow: traffic.flow,
+        overlays: layers.overlays,
+        onCameraIdle: ref.read(trafficProvider.notifier).onViewChanged,
       ),
     );
   }
@@ -244,34 +280,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   Future<void> _openMenu() async {
     final choice = await showModalBottomSheet<String>(
       context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.bookmarks),
-              title: const Text('Rutas guardadas'),
-              onTap: () => Navigator.pop(context, 'routes'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.timeline),
-              title: const Text('Mis recorridos'),
-              onTap: () => Navigator.pop(context, 'trips'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.download_for_offline),
-              title: const Text('Mapas offline'),
-              onTap: () => Navigator.pop(context, 'offline'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.account_circle),
-              title: const Text('Cuenta y sincronización'),
-              onTap: () => Navigator.pop(context, 'account'),
-            ),
-          ],
-        ),
-      ),
+      builder: (context) => const _MenuSheet(),
     );
     if (!mounted) return;
     switch (choice) {
@@ -296,19 +305,18 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final canAddStop = ref.read(mapControllerProvider).destination != null;
     final choice = await showModalBottomSheet<String>(
       context: context,
-      showDragHandle: true,
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(title: Text(point.toString())),
+            ListTile(title: const Text('Punto del mapa'), subtitle: Text(point.toString())),
             ListTile(
-              leading: const Icon(Icons.place, color: Color(0xFFD93025)),
+              leading: const Icon(Icons.place, color: BrandColors.destination),
               title: const Text('Ir aquí'),
               onTap: () => Navigator.pop(context, 'destination'),
             ),
             ListTile(
-              leading: const Icon(Icons.trip_origin, color: Color(0xFF188038)),
+              leading: const Icon(Icons.trip_origin, color: BrandColors.origin),
               title: const Text('Salir desde aquí'),
               onTap: () => Navigator.pop(context, 'origin'),
             ),
@@ -438,30 +446,125 @@ class _SearchBarButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      key: const Key('search-bar'),
-      elevation: 3,
-      borderRadius: BorderRadius.circular(28),
-      color: Theme.of(context).colorScheme.surface,
-      child: InkWell(
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        borderRadius: BorderRadius.all(Radius.circular(28)),
+        boxShadow: MapChrome.shadow,
+      ),
+      child: Material(
+        key: const Key('search-bar'),
         borderRadius: BorderRadius.circular(28),
-        onTap: onTap,
-        child: SizedBox(
-          height: 52,
-          child: Row(
-            children: [
-              const SizedBox(width: 16),
-              const Icon(Icons.search),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Buscar destino...',
-                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+        color: theme.colorScheme.surface,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(28),
+          onTap: onTap,
+          child: SizedBox(
+            height: 56,
+            child: Row(
+              children: [
+                const SizedBox(width: 10),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.asset('assets/images/logo.png', width: 34, height: 34),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Buscar destino...',
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                Icon(Icons.search, color: theme.colorScheme.onSurfaceVariant),
+                const SizedBox(width: 4),
+                IconButton(tooltip: 'Menú', icon: const Icon(Icons.menu), onPressed: onMenu),
+                const SizedBox(width: 4),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Opens the layers sheet; shows the map type it switches to, like the web viewer.
+class _LayersButton extends ConsumerWidget {
+  const _LayersButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final layers = ref.watch(mapLayersProvider).value ?? const MapLayers();
+    final options = ref.watch(mapTypeOptionsProvider).value ?? const <MapTypeOption>[];
+    final current = effectiveMapType(layers.mapType, options);
+    final satellite = options.any((o) => o.id == MapTypeOption.satellite && o.available);
+    final preview = current == MapTypeOption.map && satellite
+        ? MapTypeOption.satellite
+        : MapTypeOption.map;
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        borderRadius: BorderRadius.all(Radius.circular(MapChrome.radius)),
+        boxShadow: MapChrome.shadow,
+      ),
+      child: Material(
+        key: const Key('layers-button'),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(MapChrome.radius),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(3),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(MapChrome.radius - 3),
+              child: SizedBox.square(
+                dimension: 58,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.asset(mapTypeThumbnail(preview), fit: BoxFit.cover),
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Color(0x000F172A), Color(0xB30F172A)],
+                          stops: [0.4, 1],
+                        ),
+                      ),
+                    ),
+                    const Align(
+                      alignment: Alignment.bottomCenter,
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(4, 0, 4, 4),
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.layers_outlined, size: 13, color: Colors.white),
+                              SizedBox(width: 3),
+                              Text(
+                                'Capas',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              IconButton(tooltip: 'Menú', icon: const Icon(Icons.menu), onPressed: onMenu),
-              const SizedBox(width: 4),
-            ],
+            ),
           ),
         ),
       ),
@@ -472,45 +575,63 @@ class _SearchBarButton extends StatelessWidget {
 class _ActionButtons extends StatelessWidget {
   const _ActionButtons({
     required this.isRouting,
-    required this.onMyLocation,
     required this.onRoute,
     required this.onOfflineMaps,
   });
 
   final bool isRouting;
-  final VoidCallback onMyLocation;
   final VoidCallback onRoute;
   final VoidCallback onOfflineMaps;
 
   @override
   Widget build(BuildContext context) {
-    final style = FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8));
+    final scheme = Theme.of(context).colorScheme;
+    const height = Size.fromHeight(52);
     return Row(
       children: [
         Expanded(
-          child: FilledButton.tonal(
-            key: const Key('my-location-button'),
-            style: style,
-            onPressed: onMyLocation,
-            child: const FittedBox(child: Text('📍 Mi ubicación')),
+          flex: 5,
+          child: DecoratedBox(
+            decoration: const BoxDecoration(
+              borderRadius: BorderRadius.all(Radius.circular(MapChrome.radius)),
+              boxShadow: MapChrome.shadow,
+            ),
+            child: FilledButton.icon(
+              key: const Key('offline-maps-button'),
+              style: FilledButton.styleFrom(
+                minimumSize: height,
+                backgroundColor: scheme.surface,
+                foregroundColor: scheme.primary,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(MapChrome.radius),
+                ),
+              ),
+              onPressed: onOfflineMaps,
+              icon: const Icon(Icons.download_for_offline_outlined),
+              label: const FittedBox(child: Text('Mapas offline')),
+            ),
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 10),
         Expanded(
-          child: FilledButton(
-            key: const Key('route-button'),
-            style: style,
-            onPressed: isRouting ? null : onRoute,
-            child: FittedBox(child: Text(isRouting ? 'Calculando…' : '🗺 Trazar ruta')),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: FilledButton.tonal(
-            key: const Key('offline-maps-button'),
-            style: style,
-            onPressed: onOfflineMaps,
-            child: const FittedBox(child: Text('📥 Mapas offline')),
+          flex: 6,
+          child: DecoratedBox(
+            decoration: const BoxDecoration(
+              borderRadius: BorderRadius.all(Radius.circular(MapChrome.radius)),
+              boxShadow: MapChrome.shadow,
+            ),
+            child: FilledButton.icon(
+              key: const Key('route-button'),
+              style: FilledButton.styleFrom(
+                minimumSize: height,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(MapChrome.radius),
+                ),
+              ),
+              onPressed: isRouting ? null : onRoute,
+              icon: const Icon(Icons.directions),
+              label: FittedBox(child: Text(isRouting ? 'Calculando…' : 'Trazar ruta')),
+            ),
           ),
         ),
       ],
@@ -525,16 +646,144 @@ class _MapSourceChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final (icon, text) = switch (source) {
       LocalMapSource(:final region) => (Icons.offline_pin, 'Mapa offline: ${region.name}'),
-      RemoteMapSource(:final region) => (Icons.cloud, 'Mapa en línea: ${region.name}'),
+      RemoteMapSource(:final region) => (Icons.cloud_outlined, 'Mapa en línea: ${region.name}'),
       NoMapSource() => (Icons.layers_clear, 'Sin mapa base: descarga una región'),
     };
-    return Chip(
+    return DecoratedBox(
       key: const Key('map-source'),
-      avatar: Icon(icon, size: 18),
-      label: Text(text),
-      visualDensity: VisualDensity.compact,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface.withValues(alpha: 0.94),
+        borderRadius: BorderRadius.circular(999),
+        boxShadow: MapChrome.shadow,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 6, 12, 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: theme.colorScheme.primary),
+            const SizedBox(width: 6),
+            Text(text, style: theme.textTheme.labelMedium),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// What the traffic colours mean and what is measured in this area.
+class _TrafficLegend extends StatelessWidget {
+  const _TrafficLegend({required this.status});
+
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      key: const Key('traffic-legend'),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(MapChrome.radius),
+        boxShadow: MapChrome.shadow,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.traffic, size: 18, color: theme.colorScheme.primary),
+                const SizedBox(width: 6),
+                Text('Tráfico', style: theme.textTheme.titleSmall),
+                const SizedBox(width: 12),
+                const Expanded(child: LegendRow(entries: trafficLegend)),
+              ],
+            ),
+            if (status.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                status,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Saved routes, trips, offline maps and the account.
+class _MenuSheet extends StatelessWidget {
+  const _MenuSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    Widget item(String value, IconData icon, String title, String subtitle) => ListTile(
+      leading: CircleAvatar(
+        backgroundColor: theme.colorScheme.primaryContainer,
+        foregroundColor: theme.colorScheme.primary,
+        child: Icon(icon),
+      ),
+      title: Text(title),
+      subtitle: Text(subtitle),
+      onTap: () => Navigator.pop(context, value),
+    );
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Row(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.asset('assets/images/logo.png', width: 44, height: 44),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Route Maps', style: theme.textTheme.titleLarge),
+                      Text(
+                        'Mapas y rutas, también sin conexión',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            item('routes', Icons.bookmarks_outlined, 'Rutas guardadas', 'Disponibles sin conexión'),
+            item('trips', Icons.timeline, 'Mis recorridos', 'Viajes grabados con el GPS'),
+            item(
+              'offline',
+              Icons.download_for_offline_outlined,
+              'Mapas offline',
+              'Descarga regiones para usarlas sin Internet',
+            ),
+            item(
+              'account',
+              Icons.account_circle_outlined,
+              'Cuenta y sincronización',
+              'Tus datos en todos tus dispositivos',
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

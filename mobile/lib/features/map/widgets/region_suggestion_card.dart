@@ -34,6 +34,17 @@ class RegionSuggestionCard extends StatelessWidget {
           children: [
             Row(
               children: [
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(Icons.download_for_offline, color: theme.colorScheme.primary),
+                  ),
+                ),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     'No tienes descargado el mapa de esta región.',
@@ -47,6 +58,7 @@ class RegionSuggestionCard extends StatelessWidget {
                 ),
               ],
             ),
+            const SizedBox(height: 4),
             Row(
               children: [
                 Expanded(
@@ -56,17 +68,27 @@ class RegionSuggestionCard extends StatelessWidget {
                   ),
                 ),
                 if (task?.status == RegionDownloadStatus.downloading)
-                  Text(formatPercent(task!.progress))
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Text(formatPercent(task!.progress), style: theme.textTheme.titleSmall),
+                  )
                 else
-                  FilledButton(
+                  FilledButton.icon(
                     onPressed: onDownload,
-                    child: Text(task == null ? 'Descargar' : 'Reanudar'),
+                    icon: const Icon(Icons.download),
+                    label: Text(task == null ? 'Descargar' : 'Reanudar'),
                   ),
               ],
             ),
             if (task != null) ...[
               const SizedBox(height: 8),
-              LinearProgressIndicator(value: task.progress),
+              Padding(
+                padding: const EdgeInsets.only(right: 8, bottom: 4),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(value: task.progress, minHeight: 6),
+                ),
+              ),
             ],
           ],
         ),

@@ -60,7 +60,13 @@ expect "Nginx answers /nginx-health" test "$(curl -fsS "$BASE/nginx-health")" = 
 status=$(http GET "$BASE/health")
 expect "GET /health -> 200 ($(json .status))" test "$status" = 200
 expect "database is up" test "$(json .services.database)" = up
-expect "routing engine is up" test "$(json .services.routing)" = up
+routing_state=$(json .services.routing)
+if [[ "${ALLOW_NO_REGION:-0}" == 1 && "$routing_state" == down ]]; then
+  # Without map data there is no road graph yet; the routing section expects the 503.
+  pass "routing engine is down: no road graph (ALLOW_NO_REGION=1)"
+else
+  expect "routing engine is up" test "$routing_state" = up
+fi
 redis_state=$(json .services.redis)
 [[ "$redis_state" == up ]] && pass "redis is up" || fail "redis is $redis_state"
 

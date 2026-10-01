@@ -23,10 +23,12 @@ class MapRegion {
     this.routingChecksum,
     this.routingDownloadUrl,
     this.bbox,
+    this.assets = const [],
   });
 
   factory MapRegion.fromJson(Map<String, Object?> json) {
     final bbox = json['bbox'] as List<Object?>?;
+    final assets = json['assets'] as List<Object?>?;
     return MapRegion(
       code: json['id']! as String,
       name: json['name']! as String,
@@ -45,6 +47,10 @@ class MapRegion {
       routingDownloadUrl: json['routingDownloadUrl'] as String?,
       tilesUrl: json['tilesUrl']! as String,
       updatedAt: DateTime.parse(json['updatedAt']! as String),
+      assets: [
+        for (final asset in assets ?? const <Object?>[])
+          RegionAsset.fromJson(asset! as Map<String, Object?>),
+      ],
     );
   }
 
@@ -77,7 +83,91 @@ class MapRegion {
   final String tilesUrl;
   final DateTime updatedAt;
 
+  /// Relief, satellite imagery and overlays published with the map.
+  final List<RegionAsset> assets;
+
   bool contains(Coordinate point) => bbox?.contains(point) ?? false;
+
+  /// The archive of [kind] (`terrain`, `satellite`, `overlays`), if published.
+  RegionAsset? asset(String kind) {
+    for (final asset in assets) {
+      if (asset.kind == kind) return asset;
+    }
+    return null;
+  }
+
+  /// Highest zoom with tiles: a region that stops early (the world base map)
+  /// only gives an overview.
+  bool get isDetailed => maxZoom > overviewMaxZoom;
+
+  /// Last zoom of the overview maps (the world base map has tiles up to 7).
+  static const overviewMaxZoom = 8;
+}
+
+/// Extra archive of a region next to its map (`assets` in the API): the relief
+/// (`terrain`), the satellite imagery or the optional overlays (population,
+/// climate), read with HTTP Range requests like the map.
+@immutable
+class RegionAsset {
+  const RegionAsset({
+    required this.kind,
+    required this.tilesUrl,
+    required this.format,
+    required this.minZoom,
+    required this.maxZoom,
+    required this.sizeBytes,
+    required this.checksum,
+  });
+
+  factory RegionAsset.fromJson(Map<String, Object?> json) => RegionAsset(
+    kind: json['kind']! as String,
+    tilesUrl: json['tilesUrl']! as String,
+    format: json['format'] as String? ?? '',
+    minZoom: (json['minZoom'] as num?)?.toInt() ?? 0,
+    maxZoom: (json['maxZoom'] as num?)?.toInt() ?? 14,
+    sizeBytes: (json['size'] as num?)?.toInt() ?? 0,
+    checksum: json['checksum'] as String? ?? '',
+  );
+
+  static const terrain = 'terrain';
+  static const satellite = 'satellite';
+  static const overlays = 'overlays';
+
+  final String kind;
+
+  /// PMTiles URL (absolute path on the platform host, versioned by content).
+  final String tilesUrl;
+
+  /// Tile format: `webp`, `png`, `jpg` or `pbf`.
+  final String format;
+  final int minZoom;
+  final int maxZoom;
+  final int sizeBytes;
+  final String checksum;
+
+  Map<String, Object?> toJson() => {
+    'kind': kind,
+    'tilesUrl': tilesUrl,
+    'format': format,
+    'minZoom': minZoom,
+    'maxZoom': maxZoom,
+    'size': sizeBytes,
+    'checksum': checksum,
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      other is RegionAsset &&
+      other.kind == kind &&
+      other.tilesUrl == tilesUrl &&
+      other.format == format &&
+      other.minZoom == minZoom &&
+      other.maxZoom == maxZoom &&
+      other.sizeBytes == sizeBytes &&
+      other.checksum == checksum;
+
+  @override
+  int get hashCode => Object.hash(kind, tilesUrl, format, minZoom, maxZoom, sizeBytes, checksum);
 }
 
 /// A region stored on the device and usable without connection.

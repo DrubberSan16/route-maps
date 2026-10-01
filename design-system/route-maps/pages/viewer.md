@@ -7,9 +7,21 @@ mencionado aquí sigue el MASTER.
 
 - El patrón "Funnel (3-Step Conversion)" y el "Scroll Reveal" del MASTER **no
   aplican**: es una herramienta de mapa, no una landing.
-- Layout: panel lateral de 380 px (búsqueda, lugar, "Cómo llegar", mapas
-  disponibles) + mapa a pantalla completa. Por debajo de 768 px el panel pasa
-  abajo (50 % de alto) y el mapa arriba.
+- Layout: mapa a pantalla completa con una barra de búsqueda flotante (menú,
+  búsqueda y "Cómo llegar") y, al elegir un lugar o pedir indicaciones, un
+  panel de 408 px a la izquierda. Por debajo de 768 px el panel es una hoja
+  inferior que se puede minimizar y los controles del mapa suben con ella
+  (`--sheet-offset`).
+- Controles sobre el mapa: botón «Capas» abajo a la izquierda (miniatura del
+  tipo de mapa al que cambia; abre el panel de tipo de mapa y detalles),
+  «Instalar app» arriba a la derecha (oculto en la app instalada) y zoom,
+  escala y ubicación abajo a la derecha. Con el tráfico activo aparece su
+  leyenda.
+- Menú lateral (`<dialog>`): logo, «Instalar la app», integración, API,
+  fuentes y mapas disponibles.
+- «Instalar app» abre un diálogo con dos opciones: el APK de Android que
+  publica el servidor (`/descargas/android.json`; en iOS no se ofrece) y la app
+  web (PWA) cuando el navegador lo permite, con instrucciones si no.
 - Una sola acción primaria por vista: "Cómo llegar" en la tarjeta de lugar.
 
 ## Color
@@ -21,7 +33,9 @@ mencionado aquí sigue el MASTER.
 - Añadidos del visor: `--color-input-border` (3.2:1 sobre blanco, borde de
   campos visible), `--color-selected`, colores de marcadores
   (`--color-marker-origin` 5.5:1 con texto blanco, parada = primario, destino =
-  acento) y del aviso del mapa.
+  acento), del aviso del mapa y de las leyendas de capas (`--color-traffic-*`,
+  `--color-rain-*`, `--color-temp-*`, `--color-heat-*`, los mismos valores que
+  el estilo del mapa).
 - Solo modo claro: el estilo del mapa (`infrastructure/maps/style/style.json`)
   es claro y el panel acompaña al mapa.
 
@@ -40,11 +54,17 @@ mencionado aquí sigue el MASTER.
 - Los movimientos de cámara del mapa (`flyTo`, `fitBounds`) son de MapLibre y
   usan duración 0 con `prefers-reduced-motion`.
 
-## Iconos
+## Iconos y marca
 
 - SVG de trazo estilo Lucide (24×24, trazo 2) en un sprite inline
   (`<symbol>` en `index.html`). Decorativos con `aria-hidden`; los botones solo
   icono llevan `aria-label`.
+- Logo: `brand/logo.svg` (ruta con dos paradas sobre el azul primario). Los
+  íconos de la PWA, Android e iOS se generan con `brand/render-icons.mjs`.
+- Miniaturas de tipo de mapa: `icons/map-type-{map,satellite,relief}.webp`,
+  compartidas con la app.
+- Puntos de interés: disco del color de su clase (`maps-platform:poi-colors`)
+  con un glifo blanco, dibujado en el cliente (`/sdk/map-icons.js`).
 
 ## Accesibilidad
 

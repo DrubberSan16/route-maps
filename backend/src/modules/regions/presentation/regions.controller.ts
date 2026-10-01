@@ -131,6 +131,25 @@ export class RegionsController {
 
   @Public()
   @RawResponse()
+  @Get(':id/assets/:kind/download')
+  @ApiParam({ name: 'id', example: 'guayaquil' })
+  @ApiParam({ name: 'kind', enum: ['terrain', 'satellite', 'overlays'] })
+  @ApiProduces('application/vnd.pmtiles')
+  @ApiOperation({
+    summary: 'Download a relief, satellite or overlay archive of the region (Range / resumable)',
+  })
+  async downloadAsset(
+    @Param('id') id: string,
+    @Param('kind') kind: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const { region, asset } = await this.regions.getAsset(id, kind);
+    await this.downloads.sendAsset(region, asset, req, res);
+  }
+
+  @Public()
+  @RawResponse()
   @Get(':id/routing/download')
   @ApiParam({ name: 'id', example: 'guayaquil' })
   @ApiProduces('application/x-tar')

@@ -9,7 +9,7 @@ import {
   type MapStorageProvider,
   StorageKind,
 } from '../../maps/domain/map-storage.provider';
-import { MapRegion } from '../domain/map-region.entity';
+import { MapRegion, RegionAsset } from '../domain/map-region.entity';
 import { parseRangeHeader } from './http-range';
 
 const CONTENT_TYPES: Record<StorageKind, string> = {
@@ -40,11 +40,36 @@ export class RegionDownloadService {
         `Region ${region.code} has no ${kind} package`,
       );
     }
+    await this.sendFile(region, { kind, label: kind, relativePath, checksum }, req, res);
+  }
+
+  /** A relief, satellite or overlay archive: a PMTiles file in map storage. */
+  async sendAsset(
+    region: MapRegion,
+    asset: RegionAsset,
+    req: Request,
+    res: Response,
+  ): Promise<void> {
+    await this.sendFile(
+      region,
+      { kind: 'map', label: asset.kind, relativePath: asset.file, checksum: asset.checksum },
+      req,
+      res,
+    );
+  }
+
+  private async sendFile(
+    region: MapRegion,
+    artefact: { kind: StorageKind; label: string; relativePath: string; checksum: string | null },
+    req: Request,
+    res: Response,
+  ): Promise<void> {
+    const { kind, label, relativePath, checksum } = artefact;
     const file = await this.storage.stat(kind, relativePath);
     if (!file) {
       throw AppException.notFound(
         ErrorCode.MAP_REGION_FILE_NOT_AVAILABLE,
-        `The ${kind} file of region ${region.code} is not available on the server`,
+        `The ${label} file of region ${region.code} is not available on the server`,
       );
     }
 
@@ -116,7 +141,10 @@ export class RegionDownloadService {
     } catch (error) {
       // Client aborted or disk error mid-transfer: headers are already sent,
       // so the only thing left is to log; the client resumes with Range.
-      this.logger.warn({ err: error, region: region.code, kind }, 'Region download interrupted');
+      this.logger.warn(
+        { err: error, region: region.code, kind: label },
+        'Region download interrupted',
+      );
     }
   }
 }
