@@ -8,8 +8,8 @@ Aplicaciones web/móviles
           |
        HTTPS
           |
-        Nginx ---- PMTiles / SDK / estilo / fuentes
-          |
+        Nginx ---- PMTiles (mapa, capas, relieve, satélite) / SDK / estilo /
+          |        fuentes / /descargas/ (APK)
        Backend ---- red vial + lugares + límites + agua + clima locales
         |    |
     PostgreSQL  Redis
@@ -17,14 +17,18 @@ Aplicaciones web/móviles
 
 ## Responsabilidades
 
-- Nginx: TLS, archivos estáticos, solicitudes Range y proxy de `/api`.
-- Backend: autenticación, regiones, rutas nativas, geocodificación nativa,
-  tráfico propio, condiciones climáticas, viajes, tracking y sincronización.
+- Nginx: TLS, archivos estáticos, solicitudes Range, el APK de `/descargas/`
+  y proxy de `/api`. Los PMTiles se piden con su checksum en la URL y se
+  guardan en caché como inmutables; el visor es instalable (PWA, `sw.js`).
+- Backend: autenticación, regiones y sus archivos extra, rutas nativas,
+  geocodificación nativa, tráfico propio (en vivo y habitual), condiciones
+  climáticas, viajes, tracking y sincronización.
 - PostgreSQL/PostGIS: usuarios y datos operativos; se ejecuta en
   `ovh-serverPostgres` en producción.
 - Redis: caché y control de frecuencia.
 - `data-tools`: proceso bajo demanda que descarga fuentes auditadas, valida
-  geometrías, construye PMTiles y escribe manifiestos atómicos.
+  geometrías, construye PMTiles (vectoriales y ráster de relieve y satélite) y
+  escribe manifiestos atómicos.
 
 ## Datos
 
@@ -36,13 +40,20 @@ los archivos locales.
 Los archivos persistentes viven bajo `storage/`:
 
 - `imports/native/ecuador/*.geojson`: instantáneas verificadas y manifiesto;
-- `maps/<región>/*.pmtiles`: mapa vectorial descargable;
-- `maps/<región>/*.region.json`: versión, límites, tamaños y checksums.
+- `imports/raster/`: teselas de altura y compuestos satelitales descargados;
+- `maps/<región>/<región>.pmtiles`: mapa vectorial descargable;
+- `maps/<región>/<región>.{overlays,terrain,satellite}.pmtiles`: población y
+  clima, relieve y vista satélite;
+- `maps/<región>/*.region.json`: versión, límites, tamaños y checksums del mapa
+  y de sus archivos extra;
+- `app/`: APK publicado con `publish-app.py` para el botón «Instalar app».
 
 ## Exposición a otras aplicaciones
 
 `/sdk/route-maps.js` exporta `createMap`, `getRegions`, `searchPlaces`,
-`calculateRoute` y `offlineMapUrl`. La API equivalente está documentada en
+`calculateRoute` y `offlineMapUrl`. El mapa que devuelve `createMap` cambia de
+tipo (`setMapType`: mapa, satélite o relieve) y muestra el tráfico y las capas
+(`setTraffic`, `setOverlay`). La API equivalente está documentada en
 `/api/docs`. CORS se configura explícitamente con `CORS_ORIGINS`.
 
 ## Seguridad y despliegue

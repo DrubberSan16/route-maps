@@ -54,7 +54,10 @@ es climatología, no una observación en vivo (`climate.status=climatology`).
 - `GET /api/v1/traffic/flow?bbox=minLng,minLat,maxLng,maxLat`: tramos de vía con velocidad medida en los
   últimos 15 minutos (GeoJSON). Cada punto GPS se asocia al tramo más cercano (25 m); un tramo aparece con
   al menos 3 muestras de 2 viajes distintos, clasificado como `free`, `moderate`, `slow` o `jammed` según
-  la relación con la velocidad libre de su clase.
+  la relación con la velocidad libre de su clase (`source: live`). Donde no hay datos en vivo se añade el
+  tráfico habitual: velocidades del mismo tipo de día (lunes a viernes, sábado o domingo) y de la misma
+  hora ±1 en las últimas 4 semanas, con al menos 3 viajes (`source: typical`, hora local de
+  `TRAFFIC_TIME_ZONE`). Los clientes los dibujan más tenues.
 - `GET /api/v1/traffic/activity?bbox=…`: mapa de calor de las últimas 24 horas en celdas de ~100 m que
   reunieron al menos 3 viajes distintos.
 - `GET /api/v1/tracking/traffic`: celdas agregadas de la versión anterior (se mantiene por compatibilidad).

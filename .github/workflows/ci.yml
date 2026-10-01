@@ -90,6 +90,12 @@ jobs:
           node --test 'infrastructure/nginx/tests/*.test.mjs'
       - name: La app lleva los mismos glifos que sirve Nginx
         run: diff -r --exclude=README.md infrastructure/maps/fonts mobile/assets/fonts
+      - name: La app usa el logo y las miniaturas de tipo de mapa del visor
+        run: |
+          cmp infrastructure/nginx/html/icons/icon-192.png mobile/assets/images/logo.png
+          for type in map satellite relief; do
+            cmp "infrastructure/nginx/html/icons/map-type-$type.webp" "mobile/assets/images/map-type-$type.webp"
+          done
       - name: Catálogo de regiones válido
         run: jq -e '.regions | length > 0 and all(.code | test("^[a-z0-9][a-z0-9-]{1,62}$"))' infrastructure/regions/regions.json
       - name: Docker Compose válido (desarrollo y producción)

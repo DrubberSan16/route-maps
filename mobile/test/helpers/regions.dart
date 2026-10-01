@@ -63,7 +63,7 @@ Map<String, Object?> regionJson(MapRegion region) => {
       for (final asset in region.assets)
         {
           ...asset.toJson(),
-          'downloadUrl': '/api/v1/maps/regions/${region.code}/assets/${asset.kind}',
+          'downloadUrl': '/api/v1/maps/regions/${region.code}/assets/${asset.kind}/download',
         },
     ],
 };
