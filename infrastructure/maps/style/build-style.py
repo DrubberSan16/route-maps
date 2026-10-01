@@ -67,7 +67,8 @@ WIDTH = {
 WIDTH_CASING = {"motorway": 1.2, "trunk": 1.1, "primary": 1.0, "secondary": 1.0, "tertiary": 0.8, "minor": 0.8,
                 "service": 0.6, "track": 0.6}
 
-# Points of interest: icon/label colour by class.
+# Points of interest: icon/label colour by class. First the classes of the native data, then those
+# of the OSM-based tile generator (tilegen PoiLayer), coloured like their native counterparts.
 POI_COLORS = {
     "restaurant": "#e8710a", "shop": "#1a73e8", "hospital": "#d93025", "pharmacy": "#d93025",
     "school": "#5c6bc0", "college": "#5c6bc0", "library": "#12b5cb", "park": "#188038", "sports": "#188038",
@@ -76,11 +77,19 @@ POI_COLORS = {
     "theatre": "#12b5cb", "cinema": "#12b5cb", "attraction": "#12b5cb", "place_of_worship": "#70757a",
     "town_hall": "#70757a", "government": "#70757a", "police": "#70757a", "fire_station": "#70757a",
     "post": "#70757a", "military": "#70757a", "community": "#70757a", "building": "#70757a",
+    "food": "#e8710a", "cafe": "#e8710a", "bar": "#e8710a", "mall": "#1a73e8", "market": "#1a73e8",
+    "supermarket": "#1a73e8", "grocery": "#1a73e8", "health": "#d93025", "emergency": "#d93025",
+    "bus_station": "#1a73e8", "bus_stop": "#1a73e8", "railway_station": "#1a73e8", "transit_station": "#1a73e8",
+    "tram_stop": "#1a73e8", "ferry_terminal": "#1a73e8", "taxi": "#1a73e8", "parking": "#1a73e8",
+    "charging_station": "#1a73e8", "culture": "#12b5cb", "historic": "#12b5cb", "worship": "#70757a",
+    "playground": "#188038", "campsite": "#188038",
 }
 POI_TEXT = {key: value for key, value in POI_COLORS.items()}
 POI_TEXT.update({"park": "#137333", "sports": "#137333", "stadium": "#137333", "cemetery": "#4e6b51",
-                 "restaurant": "#c5530a", "museum": "#0e8a9b", "theatre": "#0e8a9b", "cinema": "#0e8a9b",
-                 "attraction": "#0e8a9b", "library": "#0e8a9b"})
+                 "playground": "#137333", "campsite": "#137333", "restaurant": "#c5530a", "food": "#c5530a",
+                 "cafe": "#c5530a", "bar": "#c5530a", "museum": "#0e8a9b", "theatre": "#0e8a9b",
+                 "cinema": "#0e8a9b", "attraction": "#0e8a9b", "library": "#0e8a9b", "culture": "#0e8a9b",
+                 "historic": "#0e8a9b"})
 DEFAULT_POI = "#70757a"
 
 # Traffic: same colours as the measured segments of GET /traffic/flow ("free" is also the colour of

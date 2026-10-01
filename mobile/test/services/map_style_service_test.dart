@@ -63,11 +63,16 @@ void main() {
       ),
     );
     expect(basemap(style)['url'], 'pmtiles://https://maps.example.com/maps/ec/guayaquil.pmtiles');
+    // The overlays (climate, population) come from the same archive: no placeholder is left.
+    final overlays =
+        (style['sources']! as Map<String, Object?>)['overlays']! as Map<String, Object?>;
+    expect(overlays['url'], basemap(style)['url']);
+    expect(jsonEncode(style['sources']), isNot(contains('__')));
   });
 
   test('without map data only the background remains', () async {
     final style = decode(await styles.styleFor(const NoMapSource()));
-    expect((style['sources']! as Map).containsKey('basemap'), isFalse);
+    expect((style['sources']! as Map).keys, isEmpty);
     final layers = style['layers']! as List<Object?>;
     expect(layers.map((layer) => (layer! as Map)['id']), ['background']);
   });

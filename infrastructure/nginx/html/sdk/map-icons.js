@@ -35,6 +35,21 @@ const GLYPHS = {
   post: ['M4 6h16v12H4Z', 'M4 7l8 6 8-6'],
   community: ['M9 11a3.5 3.5 0 1 0 0-7a3.5 3.5 0 1 0 0 7Z', 'M3 20v-1.5A4.5 4.5 0 0 1 7.5 14h3a4.5 4.5 0 0 1 4.5 4.5V20', 'M16 4.3a3.5 3.5 0 0 1 0 6.4', 'M21 20v-1.5a4.5 4.5 0 0 0-3-4.2'],
   building: ['M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6Z'],
+  cafe: ['M5 9h11v5a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5Z', 'M16 10h1.5a2.5 2.5 0 0 1 0 5H16', 'M8 3.5V6', 'M12 3.5V6'],
+  bar: ['M5 4h14l-7 8Z', 'M12 12v8', 'M8 20h8'],
+  supermarket: ['M3 4h2l2.5 11h10l2-8H6.2', 'M8 19.5a1.25 1.25 0 1 0 2.5 0a1.25 1.25 0 1 0-2.5 0Z',
+    'M15 19.5a1.25 1.25 0 1 0 2.5 0a1.25 1.25 0 1 0-2.5 0Z'],
+  parking: ['M8 20V4h5a4.5 4.5 0 0 1 0 9H8'],
+  taxi: ['M5 16v-4l2-5h10l2 5v4Z', 'M5 12h14', 'M7 16v2.5', 'M17 16v2.5'],
+  charging_station: ['M13 3 5 14h6l-1 7 8-11h-6Z'],
+  campsite: ['M12 4 3 20h18Z', 'M12 13l-3 7', 'M12 13l3 7'],
+};
+// Classes of the OSM-based tiles (tilegen PoiLayer) drawn with the glyph of their native counterpart.
+const ALIASES = {
+  food: 'restaurant', mall: 'shop', market: 'shop', grocery: 'supermarket', health: 'hospital',
+  emergency: 'hospital', bus_station: 'bus', bus_stop: 'bus', railway_station: 'rail', transit_station: 'rail',
+  tram_stop: 'rail', ferry_terminal: 'ferry', culture: 'theatre', historic: 'attraction',
+  worship: 'place_of_worship', playground: 'park',
 };
 
 function draw(color, glyph) {
@@ -70,7 +85,7 @@ export function registerPoiIcons(map, colors = {}) {
   const add = (id) => {
     if (!id.startsWith('poi-') || map.hasImage(id)) return;
     const poiClass = id.slice(4);
-    const glyph = GLYPHS[poiClass] ?? GLYPHS.building;
+    const glyph = GLYPHS[poiClass] ?? GLYPHS[ALIASES[poiClass]] ?? GLYPHS.building;
     const color = colors[poiClass] ?? colors.default ?? 'gray';
     try {
       map.addImage(id, draw(color, glyph), { pixelRatio: 2 });

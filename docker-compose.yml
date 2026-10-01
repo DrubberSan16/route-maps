@@ -34,6 +34,9 @@ services:
       # authorised by the backend (X-Accel-Redirect). Read-only.
       - ${STORAGE_PATH:-./storage}/maps:/data/maps:ro
       - ${STORAGE_PATH:-./storage}/routing:/data/routing:ro
+      # Android app offered by the viewer's "Instalar app" button (/descargas/),
+      # published with infrastructure/scripts/publish-app.py.
+      - ${STORAGE_PATH:-./storage}/app:/data/app:ro
     depends_on:
       backend:
         condition: service_healthy

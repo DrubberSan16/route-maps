@@ -53,6 +53,7 @@ __pycache__/
 *.osrm.*
 storage/maps/**
 storage/routing/**
+storage/app/**
 storage/imports/**
 storage/nominatim/**
 storage/.state/**

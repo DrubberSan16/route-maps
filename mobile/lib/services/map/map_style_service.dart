@@ -12,6 +12,8 @@ import '../../domain/services/offline_storage_service.dart';
 ///
 /// * the `basemap` source points to the local PMTiles file
 ///   (`pmtiles://file:///…`) or to the server's (`pmtiles://https://…`);
+/// * the climate and population overlays (hidden until switched on) are read
+///   from the same archive;
 /// * label glyphs are always read from files on the device, so text renders
 ///   without connection;
 /// * with no map data only the background is kept (routes and markers are
@@ -30,6 +32,7 @@ class MapStyleService {
   final String fontsAssetDirectory;
 
   static const _basemap = 'basemap';
+  static const _overlays = 'overlays';
 
   Future<Uri>? _glyphs;
   Map<String, Object?>? _template;
@@ -45,10 +48,16 @@ class MapStyleService {
       case RemoteMapSource(:final url):
         basemap['url'] = 'pmtiles://$url';
       case NoMapSource():
-        sources.remove(_basemap);
+        sources
+          ..remove(_basemap)
+          ..remove(_overlays);
         (style['layers']! as List<Object?>).removeWhere(
-          (layer) => (layer! as Map<String, Object?>)['source'] == _basemap,
+          (layer) =>
+              const {_basemap, _overlays}.contains((layer! as Map<String, Object?>)['source']),
         );
+    }
+    if (sources[_overlays] case final Map<String, Object?> overlays) {
+      overlays['url'] = basemap['url'];
     }
     style['glyphs'] = '${await glyphsBaseUri()}{fontstack}/{range}.pbf';
     return jsonEncode(style);

@@ -8,7 +8,8 @@
 import * as maplibregl from '../vendor/maplibre-gl.mjs';
 import { registerPoiIcons } from './map-icons.js';
 import {
-  buildStyle, currentMapType, mapTypes, parseTemplate, setMapType, setOverlay, TrafficLayer, WORLD_REGION,
+  buildStyle, currentMapType, mapTypes, parseTemplate, pmtilesLoader, setMapType, setOverlay, TrafficLayer,
+  WORLD_REGION,
 } from './map-style.js';
 
 const SDK_URL = new URL(import.meta.url);
@@ -66,8 +67,7 @@ async function ensureRuntime(origin) {
   if (!protocolReady) {
     protocolReady = (async () => {
       if (!window.pmtiles) await loadScript(`${origin}/vendor/pmtiles.js`);
-      const protocol = new window.pmtiles.Protocol();
-      maplibregl.addProtocol('pmtiles', protocol.tile);
+      maplibregl.addProtocol('pmtiles', pmtilesLoader(window.pmtiles));
     })();
   }
   await protocolReady;

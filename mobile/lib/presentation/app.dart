@@ -25,7 +25,7 @@ class MapsPlatformApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(appServicesProvider);
     return MaterialApp(
-      title: 'Maps Platform',
+      title: 'Route Maps',
       debugShowCheckedModeBanner: false,
       theme: _theme(Brightness.light),
       darkTheme: _theme(Brightness.dark),

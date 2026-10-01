@@ -18,7 +18,8 @@ PREPARE_FLAGS := $(if $(SKIP_ROUTING),--skip-routing) $(if $(WATER),--water-poly
 
 .PHONY: help init up down restart ps logs build config migrate seed regions regions-sync \
         download-region build-map build-routing prepare-region geocoding-up \
-        refresh-region prod-up prod-down prod-logs test test-backend test-e2e test-tilegen test-mobile lint check-region
+        refresh-region publish-app prod-up prod-down prod-logs test test-backend test-e2e test-tilegen test-mobile lint \
+        check-region
 
 help: ## Muestra esta ayuda
 	@grep -hE '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -78,6 +79,10 @@ prepare-region: check-region ## Descarga + mapa + manifiesto + registro: REGION=
 
 refresh-region: check-region ## Actualiza solo si cambió el origen; rollback y validación: REGION=ecuador
 	./infrastructure/scripts/refresh-region.sh $(REGION)
+
+publish-app: ## Publica el APK para el botón «Instalar app»: [APK=ruta] [HOST=servidor-ssh] [REMOTE_DIR=/opt/route-maps]
+	python3 infrastructure/scripts/publish-app.py $(or $(APK),mobile/build/app/outputs/flutter-apk/app-release.apk) \
+		$(if $(HOST),--host $(HOST)) $(if $(REMOTE_DIR),--remote-dir $(REMOTE_DIR))
 
 geocoding-up: ## Informa sobre la geocodificación nativa
 	@echo "La geocodificación nativa forma parte del backend y no requiere un servicio externo."

@@ -24,6 +24,51 @@ export const containsBox = (outer, inner) =>
 /** Id of the template layer a style layer was copied from ("ecuador/road" -> "road"). */
 export const templateId = (id) => id.slice(id.lastIndexOf('/') + 1);
 
+/**
+ * Loader of pmtiles:// URLs for maplibregl.addProtocol, built on the pmtiles library (its global
+ * build). Chromium's HTTP cache can answer a Range request with only the part of it that an
+ * overlapping request just stored, which happens as the map loads many tiles at once; the tile then
+ * fails to decompress and stays empty, and the library keeps that failure for the whole directory.
+ * So a range that comes back incomplete, or fails on the network, is read again past the cache.
+ */
+export function pmtilesLoader(library, { attempts = 3, delayMs = 40 } = {}) {
+  const protocol = new library.Protocol();
+  class CheckedSource {
+    constructor(url) {
+      this.source = new library.FetchSource(url);
+      this.uncached = new library.FetchSource(url);
+      this.uncached.chromeWindowsNoCache = true; // the library's switch for fetch(..., { cache: 'no-store' })
+    }
+
+    getKey() {
+      return this.source.getKey();
+    }
+
+    async getBytes(offset, length, signal, etag) {
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          const result = await (attempt === 1 ? this.source : this.uncached).getBytes(offset, length, signal, etag);
+          // Only the first read (the header, 16 KiB) may pass the end of a small archive.
+          if (offset > 0 && result.data.byteLength < length) throw new TypeError('Incomplete range');
+          return result;
+        } catch (error) {
+          // fetch() rejects with a TypeError on network errors; anything else (HTTP error, abort) is final.
+          if (!(error instanceof TypeError) || attempt >= attempts || signal?.aborted) throw error;
+          await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
+        }
+      }
+    }
+  }
+  return (params, abortController) => {
+    // pmtiles://<archive URL> (TileJSON) or pmtiles://<archive URL>/<z>/<x>/<y>, as the library reads them.
+    const url = params.type === 'json'
+      ? params.url.slice('pmtiles://'.length)
+      : params.url.match(/^pmtiles:\/\/(.+)\/\d+\/\d+\/\d+$/)?.[1];
+    if (url && !protocol.get(url)) protocol.add(new library.PMTiles(new CheckedSource(url)));
+    return protocol.tile(params, abortController);
+  };
+}
+
 const assetOf = (region, kind) => region.assets?.find((asset) => asset.kind === kind) ?? null;
 const widestFirst = (regions) => [...regions].sort((a, b) => area(b.bbox) - area(a.bbox));
 
