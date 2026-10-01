@@ -45,6 +45,8 @@ flutter:
   assets:
     # Map style template (same file Nginx serves at /maps/style/style.json).
     - assets/map/
+    # Logo and map type thumbnails (the same images as the web viewer).
+    - assets/images/
     # SDF glyphs for map labels, copied to disk on first start so they work offline.
     - assets/fonts/Noto Sans Regular/
     - assets/fonts/Noto Sans Medium/

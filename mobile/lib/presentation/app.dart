@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../features/map/map_screen.dart';
 import '../features/offline_maps/offline_maps_controller.dart';
 import 'providers.dart';
+import 'theme.dart';
 
 /// Background services that run for the whole life of the app: synchronization,
 /// download recovery, trip recording and catalog refresh.
@@ -27,17 +28,12 @@ class MapsPlatformApp extends ConsumerWidget {
     return MaterialApp(
       title: 'Route Maps',
       debugShowCheckedModeBanner: false,
-      theme: _theme(Brightness.light),
-      darkTheme: _theme(Brightness.dark),
+      theme: appTheme(Brightness.light),
+      darkTheme: appTheme(Brightness.dark),
       locale: const Locale('es'),
       supportedLocales: const [Locale('es'), Locale('en')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       home: home,
     );
   }
-
-  static ThemeData _theme(Brightness brightness) => ThemeData(
-    colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1A73E8), brightness: brightness),
-    useMaterial3: true,
-  );
 }

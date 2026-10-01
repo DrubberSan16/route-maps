@@ -160,6 +160,66 @@ void main() {
       await regions.refreshCatalog();
       expect(await maps.resolveSource(around: quito, online: false), isA<NoMapSource>());
     });
+
+    test('the world overview map is used only where no detailed map covers the point', () async {
+      catalog.add(
+        region(
+          'world',
+          name: 'Mundo',
+          bbox: const BoundingBox(west: -180, south: -85, east: 180, north: 85),
+          maxZoom: 7,
+        ),
+      );
+      await regions.refreshCatalog();
+
+      final atQuito = await maps.resolveSource(around: quito, online: true);
+      expect(atQuito.id, 'remote:ecuador:2026.09.01');
+      final atMadrid = await maps.resolveSource(around: const Coordinate(40.4, -3.7), online: true);
+      expect(atMadrid.id, 'remote:world:2026.09.01');
+      // Position unknown: the widest detailed map rather than the world.
+      expect((await maps.resolveSource(online: true)).id, 'remote:ecuador:2026.09.01');
+    });
+
+    test('the relief, imagery and overlays published for the region come along', () async {
+      catalog = [
+        region(
+          'guayaquil',
+          name: 'Guayaquil',
+          bbox: guayaquilBox,
+          version: '2026.09.20',
+          assets: [RegionAsset.terrain, RegionAsset.satellite, RegionAsset.overlays],
+        ),
+      ];
+      await regions.refreshCatalog();
+      final expected = {
+        'terrain': Uri.parse('https://maps.example.com/maps/ec/guayaquil.terrain.pmtiles'),
+        'satellite': Uri.parse('https://maps.example.com/maps/ec/guayaquil.satellite.pmtiles'),
+        'overlays': Uri.parse('https://maps.example.com/maps/ec/guayaquil.overlays.pmtiles'),
+      };
+
+      final remote = await maps.resolveSource(around: guayaquilCenter, online: true);
+      expect(remote, isA<RemoteMapSource>());
+      expect(remote.assets, expected);
+
+      // A downloaded map draws its own file, and the extra layers while online.
+      await storeFile(catalog.single);
+      final local = await maps.resolveSource(around: guayaquilCenter, online: true);
+      expect(local, isA<LocalMapSource>());
+      expect(local.assets, expected);
+      expect((await maps.resolveSource(around: guayaquilCenter, online: false)).assets, isEmpty);
+    });
+  });
+
+  test('the published layers of a region are kept with the cached catalog', () async {
+    catalog = [
+      region('guayaquil', bbox: guayaquilBox, assets: [RegionAsset.satellite, RegionAsset.terrain]),
+    ];
+    await regions.refreshCatalog();
+    online = false;
+    final cached = (await regions.cachedCatalog()).single;
+    expect(cached.assets, catalog.single.assets);
+    expect(cached.asset(RegionAsset.terrain)!.tilesUrl, '/maps/ec/guayaquil.terrain.pmtiles');
+    expect(cached.asset(RegionAsset.overlays), isNull);
   });
 
   test('file paths from the API cannot escape the storage directory', () async {

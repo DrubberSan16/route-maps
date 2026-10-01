@@ -9,6 +9,8 @@ MapRegion region(
   int size = 185 * 1000 * 1000,
   BoundingBox? bbox,
   String checksum = 'aa',
+  int maxZoom = 14,
+  List<String> assets = const [],
 }) => MapRegion(
   code: code,
   name: name ?? code,
@@ -19,10 +21,22 @@ MapRegion region(
   checksum: checksum,
   bbox: bbox,
   minZoom: 0,
-  maxZoom: 14,
+  maxZoom: maxZoom,
   mapDownloadUrl: '/api/v1/maps/regions/$code/download',
   tilesUrl: '/maps/ec/$code.pmtiles',
   updatedAt: DateTime.utc(2026, 9, 1),
+  assets: [
+    for (final kind in assets)
+      RegionAsset(
+        kind: kind,
+        tilesUrl: '/maps/ec/$code.$kind.pmtiles',
+        format: kind == RegionAsset.overlays ? 'pbf' : 'webp',
+        minZoom: 0,
+        maxZoom: kind == RegionAsset.overlays ? 12 : 13,
+        sizeBytes: 1000,
+        checksum: 'c-$kind',
+      ),
+  ],
 );
 
 Map<String, Object?> regionJson(MapRegion region) => {
@@ -44,6 +58,14 @@ Map<String, Object?> regionJson(MapRegion region) => {
   'tilesUrl': region.tilesUrl,
   'enabled': true,
   'updatedAt': region.updatedAt.toIso8601String(),
+  if (region.assets.isNotEmpty)
+    'assets': [
+      for (final asset in region.assets)
+        {
+          ...asset.toJson(),
+          'downloadUrl': '/api/v1/maps/regions/${region.code}/assets/${asset.kind}',
+        },
+    ],
 };
 
 const guayaquilBox = BoundingBox(west: -80.10, south: -2.35, east: -79.75, north: -1.95);

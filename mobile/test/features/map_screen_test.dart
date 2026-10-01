@@ -14,10 +14,12 @@ import 'package:maps_platform/domain/repositories/map_repository.dart';
 import 'package:maps_platform/domain/services/connectivity_service.dart';
 import 'package:maps_platform/domain/services/location_service.dart';
 import 'package:maps_platform/features/map/map_controller.dart';
+import 'package:maps_platform/features/map/map_layers_controller.dart';
 import 'package:maps_platform/features/map/map_screen.dart';
 import 'package:maps_platform/features/map/map_view.dart';
 import 'package:maps_platform/features/offline_maps/offline_maps_controller.dart';
 import 'package:maps_platform/presentation/providers.dart';
+import 'package:maps_platform/services/map/map_style_service.dart';
 import 'package:maps_platform/services/regions/region_download_service.dart';
 import 'package:maps_platform/services/tracking/trip_recorder.dart';
 
@@ -39,7 +41,9 @@ void main() {
   late ScriptedRoutingService routing;
   late ScriptedGeocodingRepository geocoding;
   late InMemorySavedRouteRepository savedRoutes;
+  late InMemorySettingsRepository settings;
   late RecordingMapView mapView;
+  late List<String> trafficRequests;
 
   final monacoRoute = RouteResult.fromApi(
     fixtureData('route_calculate_monaco')! as Map<String, Object?>,
@@ -63,7 +67,9 @@ void main() {
       ),
     ]);
     savedRoutes = InMemorySavedRouteRepository();
+    settings = InMemorySettingsRepository();
     mapView = RecordingMapView();
+    trafficRequests = [];
   });
 
   tearDown(() => mapView.dispose());
@@ -72,6 +78,9 @@ void main() {
     WidgetTester tester, {
     MapSource source = const NoMapSource(),
     Stream<RecordingState>? recording,
+    List<MapTypeOption> mapTypes = const [
+      MapTypeOption(id: MapTypeOption.map, label: 'Mapa', available: true),
+    ],
   }) async {
     await tester.pumpWidget(
       ProviderScope(
@@ -83,7 +92,13 @@ void main() {
           routingServiceProvider.overrideWithValue(routing),
           geocodingRepositoryProvider.overrideWithValue(geocoding),
           savedRouteRepositoryProvider.overrideWithValue(savedRoutes),
+          settingsRepositoryProvider.overrideWithValue(settings),
+          trafficFlowReaderProvider.overrideWithValue((bbox) async {
+            trafficRequests.add(bbox);
+            return {'type': 'FeatureCollection', 'features': <Object?>[], 'windowMinutes': 15};
+          }),
           mapStyleProvider.overrideWith((ref) async => (source: source, style: _emptyStyle)),
+          mapTypeOptionsProvider.overrideWith((ref) async => mapTypes),
           mapViewBuilderProvider.overrideWithValue(mapView.build),
           recordingProvider.overrideWith(
             (ref) => recording ?? Stream.value(const RecordingState()),
@@ -104,17 +119,79 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('shows the map with search and the three main actions', (tester) async {
+  testWidgets('shows the map with search, layers and the main actions', (tester) async {
     await pumpMap(tester);
 
     expect(find.byKey(const Key('fake-map')), findsOneWidget);
     expect(find.text('Buscar destino...'), findsOneWidget);
-    expect(find.text('📍 Mi ubicación'), findsOneWidget);
-    expect(find.text('🗺 Trazar ruta'), findsOneWidget);
-    expect(find.text('📥 Mapas offline'), findsOneWidget);
+    expect(find.byTooltip('Menú'), findsOneWidget);
+    expect(find.byTooltip('Mi ubicación'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Trazar ruta'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Mapas offline'), findsOneWidget);
+    expect(find.text('Capas'), findsOneWidget);
     expect(find.text('Sin mapa base: descarga una región'), findsOneWidget);
     // Opens where the user was last seen.
     expect(mapView.props!.initialCenter, _home);
+    expect(mapView.props!.trafficVisible, isFalse);
+    expect(mapView.props!.overlays, isEmpty);
+  });
+
+  testWidgets('the layers sheet switches the map type and draws the chosen details', (
+    tester,
+  ) async {
+    // The region has imagery but no elevation published.
+    await pumpMap(
+      tester,
+      mapTypes: const [
+        MapTypeOption(id: MapTypeOption.map, label: 'Mapa', available: true),
+        MapTypeOption(id: MapTypeOption.satellite, label: 'Satélite', available: true),
+        MapTypeOption(id: MapTypeOption.relief, label: 'Relieve', available: false),
+      ],
+    );
+    await tester.tap(find.byKey(const Key('layers-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Tipo de mapa'), findsOneWidget);
+    expect(find.text('Satélite'), findsOneWidget);
+    expect(find.text('Sin datos en esta zona'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('map-type-satellite')));
+    await tester.tap(find.byKey(const Key('layer-population')));
+    await tester.tap(find.byKey(const Key('layer-traffic')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Mapa de calor de la malla censal de 1 km².'), findsOneWidget);
+    expect(
+      MapLayers.parse(settings.values['map.layers']),
+      const MapLayers(mapType: 'satellite', traffic: true, overlays: {'population'}),
+    );
+    expect(mapView.props!.overlays, {'population'});
+    expect(mapView.props!.trafficVisible, isTrue);
+
+    // Relief cannot be picked here.
+    await tester.tap(find.byKey(const Key('map-type-relief')));
+    await tester.pumpAndSettle();
+    expect(MapLayers.parse(settings.values['map.layers']).mapType, 'satellite');
+  });
+
+  testWidgets('with traffic on, the legend shows and city views ask for the measured segments', (
+    tester,
+  ) async {
+    settings.values['map.layers'] = '{"traffic":true}';
+    await pumpMap(tester);
+
+    expect(find.byKey(const Key('traffic-legend')), findsOneWidget);
+    expect(find.text('Sin demoras'), findsOneWidget);
+    expect(find.text('Detenido'), findsOneWidget);
+
+    mapView.props!.onCameraIdle!(
+      const BoundingBox(west: 7.40, south: 43.72, east: 7.44, north: 43.75),
+      14,
+    );
+    await tester.pumpAndSettle();
+    expect(trafficRequests, ['7.40,43.72,7.44,43.75']);
+    expect(mapView.props!.trafficFlow, isNotNull);
+    expect(find.textContaining('Sin recorridos recientes ni habituales'), findsOneWidget);
   });
 
   testWidgets('traces a route with alternatives that can be picked on the panel or the map', (

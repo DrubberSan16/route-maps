@@ -10,7 +10,9 @@ import '../../domain/entities/offline_route.dart';
 import '../../domain/entities/route.dart';
 import '../../domain/entities/routing_profile.dart';
 import '../../domain/repositories/map_repository.dart';
+import '../../domain/services/connectivity_service.dart';
 import '../../presentation/providers.dart';
+import 'map_layers_controller.dart';
 
 /// Intermediate stop of the route, visited in order before the destination.
 @immutable
@@ -301,7 +303,9 @@ final referencePointProvider = Provider<Coordinate?>((ref) {
 });
 
 final mapSourceProvider = FutureProvider<MapSource>((ref) async {
-  final online = ref.watch(isOnlineProvider);
+  // Until the first reachability check answers, the server is assumed to be
+  // there: its tiles start loading at once instead of after the check.
+  final online = ref.watch(connectivityStatusProvider).value != ConnectivityStatus.offline;
   final around = ref.watch(referencePointProvider);
   // Recompute when regions are downloaded or deleted and when the catalog changes.
   ref.watch(downloadedRegionsProvider);
@@ -309,10 +313,12 @@ final mapSourceProvider = FutureProvider<MapSource>((ref) async {
   return ref.watch(mapRepositoryProvider).resolveSource(around: around, online: online);
 });
 
-/// Style JSON for the current map source.
+/// Style JSON for the current map source, drawn as the chosen map type when
+/// the source has its data.
 final mapStyleProvider = FutureProvider<({MapSource source, String style})>((ref) async {
   final source = await ref.watch(mapSourceProvider.future);
-  final style = await ref.watch(mapStyleServiceProvider).styleFor(source);
+  final mapType = await ref.watch(mapLayersProvider.selectAsync((layers) => layers.mapType));
+  final style = await ref.watch(mapStyleServiceProvider).styleFor(source, mapType: mapType);
   return (source: source, style: style);
 });
 

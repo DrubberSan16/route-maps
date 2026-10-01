@@ -70,6 +70,137 @@ void main() {
     expect(jsonEncode(style['sources']), isNot(contains('__')));
   });
 
+  group('map types', () {
+    final satellite = Uri.parse('https://maps.example.com/maps/ec/guayaquil.satellite.pmtiles');
+    final terrain = Uri.parse('https://maps.example.com/maps/ec/guayaquil.terrain.pmtiles');
+    final online = RemoteMapSource(
+      region: region('guayaquil'),
+      url: Uri.parse('https://maps.example.com/maps/ec/guayaquil.pmtiles'),
+      assets: {'satellite': satellite, 'terrain': terrain},
+    );
+
+    List<String> ids(Map<String, Object?> style) => [
+      for (final layer in style['layers']! as List<Object?>) (layer! as Map)['id']! as String,
+    ];
+
+    Map<String, Object?> layer(Map<String, Object?> style, String id) =>
+        (style['layers']! as List<Object?>).cast<Map<String, Object?>>().firstWhere(
+          (layer) => layer['id'] == id,
+        );
+
+    test('are offered where the map has their imagery or elevation', () async {
+      final options = await styles.mapTypes(online);
+      expect(
+        [for (final option in options) (option.id, option.label, option.available)],
+        [('map', 'Mapa', true), ('satellite', 'Satélite', true), ('relief', 'Relieve', true)],
+      );
+
+      final plain = await styles.mapTypes(
+        RemoteMapSource(region: region('guayaquil'), url: online.url),
+      );
+      expect([for (final option in plain) option.available], [true, false, false]);
+      expect(
+        [for (final option in await styles.mapTypes(const NoMapSource())) option.available],
+        [true, false, false],
+      );
+    });
+
+    test('satellite puts the imagery under the roads and labels', () async {
+      final style = decode(await styles.styleFor(online, mapType: MapTypeOption.satellite));
+      final source = (style['sources']! as Map<String, Object?>)['satellite']! as Map;
+      expect(source['type'], 'raster');
+      expect(source['url'], 'pmtiles://$satellite');
+      expect(source['attribution'], contains('ESA WorldCover'));
+
+      final order = ids(style);
+      expect(order.indexOf('satellite'), order.indexOf('road-path') - 1);
+      expect(layer(style, 'satellite')['source'], 'satellite');
+      expect(layer(style, 'satellite').containsKey('before'), isFalse);
+      // The paths and casings drawn for the plain map are hidden; labels turn white.
+      expect((layer(style, 'road-casing')['layout']! as Map)['visibility'], 'none');
+      expect((layer(style, 'road-label')['paint']! as Map)['text-color'], '#ffffff');
+      expect((layer(style, 'road')['layout'] as Map?)?['visibility'], isNot('none'));
+    });
+
+    test('relief colours the land by elevation and shades the slopes', () async {
+      final style = decode(await styles.styleFor(online, mapType: MapTypeOption.relief));
+      final source = (style['sources']! as Map<String, Object?>)['terrain']! as Map;
+      expect(source['type'], 'raster-dem');
+      expect(source['encoding'], 'terrarium');
+      expect(source['url'], 'pmtiles://$terrain');
+
+      final order = ids(style);
+      expect(order.indexOf('relief-color'), order.indexOf('landuse-urban') - 1);
+      expect(order.indexOf('hillshade'), order.indexOf('road-path') - 1);
+      expect(layer(style, 'hillshade')['type'], 'hillshade');
+      expect((layer(style, 'hillshade')['paint']! as Map)['hillshade-method'], 'igor');
+      expect((layer(style, 'landuse-natural')['layout']! as Map)['visibility'], 'none');
+    });
+
+    test('without the imagery the plain map is drawn', () async {
+      final style = decode(
+        await styles.styleFor(
+          RemoteMapSource(region: region('guayaquil'), url: online.url),
+          mapType: MapTypeOption.satellite,
+        ),
+      );
+      expect((style['sources']! as Map).containsKey('satellite'), isFalse);
+      expect(ids(style), isNot(contains('satellite')));
+      expect((layer(style, 'road-casing')['layout'] as Map?)?['visibility'], isNot('none'));
+    });
+  });
+
+  test('the overlays are read from their own archive when the region has one', () async {
+    final overlays = Uri.parse('https://maps.example.com/maps/ec/guayaquil.overlays.pmtiles');
+    final style = decode(
+      await styles.styleFor(
+        RemoteMapSource(
+          region: region('guayaquil'),
+          url: Uri.parse('https://maps.example.com/maps/ec/guayaquil.pmtiles'),
+          assets: {'overlays': overlays},
+        ),
+      ),
+    );
+    final source = (style['sources']! as Map<String, Object?>)['overlays']! as Map;
+    expect(source['url'], 'pmtiles://$overlays');
+  });
+
+  test('the measured traffic has its hidden layers under the labels', () async {
+    final raw = await styles.styleFor(
+      RemoteMapSource(
+        region: region('guayaquil'),
+        url: Uri.parse('https://maps.example.com/maps/ec/guayaquil.pmtiles'),
+      ),
+    );
+    final style = decode(raw);
+    final traffic =
+        (style['sources']! as Map<String, Object?>)[MapStyleService.trafficSource]! as Map;
+    expect(traffic['type'], 'geojson');
+    expect((traffic['data']! as Map)['features'], isEmpty);
+
+    final layers = (style['layers']! as List<Object?>).cast<Map<String, Object?>>();
+    final flow = layers.indexWhere((layer) => layer['id'] == 'traffic-flow');
+    final casing = layers.indexWhere((layer) => layer['id'] == 'traffic-flow-casing');
+    final labels = layers.indexWhere((layer) => layer['type'] == 'symbol');
+    expect(casing, flow - 1);
+    expect(flow, lessThan(labels));
+    for (final index in [casing, flow]) {
+      expect(layers[index]['source'], MapStyleService.trafficSource);
+      expect((layers[index]['layout']! as Map)['visibility'], 'none');
+    }
+
+    // What the map view shows and hides without reloading the style.
+    final parsed = MapStyleLayers.of(raw);
+    expect(parsed.traffic, ['traffic-network', 'traffic-flow-casing', 'traffic-flow']);
+    expect(parsed.overlays, {
+      'precipitation': ['overlay-precipitation'],
+      'temperature': ['overlay-temperature'],
+      'population': ['overlay-population'],
+    });
+    expect(parsed.poiColors['restaurant'], '#e8710a');
+    expect(parsed.firstSymbol, layers[labels]['id']);
+  });
+
   test('without map data only the background remains', () async {
     final style = decode(await styles.styleFor(const NoMapSource()));
     expect((style['sources']! as Map).keys, isEmpty);
