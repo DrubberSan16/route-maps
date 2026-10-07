@@ -83,9 +83,15 @@ jobs:
           git diff --exit-code -- infrastructure/maps/style mobile/assets/map
       - name: La app usa el mismo estilo que el servidor
         run: cmp infrastructure/maps/style/style.json mobile/assets/map/style.json
-      - name: Visor web y SDK (sintaxis y pruebas)
+      - name: Visor web, panel de administración y SDK (sintaxis y pruebas)
         run: |
-          for file in infrastructure/nginx/html/*.js infrastructure/nginx/html/sdk/*.js; do node --check "$file"; done
+          node --check infrastructure/nginx/html/sw.js
+          # ES modules: "node --check file.js" does not parse a .js file as a module (it passes
+          # with syntax errors), so they are checked through standard input as modules.
+          for file in infrastructure/nginx/html/viewer.js infrastructure/nginx/html/sdk/*.js \
+            $(find infrastructure/nginx/html/admin -name '*.js' | sort); do
+            node --input-type=module --check <"$file" || { echo "::error file=$file::Syntax error"; exit 1; }
+          done
           jq -e '.name and .start_url and (.icons | length >= 3)' infrastructure/nginx/html/manifest.webmanifest
           node --test 'infrastructure/nginx/tests/*.test.mjs'
       - name: La app lleva los mismos glifos que sirve Nginx
@@ -181,13 +187,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Crear .env con secretos aleatorios
-        run: make init
+        run: |
+          make init
+          # The smoke test sends a webhook to Nginx inside the Docker network (http, private address).
+          sed -i -e 's/^WEBHOOKS_ALLOW_INSECURE=.*/WEBHOOKS_ALLOW_INSECURE=true/' \
+            -e 's/^WEBHOOKS_ALLOW_PRIVATE_NETWORKS=.*/WEBHOOKS_ALLOW_PRIVATE_NETWORKS=true/' .env
       - name: Construir y levantar el stack
         run: make up
       - name: Esperar a que todos los servicios estén sanos
         run: docker compose up -d --wait --wait-timeout 600
       - name: Prueba de humo a través de Nginx (sin regiones preparadas)
-        run: ALLOW_NO_REGION=1 ./infrastructure/scripts/smoke-test.sh http://localhost:8080
+        env:
+          ALLOW_NO_REGION: "1"
+          # Administrator of the demo data of the development stack (SEED_DEMO_DATA=true).
+          ADMIN_EMAIL: admin@maps.local
+          ADMIN_PASSWORD: Admin1234!
+          # Delivered by the worker container through the edge network.
+          WEBHOOK_URL: http://nginx/nginx-health
+        run: ./infrastructure/scripts/smoke-test.sh http://localhost:8080
       - name: Estado y logs de los servicios
         if: failure()
         run: |

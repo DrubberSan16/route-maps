@@ -5,6 +5,8 @@
 #
 # Only Nginx publishes a port. PostgreSQL, Redis and the backend live in the
 # private network maps-network (internal: no Internet access or published ports).
+# The worker (same image as the backend) sends the integrations' webhooks: it is
+# the only service that connects to other servers.
 #
 # Audited source snapshots and PMTiles maps live in ./storage
 # (STORAGE_PATH) and is prepared on demand with the data-tools image:
@@ -91,6 +93,12 @@ services:
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
       SEED_DEMO_PASSWORD: ${SEED_DEMO_PASSWORD:-}
+      # Integrations: the API checks webhook URLs with the same rules the worker applies.
+      INTEGRATIONS_SECRET_KEY: ${INTEGRATIONS_SECRET_KEY:?Set INTEGRATIONS_SECRET_KEY in .env (make init adds it)}
+      WEBHOOKS_ALLOW_INSECURE: ${WEBHOOKS_ALLOW_INSECURE:-false}
+      WEBHOOKS_ALLOW_PRIVATE_NETWORKS: ${WEBHOOKS_ALLOW_PRIVATE_NETWORKS:-false}
+      WEBHOOK_TIMEOUT_MS: ${WEBHOOK_TIMEOUT_MS:-10000}
+      EVENTS_RETENTION_DAYS: ${EVENTS_RETENTION_DAYS:-30}
     volumes:
       # Region manifests and files (read-only: the data-tools image writes them).
       - ${STORAGE_PATH:-./storage}/maps:/data/maps:ro
@@ -113,6 +121,49 @@ services:
       start_period: 60s
     stop_grace_period: 20s
     networks: [maps-network]
+    logging: *logging
+
+  # Sends the webhooks of the integrations (with retries) and removes old events. Same image as
+  # the backend, which applies the migrations first. In maps-network (database) and edge: the
+  # only service that reaches other servers; it refuses private addresses unless
+  # WEBHOOKS_ALLOW_PRIVATE_NETWORKS=true. Several replicas can run (each delivery goes to one).
+  worker:
+    image: ${IMAGE_PREFIX:-maps-platform}/backend:${IMAGE_TAG:-latest}
+    # Built by the backend service.
+    pull_policy: never
+    init: true
+    command: ["node", "dist/src/worker.js"]
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: postgresql://${DATABASE_USER:-maps}:${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}@${DATABASE_HOST:-postgres}:${DATABASE_PORT:-5432}/${DATABASE_NAME:-maps}?schema=public
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in .env}
+      INTEGRATIONS_SECRET_KEY: ${INTEGRATIONS_SECRET_KEY:?Set INTEGRATIONS_SECRET_KEY in .env (make init adds it)}
+      WEBHOOKS_ALLOW_INSECURE: ${WEBHOOKS_ALLOW_INSECURE:-false}
+      WEBHOOKS_ALLOW_PRIVATE_NETWORKS: ${WEBHOOKS_ALLOW_PRIVATE_NETWORKS:-false}
+      WEBHOOK_TIMEOUT_MS: ${WEBHOOK_TIMEOUT_MS:-10000}
+      EVENTS_RETENTION_DAYS: ${EVENTS_RETENTION_DAYS:-30}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_PRETTY: ${LOG_PRETTY:-false}
+      RUN_MIGRATIONS: "false"
+      SEED_DEMO_DATA: "false"
+      WORKER_HEARTBEAT_FILE: /tmp/worker.heartbeat
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      # Healthy while its delivery loop runs (it touches the file every few seconds).
+      test:
+        - CMD
+        - node
+        - -e
+        - "const fs = require('fs'); try { process.exit(Date.now() - fs.statSync('/tmp/worker.heartbeat').mtimeMs < 60000 ? 0 : 1) } catch { process.exit(1) }"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 20s
+    networks: [maps-network, edge]
     logging: *logging
 
   postgres:
@@ -180,7 +231,8 @@ services:
     logging: *logging
 
 networks:
-  # Public side: only Nginx publishes ports; data-tools uses it to download extracts.
+  # Public side: only Nginx publishes ports; data-tools uses it to download extracts and the
+  # worker to send webhooks.
   edge: {}
   # Private network of the platform: no Internet access, nothing published.
   maps-network:

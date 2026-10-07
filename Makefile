@@ -2,6 +2,7 @@
 #
 #   make init                            crea .env con secretos aleatorios
 #   make up                              construye y levanta el stack
+#   make admin-create EMAIL=tu@correo    crea un administrador del panel (/admin/)
 #   make prepare-region REGION=guayaquil descarga + mapa + routing + registro
 #   make help                            todos los comandos
 
@@ -14,9 +15,11 @@ TOOLS := $(COMPOSE) --profile tools run --rm data-tools
 BACKEND_RUN := $(COMPOSE) run --rm -e RUN_MIGRATIONS=false -e SEED_DEMO_DATA=false backend
 REGION ?=
 SERVICE ?=
+# Value of a variable given on the command line only (WSL defines NAME in the environment).
+cli_var = $(if $(filter command line,$(origin $(1))),$($(1)))
 PREPARE_FLAGS := $(if $(SKIP_ROUTING),--skip-routing) $(if $(WATER),--water-polygons) $(if $(FORCE),--force-download)
 
-.PHONY: help init up down restart ps logs build config migrate seed regions regions-sync \
+.PHONY: help init up down restart ps logs build config migrate seed admin-create regions regions-sync \
         download-region build-map build-routing prepare-region geocoding-up \
         refresh-region publish-app prod-up prod-down prod-logs test test-backend test-e2e test-tilegen test-mobile lint \
         check-region
@@ -24,12 +27,13 @@ PREPARE_FLAGS := $(if $(SKIP_ROUTING),--skip-routing) $(if $(WATER),--water-poly
 help: ## Muestra esta ayuda
 	@grep -hE '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 	@echo ""
-	@echo "  Variables: REGION=<código> SERVICE=<servicio> SKIP_ROUTING=1 WATER=1 FORCE=1"
+	@echo "  Variables: REGION=<código> SERVICE=<servicio> EMAIL=<correo> NAME=<nombre> RESET=1"
+	@echo "             SKIP_ROUTING=1 WATER=1 FORCE=1"
 
-init: ## Crea .env desde .env.example con secretos aleatorios
+init: ## Crea .env con secretos aleatorios (si existe, le agrega las variables nuevas)
 	@./infrastructure/scripts/init-env.sh
 
-up: ## Construye y levanta nginx, backend, postgres y redis
+up: ## Construye y levanta nginx, backend, worker, postgres y redis
 	$(COMPOSE) up -d --build
 
 down: ## Detiene el stack (conserva volúmenes y ./storage)
@@ -55,6 +59,11 @@ migrate: ## Aplica las migraciones pendientes de Prisma
 
 seed: ## Carga usuarios y datos de demostración (idempotente)
 	$(BACKEND_RUN) node dist/prisma/seed.js
+
+admin-create: ## Crea un administrador del panel o reactiva uno: EMAIL=correo [NAME="Nombre"] [RESET=1]
+	@[[ "$(call cli_var,EMAIL)" == *@* ]] || { echo 'Uso: make admin-create EMAIL=correo [NAME="Nombre"] [RESET=1: contraseña nueva]'; exit 64; }
+	$(COMPOSE) exec -T backend node dist/src/cli/create-admin.js --email '$(call cli_var,EMAIL)' \
+		$(if $(call cli_var,NAME),--name '$(call cli_var,NAME)') $(if $(RESET),--reset-password)
 
 regions: ## Lista las regiones del catálogo y lo ya generado
 	$(TOOLS) list
