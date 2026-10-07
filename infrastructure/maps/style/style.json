@@ -2,7 +2,7 @@
   "version": 8,
   "name": "Maps Platform Light",
   "metadata": {
-    "maps-platform:schema": "1.0.0",
+    "maps-platform:schema": "1.1.0",
     "maps-platform:overlays": {
       "precipitation": [
         "overlay-precipitation"
@@ -12,6 +12,345 @@
       ],
       "population": [
         "overlay-population"
+      ]
+    },
+    "maps-platform:map-types": {
+      "map": {
+        "label": "Mapa"
+      },
+      "satellite": {
+        "label": "Satélite",
+        "asset": "satellite",
+        "source": {
+          "type": "raster",
+          "tileSize": 512,
+          "attribution": "ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021) processed by ESA WorldCover consortium"
+        },
+        "layers": [
+          {
+            "id": "satellite",
+            "type": "raster",
+            "before": "road-path",
+            "paint": {
+              "raster-fade-duration": 100
+            }
+          }
+        ],
+        "hide": [
+          "road-path",
+          "road-tunnel",
+          "road-casing",
+          "road-bridge-casing"
+        ],
+        "paint": {
+          "waterway-label": {
+            "text-color": "#cfe6ff",
+            "text-halo-color": "rgba(0,0,0,0.75)",
+            "text-halo-width": 1.4
+          },
+          "water-name": {
+            "text-color": "#cfe6ff",
+            "text-halo-color": "rgba(0,0,0,0.75)",
+            "text-halo-width": 1.4
+          },
+          "poi": {
+            "text-color": "#ffffff",
+            "text-halo-color": "rgba(0,0,0,0.75)",
+            "text-halo-width": 1.4
+          },
+          "road-label": {
+            "text-color": "#ffffff",
+            "text-halo-color": "rgba(0,0,0,0.75)",
+            "text-halo-width": 1.4
+          },
+          "poi-major": {
+            "text-color": "#ffffff",
+            "text-halo-color": "rgba(0,0,0,0.75)",
+            "text-halo-width": 1.4
+          },
+          "place-locality": {
+            "text-color": "#ffffff",
+            "text-halo-color": "rgba(0,0,0,0.75)",
+            "text-halo-width": 1.4
+          },
+          "place-suburb": {
+            "text-color": "#ffffff",
+            "text-halo-color": "rgba(0,0,0,0.75)",
+            "text-halo-width": 1.4
+          },
+          "place-island": {
+            "text-color": "#ffffff",
+            "text-halo-color": "rgba(0,0,0,0.75)",
+            "text-halo-width": 1.4
+          },
+          "place-village": {
+            "text-color": "#ffffff",
+            "text-halo-color": "rgba(0,0,0,0.75)",
+            "text-halo-width": 1.4
+          },
+          "place-town": {
+            "text-color": "#ffffff",
+            "text-halo-color": "rgba(0,0,0,0.75)",
+            "text-halo-width": 1.4
+          },
+          "place-city": {
+            "text-color": "#ffffff",
+            "text-halo-color": "rgba(0,0,0,0.75)",
+            "text-halo-width": 1.4
+          },
+          "place-state": {
+            "text-color": "#ffffff",
+            "text-halo-color": "rgba(0,0,0,0.75)",
+            "text-halo-width": 1.4
+          },
+          "place-country": {
+            "text-color": "#ffffff",
+            "text-halo-color": "rgba(0,0,0,0.75)",
+            "text-halo-width": 1.4
+          },
+          "road": {
+            "line-opacity": [
+              "interpolate",
+              [
+                "linear"
+              ],
+              [
+                "zoom"
+              ],
+              6,
+              0.6,
+              12,
+              0.45,
+              16,
+              0.6
+            ]
+          },
+          "road-bridge": {
+            "line-opacity": [
+              "interpolate",
+              [
+                "linear"
+              ],
+              [
+                "zoom"
+              ],
+              6,
+              0.6,
+              12,
+              0.45,
+              16,
+              0.6
+            ]
+          },
+          "rail": {
+            "line-opacity": 0.6
+          },
+          "boundary-other": {
+            "line-color": "rgba(255,255,255,0.45)"
+          },
+          "boundary-state": {
+            "line-color": "rgba(255,255,255,0.7)"
+          },
+          "boundary-country": {
+            "line-color": "#ffffff"
+          },
+          "boundary-country-disputed": {
+            "line-color": "#ffffff"
+          }
+        }
+      },
+      "relief": {
+        "label": "Relieve",
+        "asset": "terrain",
+        "source": {
+          "type": "raster-dem",
+          "encoding": "terrarium",
+          "tileSize": 512,
+          "attribution": "Copernicus DEM GLO-30 (c) DLR e.V. 2010-2014 y (c) Airbus Defence and Space GmbH 2014-2018, provisto por COPERNICUS de la Union Europea y la ESA"
+        },
+        "layers": [
+          {
+            "id": "relief-color",
+            "type": "color-relief",
+            "before": "landuse-urban",
+            "paint": {
+              "color-relief-color": [
+                "interpolate",
+                [
+                  "linear"
+                ],
+                [
+                  "elevation"
+                ],
+                -50,
+                "#d5e8cf",
+                0,
+                "#dcebcb",
+                250,
+                "#e3edc8",
+                700,
+                "#eaeec8",
+                1400,
+                "#efeac6",
+                2200,
+                "#efe1c2",
+                3000,
+                "#e6d5bd",
+                3700,
+                "#dccfbf",
+                4300,
+                "#d9d4ce",
+                4900,
+                "#ebe9e6",
+                5300,
+                "#fbfbfb"
+              ],
+              "color-relief-opacity": [
+                "interpolate",
+                [
+                  "linear"
+                ],
+                [
+                  "zoom"
+                ],
+                5,
+                1,
+                12,
+                0.85,
+                15,
+                0.6
+              ]
+            }
+          },
+          {
+            "id": "hillshade",
+            "type": "hillshade",
+            "before": "road-path",
+            "paint": {
+              "hillshade-method": "igor",
+              "hillshade-exaggeration": [
+                "interpolate",
+                [
+                  "linear"
+                ],
+                [
+                  "zoom"
+                ],
+                5,
+                0.6,
+                10,
+                0.55,
+                13,
+                0.35,
+                15,
+                0.15,
+                17,
+                0
+              ],
+              "hillshade-shadow-color": "rgba(62,52,36,0.75)",
+              "hillshade-highlight-color": "rgba(255,255,255,0.3)",
+              "hillshade-illumination-direction": 315
+            }
+          }
+        ],
+        "hide": [
+          "landuse-natural"
+        ],
+        "paint": {}
+      }
+    },
+    "maps-platform:traffic": {
+      "colors": {
+        "free": "#1e8e3e",
+        "moderate": "#f9ab00",
+        "slow": "#e8710a",
+        "jammed": "#b31412"
+      },
+      "network": [
+        "traffic-network"
+      ],
+      "layers": [
+        {
+          "id": "traffic-flow-casing",
+          "type": "line",
+          "layout": {
+            "line-cap": "round",
+            "line-join": "round"
+          },
+          "paint": {
+            "line-color": "#ffffff",
+            "line-opacity": 0.9,
+            "line-width": [
+              "interpolate",
+              [
+                "exponential",
+                1.5
+              ],
+              [
+                "zoom"
+              ],
+              11,
+              4.5,
+              14,
+              6.5,
+              17,
+              11
+            ]
+          }
+        },
+        {
+          "id": "traffic-flow",
+          "type": "line",
+          "layout": {
+            "line-cap": "round",
+            "line-join": "round"
+          },
+          "paint": {
+            "line-color": [
+              "match",
+              [
+                "get",
+                "status"
+              ],
+              "moderate",
+              "#f9ab00",
+              "slow",
+              "#e8710a",
+              "jammed",
+              "#b31412",
+              "#1e8e3e"
+            ],
+            "line-width": [
+              "interpolate",
+              [
+                "exponential",
+                1.5
+              ],
+              [
+                "zoom"
+              ],
+              11,
+              2.5,
+              14,
+              4.5,
+              17,
+              9
+            ],
+            "line-opacity": [
+              "case",
+              [
+                "==",
+                [
+                  "get",
+                  "source"
+                ],
+                "typical"
+              ],
+              0.75,
+              1
+            ]
+          }
+        }
       ]
     },
     "maps-platform:poi-colors": {
@@ -46,10 +385,34 @@
       "military": "#70757a",
       "community": "#70757a",
       "building": "#70757a",
+      "food": "#e8710a",
+      "cafe": "#e8710a",
+      "bar": "#e8710a",
+      "mall": "#1a73e8",
+      "market": "#1a73e8",
+      "supermarket": "#1a73e8",
+      "grocery": "#1a73e8",
+      "health": "#d93025",
+      "emergency": "#d93025",
+      "bus_station": "#1a73e8",
+      "bus_stop": "#1a73e8",
+      "railway_station": "#1a73e8",
+      "transit_station": "#1a73e8",
+      "tram_stop": "#1a73e8",
+      "ferry_terminal": "#1a73e8",
+      "taxi": "#1a73e8",
+      "parking": "#1a73e8",
+      "charging_station": "#1a73e8",
+      "culture": "#12b5cb",
+      "historic": "#12b5cb",
+      "worship": "#70757a",
+      "playground": "#188038",
+      "campsite": "#188038",
       "default": "#70757a"
     },
     "maps-platform:placeholders": {
       "__PMTILES_URL__": "PMTiles archive, e.g. https://host/maps/ecuador/ecuador.pmtiles or file:///...",
+      "__OVERLAYS_URL__": "PMTiles archive of the overlays: the region's overlays asset, or the map archive itself for maps built before the overlays had their own",
       "__GLYPHS_URL__": "Base URL of the glyph folders, e.g. https://host/maps/fonts or file:///.../fonts"
     }
   },
@@ -57,6 +420,11 @@
     "basemap": {
       "type": "vector",
       "url": "pmtiles://__PMTILES_URL__",
+      "attribution": ""
+    },
+    "overlays": {
+      "type": "vector",
+      "url": "pmtiles://__OVERLAYS_URL__",
       "attribution": ""
     }
   },
@@ -2334,6 +2702,255 @@
       }
     },
     {
+      "id": "traffic-network",
+      "type": "line",
+      "source": "basemap",
+      "source-layer": "transportation",
+      "minzoom": 5,
+      "filter": [
+        "all",
+        [
+          "in",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "literal",
+            [
+              "motorway",
+              "trunk",
+              "primary",
+              "secondary",
+              "tertiary"
+            ]
+          ]
+        ],
+        [
+          "!=",
+          [
+            "get",
+            "brunnel"
+          ],
+          "tunnel"
+        ]
+      ],
+      "layout": {
+        "visibility": "none",
+        "line-cap": "round",
+        "line-join": "round",
+        "line-sort-key": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          "track",
+          0,
+          "service",
+          1,
+          "minor",
+          2,
+          "tertiary",
+          3,
+          "secondary",
+          4,
+          "primary",
+          5,
+          "trunk",
+          6,
+          "motorway",
+          7,
+          0
+        ]
+      },
+      "paint": {
+        "line-color": "#1e8e3e",
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.4
+          ],
+          [
+            "zoom"
+          ],
+          5,
+          [
+            "match",
+            [
+              "get",
+              "class"
+            ],
+            "motorway",
+            1.0,
+            "trunk",
+            0.9,
+            "primary",
+            0.0,
+            "secondary",
+            0.0,
+            "tertiary",
+            0.0,
+            0
+          ],
+          7,
+          [
+            "match",
+            [
+              "get",
+              "class"
+            ],
+            "motorway",
+            1.4,
+            "trunk",
+            1.3,
+            "primary",
+            0.8,
+            "secondary",
+            0.0,
+            "tertiary",
+            0.0,
+            0
+          ],
+          8,
+          [
+            "match",
+            [
+              "get",
+              "class"
+            ],
+            "motorway",
+            1.6,
+            "trunk",
+            1.5,
+            "primary",
+            1.07,
+            "secondary",
+            0.0,
+            "tertiary",
+            0.0,
+            0
+          ],
+          10,
+          [
+            "match",
+            [
+              "get",
+              "class"
+            ],
+            "motorway",
+            2.2,
+            "trunk",
+            2.0,
+            "primary",
+            1.6,
+            "secondary",
+            1.0,
+            "tertiary",
+            0.0,
+            0
+          ],
+          12,
+          [
+            "match",
+            [
+              "get",
+              "class"
+            ],
+            "motorway",
+            3.0,
+            "trunk",
+            2.8,
+            "primary",
+            2.4,
+            "secondary",
+            1.8,
+            "tertiary",
+            0.0,
+            0
+          ],
+          13,
+          [
+            "match",
+            [
+              "get",
+              "class"
+            ],
+            "motorway",
+            3.6,
+            "trunk",
+            3.4,
+            "primary",
+            3.0,
+            "secondary",
+            2.4,
+            "tertiary",
+            1.0,
+            0
+          ],
+          14,
+          [
+            "match",
+            [
+              "get",
+              "class"
+            ],
+            "motorway",
+            4.2,
+            "trunk",
+            4.0,
+            "primary",
+            3.6,
+            "secondary",
+            3.0,
+            "tertiary",
+            2.0,
+            0
+          ],
+          16,
+          [
+            "match",
+            [
+              "get",
+              "class"
+            ],
+            "motorway",
+            6.5,
+            "trunk",
+            6.0,
+            "primary",
+            5.5,
+            "secondary",
+            4.8,
+            "tertiary",
+            3.6,
+            0
+          ],
+          18,
+          [
+            "match",
+            [
+              "get",
+              "class"
+            ],
+            "motorway",
+            12.0,
+            "trunk",
+            11.0,
+            "primary",
+            10.0,
+            "secondary",
+            9.0,
+            "tertiary",
+            7.0,
+            0
+          ]
+        ],
+        "line-opacity": 0.85
+      }
+    },
+    {
       "id": "boundary-other",
       "type": "line",
       "source": "basemap",
@@ -2531,7 +3148,7 @@
     {
       "id": "overlay-precipitation",
       "type": "fill",
-      "source": "basemap",
+      "source": "overlays",
       "source-layer": "climate",
       "filter": [
         "==",
@@ -2580,7 +3197,7 @@
     {
       "id": "overlay-temperature",
       "type": "fill",
-      "source": "basemap",
+      "source": "overlays",
       "source-layer": "climate",
       "filter": [
         "==",
@@ -2620,7 +3237,7 @@
     {
       "id": "overlay-population",
       "type": "heatmap",
-      "source": "basemap",
+      "source": "overlays",
       "source-layer": "population",
       "maxzoom": 15,
       "layout": {
@@ -3076,6 +3693,52 @@
           "#70757a",
           "building",
           "#70757a",
+          "food",
+          "#c5530a",
+          "cafe",
+          "#c5530a",
+          "bar",
+          "#c5530a",
+          "mall",
+          "#1a73e8",
+          "market",
+          "#1a73e8",
+          "supermarket",
+          "#1a73e8",
+          "grocery",
+          "#1a73e8",
+          "health",
+          "#d93025",
+          "emergency",
+          "#d93025",
+          "bus_station",
+          "#1a73e8",
+          "bus_stop",
+          "#1a73e8",
+          "railway_station",
+          "#1a73e8",
+          "transit_station",
+          "#1a73e8",
+          "tram_stop",
+          "#1a73e8",
+          "ferry_terminal",
+          "#1a73e8",
+          "taxi",
+          "#1a73e8",
+          "parking",
+          "#1a73e8",
+          "charging_station",
+          "#1a73e8",
+          "culture",
+          "#0e8a9b",
+          "historic",
+          "#0e8a9b",
+          "worship",
+          "#70757a",
+          "playground",
+          "#137333",
+          "campsite",
+          "#137333",
           "#70757a"
         ],
         "text-halo-color": "#ffffff",
@@ -3501,6 +4164,52 @@
           "#70757a",
           "building",
           "#70757a",
+          "food",
+          "#c5530a",
+          "cafe",
+          "#c5530a",
+          "bar",
+          "#c5530a",
+          "mall",
+          "#1a73e8",
+          "market",
+          "#1a73e8",
+          "supermarket",
+          "#1a73e8",
+          "grocery",
+          "#1a73e8",
+          "health",
+          "#d93025",
+          "emergency",
+          "#d93025",
+          "bus_station",
+          "#1a73e8",
+          "bus_stop",
+          "#1a73e8",
+          "railway_station",
+          "#1a73e8",
+          "transit_station",
+          "#1a73e8",
+          "tram_stop",
+          "#1a73e8",
+          "ferry_terminal",
+          "#1a73e8",
+          "taxi",
+          "#1a73e8",
+          "parking",
+          "#1a73e8",
+          "charging_station",
+          "#1a73e8",
+          "culture",
+          "#0e8a9b",
+          "historic",
+          "#0e8a9b",
+          "worship",
+          "#70757a",
+          "playground",
+          "#137333",
+          "campsite",
+          "#137333",
           "#70757a"
         ],
         "text-halo-color": "#ffffff",

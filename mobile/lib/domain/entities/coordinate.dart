@@ -87,6 +87,12 @@ class BoundingBox {
       point.latitude >= south &&
       point.latitude <= north;
 
+  bool containsBox(BoundingBox other) =>
+      west <= other.west && south <= other.south && east >= other.east && north >= other.north;
+
+  bool intersects(BoundingBox other) =>
+      west <= other.east && other.west <= east && south <= other.north && other.south <= north;
+
   /// Area in square degrees; only used to compare boxes with each other.
   double get area => (east - west) * (north - south);
 

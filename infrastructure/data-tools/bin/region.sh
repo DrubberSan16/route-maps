@@ -9,14 +9,16 @@
 #   build <region>               road graph, search index and map layers from the sources
 #   aliases <region>             apply neighbourhood groups and popular names (no geometry rebuild)
 #   map <region>                 build the visual map (PMTiles) with tilegen
+#   rasters <region>             relief and satellite layers (raster PMTiles, see raster-data)
 #   routing <region>             legacy Valhalla graph (OSM regions only)
 #   manifest <region>            write the manifest read by the backend
-#   prepare <region>             download (if missing) + build + map + manifest
+#   prepare <region>             download (if missing) + build + map + rasters + manifest
 #   source-version <region>      print the upstream data fingerprint
 #
 # Options
 #   --force-download             download again even if the extract exists
 #   --skip-routing               prepare: only the visual map
+#   --skip-rasters               prepare: without the relief and satellite layers
 #   --water-polygons             draw oceans with the OSMCoastline water polygons
 #                                (~1 GB download, kept in storage/imports)
 #
@@ -31,7 +33,11 @@
 #   /data/imports/native/<region>/graph.bin  road graph read by the backend (routing, reverse geocoding)
 #   /data/imports/native/<region>/search.ndjson  search index read by the backend
 #   /data/imports/naturalearth/*.zip         Natural Earth shapefiles (world input)
+#   /data/imports/raster/                    elevation tiles and satellite composites (raster layers)
 #   /data/maps/<dir>/<region>.pmtiles        visual map, vector tiles
+#   /data/maps/<dir>/<region>.overlays.pmtiles   population and climate (hidden until shown)
+#   /data/maps/<dir>/<region>.terrain.pmtiles    relief: elevation tiles (Terrarium, WebP)
+#   /data/maps/<dir>/<region>.satellite.pmtiles  satellite view: colour tiles (WebP)
 #   /data/maps/<dir>/<region>.region.json    manifest registered by the backend
 #   /data/maps/world/world.places.json       countries and cities (world only)
 #   /data/routing/<region>/                  Valhalla graph + <region>.valhalla.tar package
@@ -44,6 +50,8 @@ CATALOG="${REGIONS_CATALOG:-/etc/maps-platform/regions.json}"
 IMPORTS_DIR="${IMPORTS_DIR:-/data/imports}"
 MAPS_DIR="${MAPS_DIR:-/data/maps}"
 ROUTING_DIR="${ROUTING_DIR:-/data/routing}"
+# Extra archives a region may have next to its map, listed in the manifest as its assets.
+ASSET_KINDS=(terrain satellite overlays)
 TILEGEN_HOME="${TILEGEN_HOME:-/opt/tilegen}"
 TILEGEN_MEMORY="${TILEGEN_MEMORY:-2g}"
 TILEGEN_TMPDIR="${TILEGEN_TMPDIR:-/tmp}"
@@ -69,7 +77,7 @@ WORLD_MAX_ZOOM=7
 USER_AGENT="${DOWNLOAD_USER_AGENT:-maps-platform-data-tools/1.0}"
 CODE_PATTERN='^[a-z0-9][a-z0-9-]{1,62}$'
 
-export IMPORTS_DIR ROUTING_DIR
+export IMPORTS_DIR ROUTING_DIR MAPS_DIR
 
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
 die() {
@@ -294,14 +302,53 @@ ensure_water_polygons() {
 
 # ------------------------------------------------------------------ build steps
 
+# Runs tilegen with the given arguments, writing to $1. Planetiler's scratch files live on the
+# container filesystem: random I/O on bind mounts from Windows/macOS hosts is very slow.
+run_tilegen() {
+  local output=$1 workdir status=0
+  shift
+  mkdir -p "$TILEGEN_TMPDIR"
+  workdir=$(mktemp -d "$TILEGEN_TMPDIR/tilegen-XXXXXX")
+  # shellcheck disable=SC2086 # TILEGEN_ARGS holds several options
+  java -Xmx"$TILEGEN_MEMORY" -jar "$TILEGEN_HOME/tilegen.jar" "$@" --output="$output" --tmpdir="$workdir" \
+    ${TILEGEN_ARGS:-} || status=$?
+  rm -rf "$workdir"
+  return "$status"
+}
+
+# Population and climate of a native map, in <region>.overlays.pmtiles: the clients show them only
+# on demand, so they are read only then instead of weighing on every map tile. Up to zoom 12, the
+# last level with overlay features (the clients enlarge it further in).
+build_overlays() {
+  local code=$1 dir=$2 data=$3 out tmp
+  shift 3
+  out="$dir/$code.overlays.pmtiles"
+  tmp="$dir/.$code.overlays.building.pmtiles"
+  if [[ ! -s "$data/map-population.geojson" && ! -s "$data/climate-precipitation-regions.geojson" &&
+        ! -s "$data/climate-temperature-regions.geojson" ]]; then
+    rm -f "$out"
+    log "No population or climate layers for $code: no overlays archive"
+    return 0
+  fi
+  log "Building overlay tiles for $code"
+  if ! run_tilegen "$tmp" --native_data="$data" --native_layers=overlays --maxzoom=12 "$@"; then
+    rm -f "$tmp"
+    die "overlay tile generation failed for $code"
+  fi
+  mv -f "$tmp" "$out"
+  chmod 644 "$out"
+  match_owner "$out" "$MAPS_DIR"
+  log "Overlays ready: $out ($(du -h "$out" | cut -f1))"
+}
+
 cmd_map() {
   local code=$1 water=$2
-  local region pbf dir out tmp workdir places=""
+  local region pbf dir out tmp places="" native_data=""
   region=$(region_json "$code")
   dir="$MAPS_DIR/$(map_dir "$region")"
   out="$dir/$code.pmtiles"
   tmp="$dir/.$code.building.pmtiles"
-  local args=(--name="$(field "$region" name)")
+  local args=(--name="$(field "$region" name)") shared=()
   if is_natural_earth "$region"; then
     [[ -s "$IMPORTS_DIR/naturalearth/ne_10m_ocean.zip" ]] || die "Natural Earth not found: run 'download $code' first"
     places="$dir/$code.places.json"
@@ -309,11 +356,13 @@ cmd_map() {
   elif is_native "$region"; then
     local native_region bbox
     native_region=$(jq -r '.source.nativeRegion' <<<"$region")
-    [[ -s "$IMPORTS_DIR/native/$native_region/build.json" ]] ||
-      die "native map layers not found: run 'build $code' first"
-    args+=(--native_data="$IMPORTS_DIR/native/$native_region")
+    native_data="$IMPORTS_DIR/native/$native_region"
+    [[ -s "$native_data/build.json" ]] || die "native map layers not found: run 'build $code' first"
+    # The overlays (population, climate) get their own archive, built below.
+    args+=(--native_data="$native_data" --native_layers=map)
     bbox=$(jq -r '.bbox // empty | join(",")' <<<"$region")
-    [[ -n "$bbox" ]] && args+=(--bounds="$bbox")
+    shared=(--name="$(field "$region" name)")
+    [[ -n "$bbox" ]] && shared+=(--bounds="$bbox") && args+=(--bounds="$bbox")
   else
     pbf="$IMPORTS_DIR/$code.osm.pbf"
     [[ -s "$pbf" ]] || die "$pbf not found: run 'download $code' first"
@@ -323,17 +372,11 @@ cmd_map() {
     fi
   fi
   mkdir -p "$dir"
-  # Planetiler's scratch files live on the container filesystem: random I/O on
-  # bind mounts from Windows/macOS hosts is very slow.
-  mkdir -p "$TILEGEN_TMPDIR"
-  workdir=$(mktemp -d "$TILEGEN_TMPDIR/tilegen-$code-XXXXXX")
-  args+=(--output="$tmp" --tmpdir="$workdir")
   log "Building map tiles for $code"
-  if ! java -Xmx"$TILEGEN_MEMORY" -jar "$TILEGEN_HOME/tilegen.jar" "${args[@]}" ${TILEGEN_ARGS:-}; then
-    rm -rf "$workdir" "$tmp" ${places:+"$places.tmp"}
+  if ! run_tilegen "$tmp" "${args[@]}"; then
+    rm -f "$tmp" ${places:+"$places.tmp"}
     die "tile generation failed for $code"
   fi
-  rm -rf "$workdir"
   mv -f "$tmp" "$out"
   chmod 644 "$out"
   match_owner "$out" "$MAPS_DIR"
@@ -343,8 +386,9 @@ cmd_map() {
     match_owner "$places" "$MAPS_DIR"
     log "Place index ready: $places ($(jq '.places | length' "$places") places)"
   fi
-  match_owner "$dir" "$MAPS_DIR"
   log "Map ready: $out ($(du -h "$out" | cut -f1))"
+  [[ -n "$native_data" ]] && build_overlays "$code" "$dir" "$native_data" "${shared[@]}"
+  match_owner "$dir" "$MAPS_DIR"
 }
 
 cmd_build() {
@@ -383,17 +427,57 @@ cmd_routing() {
   match_owner "$ROUTING_DIR/$code" "$ROUTING_DIR"
 }
 
-# Reads zoom range and bounds from the PMTiles v3 header.
+has_rasters() { [[ $(jq -r '.rasters // {} | length' <<<"$1") -gt 0 ]]; }
+
+cmd_rasters() {
+  local code=$1 force=$2 region
+  region=$(region_json "$code")
+  if ! has_rasters "$region"; then
+    log "$code has no relief or satellite layers (rasters in regions.json)"
+    return 0
+  fi
+  local args=(download "$code")
+  [[ "$force" == true ]] && args+=(--force)
+  raster-data "${args[@]}"
+  match_owner "$IMPORTS_DIR/raster" "$IMPORTS_DIR"
+  raster-data build "$code"
+  local kind file
+  for kind in "${ASSET_KINDS[@]}"; do
+    file="$MAPS_DIR/$(map_dir "$region")/$code.$kind.pmtiles"
+    [[ -s "$file" ]] && match_owner "$file" "$MAPS_DIR"
+  done
+  return 0
+}
+
+# Reads zoom range, bounds and tile format from the PMTiles v3 header.
 pmtiles_header() {
   local file=$1
   [[ "$(head -c 7 "$file")" == "PMTiles" ]] || die "$file is not a PMTiles archive"
-  local zooms bounds
+  local zooms bounds type
+  type=$(od -An -tu1 -j99 -N1 "$file" | xargs)
   zooms=$(od -An -tu1 -j100 -N2 "$file" | xargs)
   bounds=$(od -An -td4 -j102 -N16 --endian=little "$file" | xargs)
-  jq -cn --arg zooms "$zooms" --arg bounds "$bounds" \
+  jq -cn --arg zooms "$zooms" --arg bounds "$bounds" --argjson type "$type" \
     '($zooms | split(" ") | map(tonumber)) as $z
      | ($bounds | split(" ") | map(tonumber / 10000000)) as $b
-     | {minZoom: $z[0], maxZoom: $z[1], bbox: $b}'
+     | {minZoom: $z[0], maxZoom: $z[1], bbox: $b,
+        format: ({"1": "pbf", "2": "png", "3": "jpg", "4": "webp", "5": "avif"}[$type | tostring] // "unknown")}'
+}
+
+# Extra archives of a region (relief, satellite, overlays) as a JSON array for its manifest.
+region_assets() {
+  local code=$1 dir=$2 kind rel file header sha assets='[]'
+  for kind in "${ASSET_KINDS[@]}"; do
+    rel="$dir/$code.$kind.pmtiles"
+    file="$MAPS_DIR/$rel"
+    [[ -s "$file" ]] || continue
+    header=$(pmtiles_header "$file")
+    sha=$(sha256sum "$file" | cut -d' ' -f1)
+    assets=$(jq -c --arg kind "$kind" --arg file "$rel" --arg sha "$sha" --argjson header "$header" \
+      '. + [{kind: $kind, file: $file, checksum: $sha, minZoom: $header.minZoom, maxZoom: $header.maxZoom,
+             format: $header.format}]' <<<"$assets")
+  done
+  echo "$assets"
 }
 
 cmd_manifest() {
@@ -431,8 +515,9 @@ cmd_manifest() {
   fi
 
   log "Computing checksums for $code"
-  local map_sha routing_sha=""
+  local map_sha routing_sha="" assets
   map_sha=$(sha256sum "$map_file" | cut -d' ' -f1)
+  assets=$(region_assets "$code" "$dir")
   if [[ -n "$routing_file" && -s "$routing_file" ]]; then
     routing_sha=$(sha256sum "$routing_file" | cut -d' ' -f1)
   else
@@ -446,6 +531,7 @@ cmd_manifest() {
     --arg version "$version" --arg mapFile "$map_rel" --arg mapChecksum "$map_sha" \
     --arg routingFile "$routing_rel" --arg routingChecksum "$routing_sha" \
     --arg dataTimestamp "$data_time" --arg generatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --argjson assets "$assets" \
     '{
       code: $region.code, name: $region.name, country: $region.country,
       province: $region.province, city: $region.city,
@@ -454,6 +540,7 @@ cmd_manifest() {
       mapFile: $mapFile, mapChecksum: $mapChecksum,
       routingFile: (if $routingFile == "" then null else $routingFile end),
       routingChecksum: (if $routingChecksum == "" then null else $routingChecksum end),
+      assets: $assets,
       source: (if $region.source.nativeRegion then "native-catalog:" + $region.source.nativeRegion
                else ($region.source.url // (if $region.source.parent then "legacy:" + $region.source.parent
                else "public-domain-world" end)) end),
@@ -468,7 +555,7 @@ cmd_manifest() {
 }
 
 cmd_prepare() {
-  local code=$1 force=$2 skip_routing=$3 water=$4
+  local code=$1 force=$2 skip_routing=$3 water=$4 skip_rasters=$5
   local started=$SECONDS region
   region=$(region_json "$code")
   cmd_download "$code" "$force"
@@ -482,6 +569,9 @@ cmd_prepare() {
     fi
   fi
   cmd_map "$code" "$water"
+  if [[ "$skip_rasters" != true ]]; then
+    cmd_rasters "$code" "$force"
+  fi
   if [[ "$skip_routing" != true ]] && ! is_natural_earth "$region" && ! is_native "$region"; then
     cmd_routing "$code"
   fi
@@ -491,17 +581,21 @@ cmd_prepare() {
 }
 
 cmd_list() {
-  printf '%-12s %-24s %-8s %-8s %-8s %s\n' CODE NAME EXTRACT MAP ROUTING SOURCE
+  printf '%-12s %-24s %-8s %-8s %-8s %-18s %s\n' CODE NAME EXTRACT MAP ROUTING ASSETS SOURCE
   jq -r '.regions[] | [.code, .name, (.mapDir // .code),
       (if .source.nativeRegion then "native:" + .source.nativeRegion else
        (.source.url // (if .source.parent then "legacy:" + .source.parent else "public-domain-world" end)) end)] | @tsv' "$CATALOG" |
     while IFS=$'\t' read -r code name dir source; do
-      local extract=no map=no routing=no
+      local extract=no map=no routing=no assets="" kind
       [[ -s "$IMPORTS_DIR/$code.osm.pbf" ]] && extract=yes
       [[ "$source" == "Natural Earth" && -s "$IMPORTS_DIR/naturalearth/ne_10m_ocean.zip" ]] && extract=yes
       [[ -s "$MAPS_DIR/$dir/$code.pmtiles" ]] && map=yes
       [[ -s "$ROUTING_DIR/$code/valhalla.json" ]] && routing=yes
-      printf '%-12s %-24s %-8s %-8s %-8s %s\n' "$code" "$name" "$extract" "$map" "$routing" "$source"
+      for kind in "${ASSET_KINDS[@]}"; do
+        [[ -s "$MAPS_DIR/$dir/$code.$kind.pmtiles" ]] && assets+="${assets:+,}$kind"
+      done
+      printf '%-12s %-24s %-8s %-8s %-8s %-18s %s\n' "$code" "$name" "$extract" "$map" "$routing" \
+        "${assets:--}" "$source"
     done
   echo
   echo "Only regions backed by the audited source catalog are accepted."
@@ -513,11 +607,12 @@ main() {
   [[ $# -ge 1 ]] || usage 64
   local command=$1
   shift
-  local code="" force=false skip_routing=false water=false
+  local code="" force=false skip_routing=false water=false skip_rasters=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
     --force-download) force=true ;;
     --skip-routing) skip_routing=true ;;
+    --skip-rasters) skip_rasters=true ;;
     --water-polygons) water=true ;;
     -h | --help) usage 0 ;;
     -*) die "unknown option $1" ;;
@@ -535,9 +630,10 @@ main() {
   build) cmd_build "${code:?region required}" ;;
   aliases) cmd_aliases "${code:?region required}" ;;
   map) cmd_map "${code:?region required}" "$water" ;;
+  rasters) cmd_rasters "${code:?region required}" "$force" ;;
   routing) cmd_routing "${code:?region required}" ;;
   manifest) cmd_manifest "${code:?region required}" ;;
-  prepare) cmd_prepare "${code:?region required}" "$force" "$skip_routing" "$water" ;;
+  prepare) cmd_prepare "${code:?region required}" "$force" "$skip_routing" "$water" "$skip_rasters" ;;
   help | -h | --help) usage 0 ;;
   *) die "unknown command '$command' (see: help)" ;;
   esac

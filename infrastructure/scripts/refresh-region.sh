@@ -84,6 +84,7 @@ NATIVE_REGION="$(jq -r --arg code "$REGION" \
 NATIVE_DIR="$STORAGE_PATH/imports/native/$NATIVE_REGION"
 MANIFEST="$(find "$STORAGE_PATH/maps" -type f -name "$REGION.region.json" -print -quit)"
 MAP_REL=""
+MAP_FILES=()
 RUNTIME_NATIVE_FILES=(graph.bin search.ndjson build.json manifest.json climate-precipitation-regions.geojson)
 mkdir -p "$BACKUP_DIR/native"
 for file in "${RUNTIME_NATIVE_FILES[@]}"; do
@@ -98,8 +99,14 @@ if [[ -n "$MANIFEST" ]]; then
     echo "Ruta de mapa insegura en $MANIFEST" >&2
     exit 1
   }
+  # The map and its overlays archive (population, climate): "map" rebuilds both.
+  MAP_FILES=("$MAP_REL" "${MAP_REL%.pmtiles}.overlays.pmtiles")
   mkdir -p "$BACKUP_DIR/maps/$(dirname "$MAP_REL")"
-  cp -a "$STORAGE_PATH/maps/$MAP_REL" "$BACKUP_DIR/maps/$MAP_REL"
+  for file in "${MAP_FILES[@]}"; do
+    if [[ -f "$STORAGE_PATH/maps/$file" ]]; then
+      cp -a "$STORAGE_PATH/maps/$file" "$BACKUP_DIR/maps/$file"
+    fi
+  done
   cp -a "$MANIFEST" "$BACKUP_DIR/maps/$(dirname "$MAP_REL")/$REGION.region.json"
 fi
 restore() {
@@ -107,8 +114,12 @@ restore() {
   trap - EXIT INT TERM
   echo "La actualización falló; restaurando los artefactos anteriores de $REGION." >&2
   if [[ -n "$MAP_REL" && -f "$BACKUP_DIR/maps/$MAP_REL" ]]; then
-    rm -f -- "$STORAGE_PATH/maps/$MAP_REL"
-    cp -a "$BACKUP_DIR/maps/$MAP_REL" "$STORAGE_PATH/maps/$MAP_REL"
+    for file in "${MAP_FILES[@]}"; do
+      rm -f -- "$STORAGE_PATH/maps/$file"
+      if [[ -f "$BACKUP_DIR/maps/$file" ]]; then
+        cp -a "$BACKUP_DIR/maps/$file" "$STORAGE_PATH/maps/$file"
+      fi
+    done
     cp -a "$BACKUP_DIR/maps/$(dirname "$MAP_REL")/$REGION.region.json" "$MANIFEST"
   fi
   mkdir -p "$NATIVE_DIR"

@@ -1,6 +1,47 @@
 {
   "schemaVersion": 1,
   "description": "Registro auditable de fuentes no-OSM. Cada capa se descarga, valida y sirve desde la plataforma; las URL remotas solo se usan durante la ingesta.",
+  "rasters": {
+    "terrain": {
+      "id": "copernicus-dem-glo30",
+      "title": "Copernicus DEM GLO-30: modelo digital de superficie de 1 segundo de arco (~30 m)",
+      "role": "terrain",
+      "kind": "copernicus-dem",
+      "url": "https://copernicus-dem-30m.s3.amazonaws.com",
+      "tileList": "https://copernicus-dem-30m.s3.amazonaws.com/tileList.txt",
+      "code": "10",
+      "updateCadence": "source-defined",
+      "method": "measured",
+      "organization": "Agencia Espacial Europea (ESA), programa Copernicus de la Union Europea",
+      "license": {
+        "id": "Copernicus-DEM-GLO-30-public",
+        "attributionRequired": true,
+        "commercialUse": "allowed",
+        "citation": "Copernicus DEM GLO-30 (c) DLR e.V. 2010-2014 y (c) Airbus Defence and Space GmbH 2014-2018, provisto por COPERNICUS de la Union Europea y la ESA",
+        "termsUrl": "https://dataspace.copernicus.eu/explore-data/data-collections/copernicus-contributing-missions/collections-description/COP-DEM"
+      },
+      "note": "Superficie (incluye edificios y vegetacion). El mar no tiene teselas y se toma como altura 0."
+    },
+    "satellite": {
+      "id": "esa-worldcover-s2-rgbnir",
+      "title": "Compuestos anuales Sentinel-2 L2A de ESA WorldCover (mediana sin nubes, 10 m)",
+      "role": "imagery",
+      "kind": "esa-worldcover-s2",
+      "url": "https://esa-worldcover-s2.s3.eu-central-1.amazonaws.com",
+      "years": [[2021, "v200"], [2020, "v100"]],
+      "updateCadence": "static",
+      "method": "measured",
+      "organization": "Agencia Espacial Europea (ESA), consorcio ESA WorldCover",
+      "license": {
+        "id": "CC-BY-4.0",
+        "attributionRequired": true,
+        "commercialUse": "allowed",
+        "citation": "ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021) processed by ESA WorldCover consortium",
+        "termsUrl": "https://creativecommons.org/licenses/by/4.0/"
+      },
+      "note": "Se usa el compuesto 2021; sus vacios se completan con el de 2020."
+    }
+  },
   "regions": [
     {
       "code": "ecuador",

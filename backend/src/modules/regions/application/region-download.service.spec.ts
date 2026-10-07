@@ -15,6 +15,8 @@ import { RegionDownloadService } from './region-download.service';
 
 const MAP_BYTES = randomBytes(64 * 1024);
 const MAP_SHA256 = createHash('sha256').update(MAP_BYTES).digest('hex');
+const SATELLITE_BYTES = randomBytes(8 * 1024);
+const SATELLITE_SHA256 = createHash('sha256').update(SATELLITE_BYTES).digest('hex');
 
 const REGION: MapRegion = {
   id: '6a4c3f7e-8a51-4a57-9d0e-2f0a8c6f1b11',
@@ -34,6 +36,26 @@ const REGION: MapRegion = {
   routingFile: null,
   routingFileSize: null,
   routingChecksum: null,
+  assets: [
+    {
+      kind: 'satellite',
+      file: 'ecuador/guayaquil.satellite.pmtiles',
+      size: SATELLITE_BYTES.length,
+      checksum: SATELLITE_SHA256,
+      minZoom: 0,
+      maxZoom: 14,
+      format: 'webp',
+    },
+    {
+      kind: 'terrain',
+      file: 'ecuador/guayaquil.terrain.pmtiles',
+      size: 10,
+      checksum: 'f'.repeat(64),
+      minZoom: 0,
+      maxZoom: 12,
+      format: 'webp',
+    },
+  ],
   enabled: true,
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -47,6 +69,12 @@ class DownloadController {
   async download(@Param('kind') kind: StorageKind, @Req() req: Request, @Res() res: Response) {
     await this.downloads.send(REGION, kind, req, res);
   }
+
+  @Get('assets/:kind')
+  async asset(@Param('kind') kind: string, @Req() req: Request, @Res() res: Response) {
+    const asset = REGION.assets.find((item) => item.kind === kind)!;
+    await this.downloads.sendAsset(REGION, asset, req, res);
+  }
 }
 
 describe('RegionDownloadService', () => {
@@ -58,6 +86,7 @@ describe('RegionDownloadService', () => {
     root = await mkdtemp(join(tmpdir(), 'maps-download-'));
     await mkdir(join(root, 'maps', 'ecuador'), { recursive: true });
     await writeFile(join(root, 'maps', REGION.fileName), MAP_BYTES);
+    await writeFile(join(root, 'maps', REGION.assets[0].file), SATELLITE_BYTES);
 
     const maps = () => ({
       storagePath: join(root, 'maps'),
@@ -175,6 +204,34 @@ describe('RegionDownloadService', () => {
     expect(response.headers['x-accel-redirect']).toBe('/_protected/maps/ecuador/guayaquil.pmtiles');
     expect(response.headers['x-checksum-sha256']).toBe(MAP_SHA256);
     expect((response.body as Buffer).length).toBe(0);
+  });
+
+  it('serves an asset archive (satellite imagery) with its own checksum', async () => {
+    const response = await get('/regions/assets/satellite').set('Range', 'bytes=0-15').expect(206);
+
+    expect(Buffer.compare(response.body as Buffer, SATELLITE_BYTES.subarray(0, 16))).toBe(0);
+    expect(response.headers).toMatchObject({
+      'content-type': 'application/vnd.pmtiles',
+      'content-disposition': 'attachment; filename="guayaquil.satellite.pmtiles"',
+      etag: `"${SATELLITE_SHA256}"`,
+      'x-checksum-sha256': SATELLITE_SHA256,
+    });
+  });
+
+  it('delegates asset transfers to Nginx too', async () => {
+    accelRedirect = true;
+    const response = await get('/regions/assets/satellite').expect(200);
+    expect(response.headers['x-accel-redirect']).toBe(
+      '/_protected/maps/ecuador/guayaquil.satellite.pmtiles',
+    );
+  });
+
+  it('answers 404 when an asset file is missing on the server', async () => {
+    const response = await request(app.getHttpServer()).get('/regions/assets/terrain').expect(404);
+    expect(response.body).toMatchObject({
+      success: false,
+      error: { code: 'MAP_REGION_FILE_NOT_AVAILABLE' },
+    });
   });
 
   it('answers 404 when the region has no routing package', async () => {

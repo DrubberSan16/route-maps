@@ -31,9 +31,28 @@ usa CDN. Exporta:
 | `calculateRoute(input, options?)` | ruta principal, alternativas, geometría e indicaciones |
 | `offlineMapUrl(regionId, options?)` | URL de descarga PMTiles reanudable |
 
-El objeto devuelto por `createMap` incluye `setOverlay(kind, visible)` para mostrar u ocultar las capas
-`precipitation` (lluvia anual), `temperature` (pisos térmicos) y `population` (mapa de calor de población).
-Los iconos de los puntos de interés se dibujan en el navegador (`/sdk/map-icons.js`).
+Opciones de `createMap` además de `container`: `baseUrl`, `region` (por defecto `ecuador`), `center`,
+`zoom`, `minZoom`, `maxZoom`, `navigationControl`, `mapType` (`map`, `satellite` o `relief`), `traffic`
+(`true` para empezar con el tráfico visible) y `onTrafficStatus(text)` (qué muestra el tráfico en la zona).
+
+El objeto devuelto por `createMap` incluye:
+
+| Miembro | Uso |
+| --- | --- |
+| `map` | el mapa MapLibre, para añadir capas o eventos propios |
+| `mapTypes` | `[{ id, label, available }]`: tipos de mapa y si la región tiene sus datos |
+| `setMapType(type)` / `getMapType()` | cambia o lee el tipo; devuelve `false` y deja el mapa normal si la región no publica la imagen o la altura |
+| `setTraffic(visible)` | vías principales en verde sin demoras reportadas y, encima, los tramos medidos |
+| `setOverlay(kind, visible)` | capas `precipitation` (lluvia anual), `temperature` (pisos térmicos) y `population` (mapa de calor) |
+
+```js
+const platform = await createMap({ container: 'map', region: 'guayaquil', mapType: 'satellite' });
+platform.setTraffic(true);
+platform.setMapType('relief');
+```
+
+Los iconos de los puntos de interés se dibujan en el navegador (`/sdk/map-icons.js`). La vista satélite y
+el relieve llevan su cita en el control de atribución del mapa.
 
 `baseUrl` es opcional y permite apuntar a otra instalación. Las coordenadas de
 la API usan `{ latitude, longitude }`; GeoJSON mantiene el orden estándar
@@ -64,9 +83,10 @@ registrada que se deben dibujar como aproximados).
 - `GET /api/v1/geocoding/search?q=…&lat=…&lng=…`: lugares, calles, intersecciones
   ("Av. 9 de Octubre y Boyacá") y puntos de interés de todo el país.
 - `GET /api/v1/geocoding/reverse?lat=…&lng=…`: calle, lugar y división administrativa.
-- `GET /api/v1/traffic/flow?bbox=…` y `GET /api/v1/traffic/activity?bbox=…`: tráfico de
-  los últimos 15 minutos por tramo y mapa de calor de actividad (GeoJSON, ver
-  `docs/routing.md`).
+- `GET /api/v1/traffic/flow?bbox=…` y `GET /api/v1/traffic/activity?bbox=…`: tráfico por
+  tramo (en vivo de los últimos 15 minutos o, donde no hay, lo habitual para ese día y hora;
+  `properties.source`: `live` o `typical`) y mapa de calor de actividad (GeoJSON, ver
+  `docs/routing.md` y `docs/maps.md`).
 
 ## Mapas offline
 
@@ -78,6 +98,10 @@ registrada que se deben dibujar como aproximados).
 
 La aplicación móvil incluida implementa ese flujo con archivo `.part`, control
 de espacio, reanudación, SHA-256 y reemplazo atómico.
+
+Cada región puede publicar además `assets` (relieve `terrain`, satélite
+`satellite` y capas `overlays`), cada uno con `tilesUrl` para leerlo en línea,
+`downloadUrl` reanudable, `checksum`, `size`, `format` y zooms.
 
 ## CORS, capacidad y procedencia
 

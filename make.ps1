@@ -6,6 +6,7 @@
   .\make.ps1 up
   .\make.ps1 prepare-region -Region guayaquil
   .\make.ps1 logs -Service backend
+  .\make.ps1 publish-app -Server ovh-serverSoft
   .\make.ps1 help
 #>
 [CmdletBinding()]
@@ -14,6 +15,9 @@ param(
   [string]$Command = 'help',
   [string]$Region = '',
   [string]$Service = '',
+  [string]$Apk = '',
+  [string]$Server = '',
+  [string]$RemoteDir = '',
   [switch]$SkipRouting,
   [switch]$WaterPolygons,
   [switch]$ForceDownload
@@ -27,6 +31,18 @@ function Invoke-Docker {
   $filtered = @($args | Where-Object { $null -ne $_ -and "$_" -ne '' })
   & docker @filtered
   if ($LASTEXITCODE -ne 0) { throw "docker $($filtered -join ' ') failed (exit code $LASTEXITCODE)." }
+}
+
+# Python 3 for the helper scripts: the py launcher of python.org first (on a Windows without Python,
+# "python" only opens the Microsoft Store).
+function Get-Python {
+  foreach ($candidate in @(@('py', '-3'), @('python'), @('python3'))) {
+    if (-not (Get-Command $candidate[0] -ErrorAction SilentlyContinue)) { continue }
+    $rest = @($candidate | Select-Object -Skip 1)
+    & $candidate[0] @rest --version *> $null
+    if ($LASTEXITCODE -eq 0) { return , $candidate }
+  }
+  throw 'Falta Python 3: instálalo desde python.org (o con winget install Python.Python.3.13).'
 }
 
 function Assert-Region {
@@ -57,6 +73,7 @@ $commands = [ordered]@{
   'build-map'       = 'Genera el mapa PMTiles de una región descargada (-WaterPolygons: océanos)'
   'build-routing'   = 'Construye grafo de rutas, índice de búsqueda y capas nativas'
   'prepare-region'  = 'Descarga + mapa + manifiesto + registro: -Region ecuador'
+  'publish-app'     = 'Publica el APK para el botón «Instalar app»: [-Apk ruta] [-Server servidor-ssh] [-RemoteDir /opt/route-maps]'
   'geocoding-up'    = 'Informa sobre la geocodificación nativa integrada'
   'prod-up'         = 'Producción: construye y levanta con docker-compose.prod.yml'
   'prod-down'       = 'Producción: detiene el stack'
@@ -101,6 +118,16 @@ switch ($Command) {
     Assert-Region
     $scriptArgs = @{ Region = $Region; SkipRouting = $SkipRouting; WaterPolygons = $WaterPolygons; ForceDownload = $ForceDownload }
     & (Join-Path $PSScriptRoot 'infrastructure\scripts\download-region.ps1') @scriptArgs
+  }
+  'publish-app' {
+    $python = Get-Python
+    $apkPath = if ($Apk) { $Apk } else { Join-Path $PSScriptRoot 'mobile\build\app\outputs\flutter-apk\app-release.apk' }
+    $publishArgs = @($python | Select-Object -Skip 1) +
+      @((Join-Path $PSScriptRoot 'infrastructure\scripts\publish-app.py'), $apkPath)
+    if ($Server) { $publishArgs += @('--host', $Server) }
+    if ($RemoteDir) { $publishArgs += @('--remote-dir', $RemoteDir) }
+    & $python[0] @publishArgs
+    if ($LASTEXITCODE -ne 0) { throw 'No se pudo publicar la app.' }
   }
   'geocoding-up' { 'La geocodificación nativa forma parte del backend y no requiere un servicio externo.' }
   'prod-up' { Invoke-Docker @prod up -d --build }

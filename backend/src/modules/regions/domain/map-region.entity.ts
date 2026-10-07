@@ -1,5 +1,26 @@
 import { BoundingBox } from '../../../common/geo/geojson';
 
+/** Archives a region may have next to its vector map. */
+export const REGION_ASSET_KINDS = ['terrain', 'satellite', 'overlays'] as const;
+export type RegionAssetKind = (typeof REGION_ASSET_KINDS)[number];
+
+/**
+ * An extra PMTiles archive of the region: relief (elevation tiles), satellite imagery or the
+ * hidden-by-default overlays (population, climate), read on demand like the map itself.
+ */
+export interface RegionAsset {
+  kind: RegionAssetKind;
+  /** Relative to the map storage root. */
+  file: string;
+  size: number;
+  /** SHA-256 (hex). */
+  checksum: string;
+  minZoom: number;
+  maxZoom: number;
+  /** Tile format: webp, png, jpg or pbf. */
+  format: string;
+}
+
 export interface MapRegion {
   id: string;
   code: string;
@@ -18,6 +39,7 @@ export interface MapRegion {
   routingFile: string | null;
   routingFileSize: number | null;
   routingChecksum: string | null;
+  assets: RegionAsset[];
   enabled: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -39,6 +61,7 @@ export interface UpsertMapRegion {
   routingFile?: string | null;
   routingFileSize?: number | null;
   routingChecksum?: string | null;
+  assets?: RegionAsset[];
   enabled: boolean;
 }
 

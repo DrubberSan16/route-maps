@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 /**
  * Command line entry point.
@@ -17,7 +18,11 @@ import java.nio.file.Path;
  *   --native_data=/data/imports/native/ecuador \
  *   --output=/data/maps/ecuador/guayaquil.pmtiles \
  *   --name="Guayaquil" \
- *   [--water_polygons=/data/imports/water-polygons-split-3857.zip]
+ *   [--native_layers=map]
+ *
+ * java -jar tilegen-with-deps.jar \
+ *   --native_data=/data/imports/native/ecuador --native_layers=overlays --maxzoom=12 \
+ *   --output=/data/maps/ecuador/guayaquil.overlays.pmtiles --name="Guayaquil"
  *
  * java -jar tilegen-with-deps.jar \
  *   --natural_earth=/data/imports/naturalearth \
@@ -25,13 +30,21 @@ import java.nio.file.Path;
  *   --output=/data/maps/world/world.pmtiles --maxzoom=7 --name="Mundo"
  * </pre>
  * <p>
- * The second form builds the world base map from the Natural Earth shapefiles ({@code <name>.zip}, see
+ * {@code --native_layers} splits a native map in two archives: {@code map} leaves out the optional overlays
+ * (population, climate) and {@code overlays} builds only them (see {@link NativeData#OVERLAY_SOURCES});
+ * {@code all}, the default, keeps everything in one archive.
+ * <p>
+ * The third form builds the world base map from the Natural Earth shapefiles ({@code <name>.zip}, see
  * {@link NaturalEarth#SOURCES}) and writes its countries and cities for the place search.
  * <p>
  * Any other Planetiler option can be passed too (for example {@code --tmpdir}, {@code --threads} or {@code --bounds}).
  * Nothing is downloaded: inputs are prepared by the region scripts.
  */
 public final class TileGenerator {
+
+  static final String ALL_LAYERS = "all";
+  static final String MAP_LAYERS = "map";
+  static final String OVERLAY_LAYERS = "overlays";
 
   private TileGenerator() {}
 
@@ -51,6 +64,8 @@ public final class TileGenerator {
     Path waterPolygons = arguments.file("water_polygons",
       "optional OSMCoastline water polygons (water-polygons-split-3857.zip) to draw oceans", null);
     String name = arguments.getString("name", "human readable tileset name", "");
+    String nativeLayers = arguments.getString("native_layers",
+      "native layers to build: all, map (without the overlays) or overlays (population and climate only)", "all");
 
     if (!output.getFileName().toString().endsWith(".pmtiles")) {
       throw new IllegalArgumentException("--output must end with .pmtiles: " + output);
@@ -60,6 +75,12 @@ public final class TileGenerator {
     }
     if (gazetteer != null && naturalEarth == null) {
       throw new IllegalArgumentException("--gazetteer needs --natural_earth");
+    }
+    if (!List.of(ALL_LAYERS, MAP_LAYERS, OVERLAY_LAYERS).contains(nativeLayers)) {
+      throw new IllegalArgumentException("--native_layers must be all, map or overlays: " + nativeLayers);
+    }
+    if (!ALL_LAYERS.equals(nativeLayers) && (nativeData == null || osm != null || naturalEarth != null)) {
+      throw new IllegalArgumentException("--native_layers only applies to --native_data alone");
     }
 
     MapsPlatformProfile profile = new MapsPlatformProfile(name, naturalEarth != null && osm == null && nativeData == null,
@@ -87,6 +108,10 @@ public final class TileGenerator {
       }
       int sources = 0;
       for (String source : NativeData.SOURCES) {
+        boolean overlay = NativeData.OVERLAY_SOURCES.contains(source);
+        if (overlay ? MAP_LAYERS.equals(nativeLayers) : OVERLAY_LAYERS.equals(nativeLayers)) {
+          continue;
+        }
         Path geojson = nativeData.resolve(source.substring(NativeData.PREFIX.length()) + ".geojson");
         if (Files.isRegularFile(geojson)) {
           planetiler.addGeoJsonSource(source, geojson);
@@ -94,7 +119,9 @@ public final class TileGenerator {
         }
       }
       if (sources == 0) {
-        throw new IllegalArgumentException("--native_data has no cataloged GeoJSON files: " + nativeData);
+        throw new IllegalArgumentException(OVERLAY_LAYERS.equals(nativeLayers) ?
+          "--native_data has no overlay layers (population, climate): " + nativeData :
+          "--native_data has no cataloged GeoJSON files: " + nativeData);
       }
     }
     if (waterPolygons != null) {

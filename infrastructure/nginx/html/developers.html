@@ -33,7 +33,8 @@
     <p class="lead">El mapa, las búsquedas, las rutas y las descargas offline salen de esta misma instalación. El navegador de la aplicación cliente no necesita claves de servicios externos ni una CDN.</p>
 
     <div class="cards">
-      <div class="card"><strong>Mapas vectoriales</strong>Regiones publicadas en PMTiles, con estilo y tipografías servidos localmente.</div>
+      <div class="card"><strong>Mapa, satélite y relieve</strong>Regiones publicadas en PMTiles, con estilo, tipografías, imagen y alturas servidos localmente.</div>
+      <div class="card"><strong>Tráfico</strong>Vías principales y tramos medidos por recorridos propios, en vivo o con lo habitual a esa hora.</div>
       <div class="card"><strong>Rutas</strong>Tres perfiles vehiculares, paradas intermedias, condiciones e indicaciones en español.</div>
       <div class="card"><strong>Modo offline</strong>Descargas reanudables, versión y SHA-256 para verificar cada archivo.</div>
     </div>
@@ -52,6 +53,21 @@
     region: 'ecuador'
   });
 &lt;/script&gt;</code></pre>
+
+    <h2>Satélite, relieve y tráfico</h2>
+    <pre><code>const platform = await createMap({
+  container: 'map',
+  region: 'guayaquil',
+  mapType: 'satellite',          // 'map', 'satellite' o 'relief'
+  traffic: true,
+  onTrafficStatus: (text) =&gt; console.log(text)
+});
+
+platform.mapTypes;               // [{ id, label, available }]
+platform.setMapType('relief');   // false si la región no publica sus alturas
+platform.getMapType();
+platform.setTraffic(false);
+platform.setOverlay('population', true); // 'precipitation', 'temperature'</code></pre>
 
     <h2>Calcular una ruta</h2>
     <pre><code>import { calculateRoute } from

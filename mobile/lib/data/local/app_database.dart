@@ -41,7 +41,7 @@ class AppDatabase extends _$AppDatabase {
   );
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -53,6 +53,10 @@ class AppDatabase extends _$AppDatabase {
         await migrator.addColumn(offlineRoutes, offlineRoutes.accountId);
         await migrator.addColumn(trips, trips.accountId);
         await migrator.addColumn(syncQueue, syncQueue.accountId);
+      }
+      if (from < 3) {
+        // Filled by the next catalog refresh.
+        await migrator.addColumn(catalogRegions, catalogRegions.assets);
       }
     },
     beforeOpen: (details) async {

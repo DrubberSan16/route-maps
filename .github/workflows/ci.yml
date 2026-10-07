@@ -74,10 +74,28 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: El estilo publicado es el que genera build-style.py
+        run: |
+          python3 infrastructure/maps/style/build-style.py
+          git diff --exit-code -- infrastructure/maps/style mobile/assets/map
       - name: La app usa el mismo estilo que el servidor
         run: cmp infrastructure/maps/style/style.json mobile/assets/map/style.json
+      - name: Visor web y SDK (sintaxis y pruebas)
+        run: |
+          for file in infrastructure/nginx/html/*.js infrastructure/nginx/html/sdk/*.js; do node --check "$file"; done
+          jq -e '.name and .start_url and (.icons | length >= 3)' infrastructure/nginx/html/manifest.webmanifest
+          node --test 'infrastructure/nginx/tests/*.test.mjs'
       - name: La app lleva los mismos glifos que sirve Nginx
         run: diff -r --exclude=README.md infrastructure/maps/fonts mobile/assets/fonts
+      - name: La app usa el logo y las miniaturas de tipo de mapa del visor
+        run: |
+          cmp infrastructure/nginx/html/icons/icon-192.png mobile/assets/images/logo.png
+          for type in map satellite relief; do
+            cmp "infrastructure/nginx/html/icons/map-type-$type.webp" "mobile/assets/images/map-type-$type.webp"
+          done
       - name: Catálogo de regiones válido
         run: jq -e '.regions | length > 0 and all(.code | test("^[a-z0-9][a-z0-9-]{1,62}$"))' infrastructure/regions/regions.json
       - name: Docker Compose válido (desarrollo y producción)
@@ -120,6 +138,15 @@ jobs:
         run: >-
           flutter build apk --release
           --dart-define=API_BASE_URL=${{ vars.API_BASE_URL || 'https://route-map.softwareeasydev.com' }}
+      - name: El APK se publica para el botón «Instalar app» (versión leída del propio APK)
+        run: |
+          python3 ../infrastructure/scripts/publish-app.py build/app/outputs/flutter-apk/app-release.apk \
+            --storage "$RUNNER_TEMP/storage"
+          version="$(sed -n 's/^version: *\([^+]*\)+\(.*\)$/\1 \2/p' pubspec.yaml)"
+          jq -e --arg version "${version% *}" --argjson build "${version#* }" \
+            '.package == "com.mapsplatform.maps_platform" and .version == $version and .build == $build
+             and .minSdk >= 21 and (.url | startswith("/descargas/route-maps-"))' "$RUNNER_TEMP/storage/app/android.json"
+          cmp build/app/outputs/flutter-apk/app-release.apk "$RUNNER_TEMP/storage/app/route-maps.apk"
       - name: Publicar el APK como artefacto
         uses: actions/upload-artifact@v7
         with:

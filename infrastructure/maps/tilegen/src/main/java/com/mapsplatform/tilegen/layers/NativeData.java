@@ -36,6 +36,13 @@ public final class NativeData {
   public static final List<String> SOURCES = List.of(ROADS, PLACES, POIS, LANDUSE, URBAN, BLOCKS, BUILDINGS,
     POPULATION, PROVINCES, CANTONS, PARISHES, WATER_AREAS, WATERWAYS, CLIMATE_PRECIPITATION, CLIMATE_TEMPERATURE);
 
+  /**
+   * Sources of the optional overlays (population heat map, climate zones). The clients start with them hidden, so
+   * they are built into an archive of their own ({@code <region>.overlays.pmtiles}): the map tiles stay light and the
+   * overlays are only downloaded when someone turns them on.
+   */
+  public static final List<String> OVERLAY_SOURCES = List.of(POPULATION, CLIMATE_PRECIPITATION, CLIMATE_TEMPERATURE);
+
   /** Layer of the census population grid (drawn as a heat map by the clients). */
   public static final String POPULATION_LAYER = "population";
   /** Layer of the climate zones (optional overlay of the clients). */

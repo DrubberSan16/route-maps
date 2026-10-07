@@ -8,6 +8,17 @@ export interface StoredFileInfo {
   modifiedAt: Date;
 }
 
+/** An extra archive of the region (relief, satellite, overlays) listed in its manifest. */
+export interface RegionManifestAsset {
+  kind: string;
+  /** Relative to the map storage root. */
+  file: string;
+  checksum?: string;
+  minZoom?: number;
+  maxZoom?: number;
+  format?: string;
+}
+
 /** Region description written by the data pipeline next to each PMTiles file. */
 export interface RegionManifest {
   code: string;
@@ -27,6 +38,8 @@ export interface RegionManifest {
   /** Optional SHA-256 values computed by the pipeline. */
   mapChecksum?: string;
   routingChecksum?: string;
+  /** Relief, satellite and overlay archives of the region. */
+  assets?: RegionManifestAsset[];
 }
 
 /**

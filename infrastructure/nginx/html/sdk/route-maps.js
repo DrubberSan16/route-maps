@@ -7,11 +7,13 @@
  */
 import * as maplibregl from '../vendor/maplibre-gl.mjs';
 import { registerPoiIcons } from './map-icons.js';
+import {
+  buildStyle, currentMapType, mapTypes, parseTemplate, pmtilesLoader, setMapType, setOverlay, TrafficLayer,
+  WORLD_REGION,
+} from './map-style.js';
 
 const SDK_URL = new URL(import.meta.url);
 const DEFAULT_BASE_URL = SDK_URL.origin;
-const WORLD_REGION = 'world';
-const WORLD_MAX_VISIBLE_ZOOM = 8;
 let protocolReady;
 
 export class RouteMapsError extends Error {
@@ -65,8 +67,7 @@ async function ensureRuntime(origin) {
   if (!protocolReady) {
     protocolReady = (async () => {
       if (!window.pmtiles) await loadScript(`${origin}/vendor/pmtiles.js`);
-      const protocol = new window.pmtiles.Protocol();
-      maplibregl.addProtocol('pmtiles', protocol.tile);
+      maplibregl.addProtocol('pmtiles', pmtilesLoader(window.pmtiles));
     })();
   }
   await protocolReady;
@@ -90,10 +91,6 @@ async function request(origin, path, options = {}) {
   return body.data;
 }
 
-const area = ([minLng, minLat, maxLng, maxLat]) =>
-  (maxLng - minLng) * (maxLat - minLat);
-const containsBox = (outer, inner) =>
-  outer[0] <= inner[0] && outer[1] <= inner[1] && outer[2] >= inner[2] && outer[3] >= inner[3];
 const bounds = ([minLng, minLat, maxLng, maxLat]) => [
   [minLng, minLat],
   [maxLng, maxLat],
@@ -101,36 +98,10 @@ const bounds = ([minLng, minLat, maxLng, maxLat]) => [
 
 function selectTilesets(regions, selectedRegion) {
   const world = regions.find((region) => region.id === WORLD_REGION);
-  if (!selectedRegion || selectedRegion === WORLD_REGION) return world ? [{ region: world, world: true }] : [];
+  if (!selectedRegion || selectedRegion === WORLD_REGION) return world ? [{ region: world, isWorld: true }] : [];
   const selected = regions.find((region) => region.id === selectedRegion);
   if (!selected) throw new RouteMapsError('MAP_REGION_NOT_FOUND', `No existe la región ${selectedRegion}`);
-  return [...(world ? [{ region: world, world: true }] : []), { region: selected, world: false }];
-}
-
-function buildStyle(templateText, origin, sets) {
-  const template = JSON.parse(templateText.replaceAll('__GLYPHS_URL__', `${origin}/maps/fonts`));
-  const baseSource = Object.values(template.sources)[0];
-  const style = { ...template, sources: {}, layers: [] };
-  for (const set of sets) {
-    style.sources[set.region.id] = {
-      ...baseSource,
-      url: `pmtiles://${origin}${set.region.tilesUrl}`,
-      attribution: set.world ? '' : baseSource.attribution,
-    };
-  }
-  for (const layer of template.layers) {
-    if (!layer.source) {
-      style.layers.push(layer);
-      continue;
-    }
-    for (const set of sets) {
-      if (set.world && (layer.minzoom ?? 0) >= WORLD_MAX_VISIBLE_ZOOM) continue;
-      const copy = { ...layer, id: `${set.region.id}/${layer.id}`, source: set.region.id };
-      if (set.world) copy.maxzoom = Math.min(layer.maxzoom ?? 24, WORLD_MAX_VISIBLE_ZOOM);
-      style.layers.push(copy);
-    }
-  }
-  return style;
+  return [...(world ? [{ region: world, isWorld: true }] : []), { region: selected, isWorld: false }];
 }
 
 /** Returns the currently published map regions. */
@@ -168,7 +139,8 @@ export function offlineMapUrl(regionId, options = {}) {
  *
  * Required: { container } (element or element id).
  * Optional: baseUrl, region (default: ecuador), center [lng, lat], zoom,
- * minZoom, maxZoom and navigationControl.
+ * minZoom, maxZoom, navigationControl, mapType ('map', 'satellite' or
+ * 'relief') and traffic (true to start with traffic shown).
  */
 export async function createMap(options) {
   if (!options?.container) throw new TypeError('createMap requires a container');
@@ -184,33 +156,64 @@ export async function createMap(options) {
   const selected = options.region ?? 'ecuador';
   const sets = selectTilesets(regions, selected);
   if (sets.length === 0) throw new RouteMapsError('NO_MAPS_AVAILABLE', 'No hay mapas publicados');
-  const detailed = [...sets].reverse().find((set) => !set.world)?.region;
+  const detailed = [...sets].reverse().find((set) => !set.isWorld)?.region;
   const home = detailed?.bbox ?? sets[0].region.bbox;
+  const template = parseTemplate(templateText, origin);
+  const drawnRegions = sets.map((set) => set.region);
   const map = new maplibregl.Map({
     container: options.container,
-    style: buildStyle(templateText, origin, sets),
+    style: buildStyle(template, origin, sets),
     ...(options.center ? { center: options.center, zoom: options.zoom ?? 11 } : { bounds: bounds(home) }),
     minZoom: options.minZoom,
     maxZoom: options.maxZoom,
-    attributionControl: false,
+    // Satellite imagery and elevation carry the citation their licences ask for.
+    attributionControl: { compact: true },
     dragRotate: false,
     pitchWithRotate: false,
   });
   map.touchZoomRotate.disableRotation();
-  registerPoiIcons(map, JSON.parse(templateText).metadata?.['maps-platform:poi-colors'] ?? {});
+  registerPoiIcons(map, template.metadata?.['maps-platform:poi-colors'] ?? {});
   if (options.navigationControl !== false) {
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
   }
-  const setOverlay = (kind, visible) => {
-    for (const layer of map.getStyle().layers) {
-      if (layer.id.endsWith(`/overlay-${kind}`)) map.setLayoutProperty(layer.id, 'visibility', visible ? 'visible' : 'none');
-    }
-  };
+  const traffic = new TrafficLayer(map, template, {
+    fetchFlow: (bbox) => request(origin, `/traffic/flow?bbox=${bbox}`),
+    onStatus: options.onTrafficStatus,
+  });
+  // Changes asked for before the style loads are applied once it has.
+  const pending = { mapType: options.mapType ?? 'map', traffic: Boolean(options.traffic), overlays: new Map() };
+  map.once('load', () => {
+    traffic.install();
+    setMapType(map, template, drawnRegions, origin, pending.mapType);
+    if (pending.traffic) traffic.setVisible(true);
+    for (const [kind, visible] of pending.overlays) setOverlay(map, template, kind, visible);
+  });
   return {
     map,
     regions,
+    /** Map types of this installation: [{ id, label, available }]. */
+    mapTypes: mapTypes(template, drawnRegions),
+    /**
+     * Shows 'map', 'satellite' or 'relief'. Returns false (and keeps the plain map) when the
+     * region has no imagery or elevation published.
+     */
+    setMapType: (type) => {
+      pending.mapType = type;
+      if (!map.isStyleLoaded()) return mapTypes(template, drawnRegions).some((item) => item.id === type && item.available);
+      return setMapType(map, template, drawnRegions, origin, type);
+    },
+    /** The map type shown. */
+    getMapType: () => currentMapType(map),
+    /** Shows or hides traffic: main roads in green without reported delays, measured segments on top. */
+    setTraffic: (visible) => {
+      pending.traffic = Boolean(visible);
+      if (map.isStyleLoaded()) traffic.setVisible(Boolean(visible));
+    },
     /** Shows or hides a map overlay: 'precipitation', 'temperature' or 'population'. */
-    setOverlay,
+    setOverlay: (kind, visible) => {
+      pending.overlays.set(kind, visible);
+      if (map.isStyleLoaded()) setOverlay(map, template, kind, visible);
+    },
     calculateRoute: (input) => calculateRoute(input, { baseUrl: origin }),
     searchPlaces: (query, searchOptions = {}) =>
       searchPlaces(query, { ...searchOptions, baseUrl: origin }),

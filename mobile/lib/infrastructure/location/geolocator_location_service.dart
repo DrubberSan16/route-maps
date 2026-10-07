@@ -132,7 +132,7 @@ class GeolocatorLocationService implements LocationService {
         foregroundNotificationConfig: _background
             ? const geo.ForegroundNotificationConfig(
                 notificationTitle: 'Grabando recorrido',
-                notificationText: 'Maps Platform registra tu ubicación para el recorrido.',
+                notificationText: 'Route Maps registra tu ubicación para el recorrido.',
                 notificationChannelName: 'Recorridos',
                 enableWakeLock: true,
                 setOngoing: true,

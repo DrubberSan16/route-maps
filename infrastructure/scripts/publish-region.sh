@@ -6,8 +6,8 @@
 #
 # Converting the national INEC packages needs about 6 GB of RAM and 15 GB of free disk; a small
 # server only needs the results. This script copies them (the maps of every catalog region built
-# from the same native catalog, their manifests, the road graph, the search index and the climate
-# layer) to a staging folder on the server, verifies every SHA-256 there, swaps them in (data
+# from the same native catalog with their relief, satellite and overlay archives, their manifests,
+# the road graph, the search index and the climate layer) to a staging folder on the server, verifies every SHA-256 there, swaps them in (data
 # first, manifests last), restarts the backend so it loads the new graph and index, and registers
 # the manifests. The replaced files are kept in storage/.publish-backup until the next publication.
 #
@@ -35,8 +35,9 @@ done
 STORAGE="${STORAGE_PATH:-$ROOT/storage}"
 CATALOG="$ROOT/infrastructure/regions/regions.json"
 
-# "<native catalog>" on the first line, then "<code> <map dir> <manifest checksum>" for every
-# region built from that catalog.
+# "<native catalog>" on the first line, then "map <code> <map dir> <map checksum>" for every region
+# built from that catalog, each followed by "asset <code> <file> <checksum>" for the extra archives
+# (relief, satellite, overlays) its manifest lists. Checksums come from the manifests.
 PLAN="$("$PYTHON" - "$CATALOG" "$REGION" "$STORAGE" <<'PY'
 import json, sys
 from pathlib import Path
@@ -53,8 +54,10 @@ for item in catalog["regions"]:
         continue
     directory = item.get("mapDir") or item["code"]
     manifest = storage / "maps" / directory / f"{item['code']}.region.json"
-    checksum = json.loads(manifest.read_text(encoding="utf-8")).get("mapChecksum", "") if manifest.exists() else "-"
-    print(item["code"], directory, checksum)
+    data = json.loads(manifest.read_text(encoding="utf-8")) if manifest.exists() else {}
+    print("map", item["code"], directory, data.get("mapChecksum") or "-")
+    for asset in data.get("assets") or []:
+        print("asset", item["code"], asset["file"], asset["checksum"])
 PY
 )"
 PLAN="$(tr -d '\r' <<<"$PLAN")"  # Python on Windows ends its lines with CRLF
@@ -62,17 +65,33 @@ NATIVE="$(head -n 1 <<<"$PLAN")"
 NATIVE_DIR="$STORAGE/imports/native/$NATIVE"
 RUNTIME_FILES=(graph.bin graph.json search.ndjson build.json manifest.json climate-precipitation-regions.geojson)
 
-FILES=()
-while read -r code dir expected; do
-  map="maps/$dir/$code.pmtiles"
-  manifest="maps/$dir/$code.region.json"
-  [[ -s "$STORAGE/$map" && "$expected" != "-" ]] || continue
-  actual="$(sha256sum "$STORAGE/$map" | cut -d' ' -f1)"
-  [[ "$expected" == "$actual" ]] || {
-    echo "$map no coincide con su manifiesto: ejecute 'region.sh manifest $code'." >&2
+# Fails unless a file of storage/ has the checksum its region's manifest recorded.
+verify() {
+  local file=$1 expected=$2 code=$3
+  [[ -s "$STORAGE/$file" && "$(sha256sum "$STORAGE/$file" | cut -d' ' -f1)" == "$expected" ]] || {
+    echo "$file no coincide con su manifiesto: ejecute 'region.sh manifest $code'." >&2
     exit 1
   }
-  FILES+=("$map" "$manifest")
+}
+
+FILES=()
+READY=" "
+while read -r kind code path expected; do
+  case "$kind" in
+    map)
+      map="maps/$path/$code.pmtiles"
+      [[ -s "$STORAGE/$map" && "$expected" != "-" ]] || continue
+      verify "$map" "$expected" "$code"
+      FILES+=("$map" "maps/$path/$code.region.json")
+      READY+="$code "
+      ;;
+    asset)
+      # Relief, satellite and overlays of a region that is published (its map line came first).
+      [[ "$READY" == *" $code "* ]] || continue
+      verify "maps/$path" "$expected" "$code"
+      FILES+=("maps/$path")
+      ;;
+  esac
 done < <(tail -n +2 <<<"$PLAN")
 [[ ${#FILES[@]} -gt 0 ]] || {
   echo "No hay mapas preparados para $NATIVE." >&2
