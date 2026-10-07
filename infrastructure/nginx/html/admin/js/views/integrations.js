@@ -515,7 +515,7 @@ async function editWebhook(ctx, integration, base, webhook) {
         ? [ALL_EVENTS]
         : types.map((item) => item.querySelector('input')).filter((box) => box.checked).map((box) => box.value);
       if (events.length === 0) throw new Error('Elige al menos un tipo de evento.');
-      const body = { url: url.value.trim(), description: description.value.trim() || undefined, events };
+      const body = { url: url.value.trim(), description: description.value.trim() || null, events };
       return webhook ? ctx.api.patch(`${base}/webhooks/${webhook.id}`, body) : ctx.api.post(`${base}/webhooks`, body);
     },
   });

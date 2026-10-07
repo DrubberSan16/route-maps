@@ -15,8 +15,15 @@ import {
   toEventView,
 } from '../domain/platform-event';
 
-/** The Prisma client or the transaction of the change an event describes. */
+/** The transaction of the change an event describes. */
 export type EventsSqlClient = Pick<Prisma.TransactionClient, '$executeRaw'>;
+
+/**
+ * Advisory lock every transaction that adds events holds from the insert until it ends, so that
+ * events become visible in the order of their `seq`. Without it a change that took a lower `seq`
+ * but was saved later would be skipped by a `GET /events` reader already past it.
+ */
+const EVENT_ORDER_LOCK = 0x524d4556; // "RMEV"
 
 export interface EventFeed {
   items: PlatformEventView[];
@@ -61,11 +68,14 @@ export class PlatformEventsService {
    * Stores the event and, in the same statement, queues one delivery for every active webhook
    * subscribed to it: those of the account's integrations and of the integrations that receive
    * every account's events, or of every integration for platform events. Pass the transaction of
-   * the change it describes so that both are kept or neither.
+   * the change it describes so that both are kept or neither; without one the event gets its own.
+   * Emit at the end of that transaction: the events of other changes wait until it ends.
    */
-  async emit(event: PlatformEventInput, client: EventsSqlClient = this.prisma): Promise<string> {
+  async emit(event: PlatformEventInput, tx?: EventsSqlClient): Promise<string> {
+    if (!tx) return this.prisma.$transaction((own) => this.emit(event, own));
     const id = randomUUID();
-    await client.$executeRaw`
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${EVENT_ORDER_LOCK}::bigint)`;
+    await tx.$executeRaw`
       WITH event AS (
         INSERT INTO platform_events (id, type, account_id, data)
         VALUES (${id}::uuid, ${event.type}, ${event.accountId}::uuid,

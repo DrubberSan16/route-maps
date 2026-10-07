@@ -10,12 +10,19 @@ import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/bootstrap';
 import { AppConfigService } from '../src/config/app-config.service';
 import { PrismaService } from '../src/infrastructure/prisma/prisma.service';
+import { AuditService } from '../src/modules/audit/application/audit.service';
+import { PlatformEventsService } from '../src/modules/events/application/platform-events.service';
 import { ApiKeyAuthenticatorService } from '../src/modules/integrations/application/api-key-authenticator.service';
 import { verifySignature } from '../src/modules/integrations/domain/webhook-signature';
+import { Housekeeping } from '../src/modules/integrations/infrastructure/housekeeping';
 import { SecretBox } from '../src/modules/integrations/infrastructure/secret-box';
 import { WebhookDispatcher } from '../src/modules/integrations/infrastructure/webhook-dispatcher';
 import { WebhookSender } from '../src/modules/integrations/infrastructure/webhook-sender';
 import { MapRegionService } from '../src/modules/regions/application/map-region.service';
+import {
+  MAP_REGION_REPOSITORY,
+  type MapRegionRepository,
+} from '../src/modules/regions/domain/map-region.entity';
 import { ROUTING_PROVIDER } from '../src/modules/routing/domain/interfaces/routing-provider';
 import { ROUTING_PROFILES } from '../src/modules/routing/domain/value-objects/routing-profile';
 
@@ -254,6 +261,24 @@ describe('Administration and integrations (e2e)', () => {
         .expect(409)
         .expect(({ body }) => expect(body.error.code).toBe('EMAIL_ALREADY_REGISTERED'));
       await as('admin').post('/admin/users').send({ email: 'bad', name: 'x' }).expect(400);
+    });
+
+    it('keeps no account whose audit entry could not be written', async () => {
+      const record = jest
+        .spyOn(app.get(AuditService), 'record')
+        .mockRejectedValueOnce(new Error('The audit log is not available'));
+      try {
+        const account = { email: email('unaudited'), name: 'E2E unaudited' };
+        await as('admin').post('/admin/users').send(account).expect(500);
+        expect(await prisma.user.findUnique({ where: { email: account.email } })).toBeNull();
+
+        // Asked again, it is created and its temporary password shown.
+        const res = await as('admin').post('/admin/users').send(account).expect(201);
+        expect(res.body.data.temporaryPassword).toMatch(TEMPORARY_PASSWORD);
+      } finally {
+        record.mockRestore();
+        await prisma.user.deleteMany({ where: { email: email('unaudited') } });
+      }
     });
 
     it('finds accounts and shows their detail', async () => {
@@ -860,6 +885,12 @@ describe('Administration and integrations (e2e)', () => {
       expect(secret).toMatch(/^whsec_/);
       const stored = await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: webhook.id } });
       expect(stored.secret).not.toContain(secret);
+      // An emptied description is removed.
+      const cleared = await as('admin')
+        .patch(`/admin/integrations/${integration.id}/webhooks/${webhook.id}`)
+        .send({ description: null })
+        .expect(200);
+      expect(cleared.body.data).toMatchObject({ description: null, url: receiverUrl });
 
       key = (
         await as('admin')
@@ -1029,6 +1060,19 @@ describe('Administration and integrations (e2e)', () => {
       const healed = (await as('admin').get(`/admin/integrations/${integration.id}`).expect(200))
         .body.data;
       expect(healed.webhooks[0].consecutiveFailures).toBe(0);
+
+      // A delivery the worker is sending is not queued again meanwhile.
+      await prisma.webhookDelivery.update({
+        where: { id: pending.id },
+        data: { status: 'SENDING', lockedAt: new Date() },
+      });
+      await as('admin')
+        .post(`/admin/integrations/${integration.id}/deliveries/${pending.id}/retry`)
+        .expect(409);
+      await prisma.webhookDelivery.update({
+        where: { id: pending.id },
+        data: { status: 'SUCCEEDED', lockedAt: null },
+      });
     });
 
     it('signs with the new secret after a rotation and pauses disabled endpoints', async () => {
@@ -1137,6 +1181,13 @@ describe('Administration and integrations (e2e)', () => {
       expect((audit.items as { action: string }[]).map((entry) => entry.action)).toEqual(
         expect.arrayContaining(['region.sync', 'region.disable']),
       );
+
+      // A change whose event cannot be stored is not kept either.
+      const repository = app.get<MapRegionRepository>(MAP_REGION_REPOSITORY);
+      await expect(
+        repository.setEnabled(REGION, true, () => Promise.reject(new Error('No event'))),
+      ).rejects.toThrow('No event');
+      await expect(repository.findByCodeOrId(REGION)).resolves.toMatchObject({ enabled: false });
       await app.get(MapRegionService).setEnabled(REGION, true);
     });
 
@@ -1267,6 +1318,95 @@ describe('Administration and integrations (e2e)', () => {
         .get(`/api/v1/trips/${tripId}`)
         .set('Authorization', `Bearer ${tokens.driver}`)
         .expect(200);
+    });
+
+    it('never lets a feed reader skip an event whose change is saved after a later one', async () => {
+      const events = app.get(PlatformEventsService);
+      const account = await prisma.user.create({
+        data: { email: email('order'), name: 'E2E order', passwordHash: 'not used' },
+      });
+      const ofAccount = async (after: bigint) =>
+        (await events.feed(account.id, { after, limit: 500 })).items
+          .filter((item) => item.accountId === account.id)
+          .map((item) => item.data);
+      let commit = () => {};
+      const running: Promise<unknown>[] = [];
+      try {
+        const start =
+          (await prisma.platformEvent.aggregate({ _max: { seq: true } }))._max.seq ?? 0n;
+        let emitted!: () => void;
+        const firstEmitted = new Promise<void>((resolve) => (emitted = resolve));
+        const committing = new Promise<void>((resolve) => (commit = resolve));
+        // A change that adds its event first and keeps working before it is saved.
+        running.push(
+          prisma.$transaction(async (tx) => {
+            await events.emit({ type: 'trip.started', accountId: account.id, data: { n: 1 } }, tx);
+            emitted();
+            await committing;
+          }),
+        );
+        await firstEmitted;
+        let laterSaved = false;
+        running.push(
+          events
+            .emit({ type: 'trip.finished', accountId: account.id, data: { n: 2 } })
+            .then(() => (laterSaved = true)),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 300));
+
+        // The later event waits for the earlier one, so a reader cannot get past it meanwhile.
+        expect(laterSaved).toBe(false);
+        expect(await ofAccount(start)).toEqual([]);
+        commit();
+        await Promise.all(running);
+        expect(await ofAccount(start)).toEqual([{ n: 1 }, { n: 2 }]);
+      } finally {
+        commit();
+        await Promise.allSettled(running);
+        await prisma.user.delete({ where: { id: account.id } });
+      }
+    });
+
+    it('keeps old events until their webhooks have received them', async () => {
+      const account = await prisma.user.create({
+        data: { email: email('retention'), name: 'E2E retention', passwordHash: 'not used' },
+      });
+      try {
+        const endpoint = await prisma.webhookEndpoint.create({
+          data: {
+            url: receiverUrl,
+            events: ['*'],
+            secret: 'not used',
+            integration: { create: { name: `${PREFIX} retention ${RUN}`, userId: account.id } },
+          },
+        });
+        // Older than any retention.
+        const createdAt = new Date(Date.now() - 4000 * 86_400_000);
+        const event = (status?: 'PENDING' | 'SENDING' | 'SUCCEEDED' | 'FAILED') =>
+          prisma.platformEvent.create({
+            data: {
+              type: 'trip.started',
+              accountId: account.id,
+              data: {},
+              createdAt,
+              ...(status ? { deliveries: { create: { endpointId: endpoint.id, status } } } : {}),
+            },
+          });
+        const kept = [await event('PENDING'), await event('SENDING')];
+        await event();
+        await event('SUCCEEDED');
+        await event('FAILED');
+
+        await new Housekeeping(prisma, app.get(AppConfigService)).runOnce();
+
+        const left = await prisma.platformEvent.findMany({
+          where: { accountId: account.id },
+          select: { id: true },
+        });
+        expect(left.map((item) => item.id).sort()).toEqual(kept.map((item) => item.id).sort());
+      } finally {
+        await prisma.user.delete({ where: { id: account.id } });
+      }
     });
   });
 

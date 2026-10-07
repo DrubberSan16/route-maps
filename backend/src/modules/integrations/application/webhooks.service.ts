@@ -90,21 +90,29 @@ export class WebhooksService {
     const integration = await this.integrations.require(integrationId);
     const url = this.checkUrl(dto.url);
     const secret = generateWebhookSecret();
-    const webhook = await this.prisma.webhookEndpoint.create({
-      data: {
-        integrationId,
-        url,
-        description: dto.description,
-        events: dto.events,
-        secret: this.secrets.seal(secret),
-      },
-    });
-    await this.audit.record(actor, {
-      action: 'integration.webhook.create',
-      targetType: 'integration',
-      targetId: integrationId,
-      summary: integration.name,
-      details: { webhookId: webhook.id, url, events: dto.events },
+    // With its audit entry: a failure must not leave an endpoint whose secret nobody saw.
+    const webhook = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.webhookEndpoint.create({
+        data: {
+          integrationId,
+          url,
+          description: dto.description,
+          events: dto.events,
+          secret: this.secrets.seal(secret),
+        },
+      });
+      await this.audit.record(
+        actor,
+        {
+          action: 'integration.webhook.create',
+          targetType: 'integration',
+          targetId: integrationId,
+          summary: integration.name,
+          details: { webhookId: created.id, url, events: dto.events },
+        },
+        tx,
+      );
+      return created;
     });
     return { webhook: toWebhookView(webhook), secret };
   }
@@ -163,16 +171,24 @@ export class WebhooksService {
   ): Promise<{ webhook: WebhookView; secret: string }> {
     const { integration } = await this.require(integrationId, webhookId);
     const secret = generateWebhookSecret();
-    const webhook = await this.prisma.webhookEndpoint.update({
-      where: { id: webhookId },
-      data: { secret: this.secrets.seal(secret) },
-    });
-    await this.audit.record(actor, {
-      action: 'integration.webhook.rotate_secret',
-      targetType: 'integration',
-      targetId: integrationId,
-      summary: integration.name,
-      details: { webhookId },
+    // With its audit entry: a failure must not leave the endpoint signing with an unseen secret.
+    const webhook = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.webhookEndpoint.update({
+        where: { id: webhookId },
+        data: { secret: this.secrets.seal(secret) },
+      });
+      await this.audit.record(
+        actor,
+        {
+          action: 'integration.webhook.rotate_secret',
+          targetType: 'integration',
+          targetId: integrationId,
+          summary: integration.name,
+          details: { webhookId },
+        },
+        tx,
+      );
+      return updated;
     });
     return { webhook: toWebhookView(webhook), secret };
   }
@@ -249,18 +265,25 @@ export class WebhooksService {
   /** Sends a delivery again as soon as possible (a failed one, or one already delivered). */
   async retry(actor: AuditActor, integrationId: string, deliveryId: string): Promise<DeliveryView> {
     const row = await this.findDelivery(integrationId, deliveryId);
-    if (row.status === WebhookDeliveryStatus.SENDING) {
+    // Checked in the update itself: the worker may claim the delivery in the meantime.
+    const queued = await this.prisma.webhookDelivery.updateMany({
+      where: {
+        id: deliveryId,
+        endpoint: { integrationId },
+        status: { not: WebhookDeliveryStatus.SENDING },
+      },
+      data: { status: WebhookDeliveryStatus.PENDING, nextAttemptAt: new Date(), lockedAt: null },
+    });
+    if (queued.count === 0) {
+      // Not found when it was removed meanwhile (with its webhook or its event).
+      await this.findDelivery(integrationId, deliveryId);
       throw new AppException(
         ErrorCode.CONFLICT,
         'This delivery is being sent right now',
         HttpStatus.CONFLICT,
       );
     }
-    const updated = await this.prisma.webhookDelivery.update({
-      where: { id: deliveryId },
-      data: { status: WebhookDeliveryStatus.PENDING, nextAttemptAt: new Date(), lockedAt: null },
-      include: DELIVERY_INCLUDE,
-    });
+    const updated = await this.findDelivery(integrationId, deliveryId);
     const integration = await this.integrations.require(integrationId);
     await this.audit.record(actor, {
       action: 'integration.delivery.retry',

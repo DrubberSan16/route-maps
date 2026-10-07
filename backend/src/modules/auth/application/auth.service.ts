@@ -80,14 +80,19 @@ export class AuthService {
     return { user: toUserProfile(user), ...tokens };
   }
 
-  /** Rotates the refresh token. Re-use of a revoked token revokes the whole family. */
+  /** Rotates the refresh token. Re-use of a rotated token revokes the whole family. */
   async refresh(refreshToken: string, userAgent?: string): Promise<AuthTokens> {
     const payload = await this.verifyRefreshToken(refreshToken);
     const stored = await this.refreshTokens.findById(payload.jti);
     if (!stored || stored.userId !== payload.sub || stored.tokenHash !== sha256(refreshToken)) {
       throw this.invalidRefresh();
     }
-    if (stored.revokedAt) throw await this.reuseDetected(stored.userId);
+    if (stored.revokedAt) {
+      // Only a token already exchanged for a successor reveals a copy. One closed by a logout, a
+      // new password or an administrator is just no longer valid: refusing it must not close the
+      // sessions opened since (a device still holding it would otherwise sign the others out).
+      throw stored.replacedById ? await this.reuseDetected(stored.userId) : this.invalidRefresh();
+    }
     if (stored.expiresAt.getTime() <= Date.now()) throw this.invalidRefresh();
 
     const user = await this.users.getById(stored.userId);

@@ -226,18 +226,25 @@ export class AdminUsersService {
       );
     }
     const temporaryPassword = dto.password ? null : generateTemporaryPassword();
-    const user = await this.users.create({
-      email: dto.email,
-      name: dto.name,
-      role: dto.role,
-      passwordHash: await this.hasher.hash(dto.password ?? temporaryPassword!),
-    });
-    await this.audit.record(actor, {
-      action: 'user.create',
-      targetType: 'user',
-      targetId: user.id,
-      summary: user.email,
-      details: { role: user.role, generatedPassword: temporaryPassword !== null },
+    const passwordHash = await this.hasher.hash(dto.password ?? temporaryPassword!);
+    // With its audit entry: a failure must not leave the account with a password nobody saw.
+    const user = await this.prisma.$transaction(async (tx) => {
+      const created = await this.users.create(
+        { email: dto.email, name: dto.name, role: dto.role, passwordHash },
+        tx,
+      );
+      await this.audit.record(
+        actor,
+        {
+          action: 'user.create',
+          targetType: 'user',
+          targetId: created.id,
+          summary: created.email,
+          details: { role: created.role, generatedPassword: temporaryPassword !== null },
+        },
+        tx,
+      );
+      return created;
     });
     return { user: await this.get(user.id), temporaryPassword };
   }
@@ -325,18 +332,22 @@ export class AdminUsersService {
       );
     }
     const temporaryPassword = dto.password ? null : generateTemporaryPassword();
-    await this.users.replacePassword(
-      id,
-      await this.hasher.hash(dto.password ?? temporaryPassword!),
-    );
-    this.accounts.invalidate(id);
-    await this.audit.record(actor, {
-      action: 'user.password_reset',
-      targetType: 'user',
-      targetId: id,
-      summary: user.email,
-      details: { generatedPassword: temporaryPassword !== null },
+    const passwordHash = await this.hasher.hash(dto.password ?? temporaryPassword!);
+    await this.prisma.$transaction(async (tx) => {
+      await this.users.replacePassword(id, passwordHash, tx);
+      await this.audit.record(
+        actor,
+        {
+          action: 'user.password_reset',
+          targetType: 'user',
+          targetId: id,
+          summary: user.email,
+          details: { generatedPassword: temporaryPassword !== null },
+        },
+        tx,
+      );
     });
+    this.accounts.invalidate(id);
     return { temporaryPassword };
   }
 

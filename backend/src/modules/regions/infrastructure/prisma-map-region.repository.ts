@@ -5,6 +5,7 @@ import { BoundingBox } from '../../../common/geo/geojson';
 import {
   MapRegion,
   MapRegionRepository,
+  RegionAnnouncement,
   RegionAsset,
   UpsertMapRegion,
 } from '../domain/map-region.entity';
@@ -79,12 +80,8 @@ export class PrismaMapRegionRepository implements MapRegionRepository {
     return rows.map(toEntity);
   }
 
-  async findByCodeOrId(idOrCode: string): Promise<MapRegion | null> {
-    const condition = UUID_PATTERN.test(idOrCode)
-      ? Prisma.sql`WHERE id = ${idOrCode}::uuid OR code = ${idOrCode}`
-      : Prisma.sql`WHERE code = ${idOrCode}`;
-    const rows = await this.prisma.$queryRaw<MapRegionRow[]>`${SELECT} ${condition} LIMIT 1`;
-    return rows[0] ? toEntity(rows[0]) : null;
+  findByCodeOrId(idOrCode: string): Promise<MapRegion | null> {
+    return this.find(this.prisma, idOrCode);
   }
 
   /** Enabled regions whose bounding box contains the point, most specific (smallest) first. */
@@ -97,7 +94,7 @@ export class PrismaMapRegionRepository implements MapRegionRepository {
     return rows.map(toEntity);
   }
 
-  async upsert(region: UpsertMapRegion): Promise<MapRegion> {
+  async upsert(region: UpsertMapRegion, announce: RegionAnnouncement): Promise<MapRegion> {
     const data = {
       name: region.name,
       country: region.country.toUpperCase(),
@@ -116,23 +113,47 @@ export class PrismaMapRegionRepository implements MapRegionRepository {
       enabled: region.enabled,
     };
     const [minLng, minLat, maxLng, maxLat] = region.bbox;
-    await this.prisma.$transaction([
-      this.prisma.mapRegion.upsert({
+    return this.prisma.$transaction(async (tx) => {
+      await tx.mapRegion.upsert({
         where: { code: region.code },
         create: { code: region.code, ...data },
         update: data,
-      }),
-      this.prisma.$executeRaw`
+      });
+      await tx.$executeRaw`
         UPDATE map_regions
         SET bounding_box = ST_MakeEnvelope(${minLng}, ${minLat}, ${maxLng}, ${maxLat}, 4326)
-        WHERE code = ${region.code}`,
-    ]);
-    const saved = await this.findByCodeOrId(region.code);
-    if (!saved) throw new Error(`Region ${region.code} vanished after upsert`);
+        WHERE code = ${region.code}`;
+      return this.announced(tx, region.code, announce);
+    });
+  }
+
+  setEnabled(code: string, enabled: boolean, announce: RegionAnnouncement): Promise<MapRegion> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.mapRegion.update({ where: { code }, data: { enabled } });
+      return this.announced(tx, code, announce);
+    });
+  }
+
+  /** The region as saved by the transaction, once its announcement is stored with it. */
+  private async announced(
+    tx: Prisma.TransactionClient,
+    code: string,
+    announce: RegionAnnouncement,
+  ): Promise<MapRegion> {
+    const saved = await this.find(tx, code);
+    if (!saved) throw new Error(`Region ${code} vanished while it was saved`);
+    await announce(saved, tx);
     return saved;
   }
 
-  async setEnabled(code: string, enabled: boolean): Promise<void> {
-    await this.prisma.mapRegion.update({ where: { code }, data: { enabled } });
+  private async find(
+    client: Pick<Prisma.TransactionClient, '$queryRaw'>,
+    idOrCode: string,
+  ): Promise<MapRegion | null> {
+    const condition = UUID_PATTERN.test(idOrCode)
+      ? Prisma.sql`WHERE id = ${idOrCode}::uuid OR code = ${idOrCode}`
+      : Prisma.sql`WHERE code = ${idOrCode}`;
+    const rows = await client.$queryRaw<MapRegionRow[]>`${SELECT} ${condition} LIMIT 1`;
+    return rows[0] ? toEntity(rows[0]) : null;
   }
 }

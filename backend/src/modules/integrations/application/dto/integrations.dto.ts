@@ -157,11 +157,11 @@ export class CreateWebhookDto {
   @Length(8, 2048)
   url: string;
 
-  @ApiPropertyOptional({ example: 'Viajes terminados' })
+  @ApiPropertyOptional({ example: 'Viajes terminados', nullable: true })
   @IsOptional()
   @IsString()
   @MaxLength(300)
-  description?: string;
+  description?: string | null;
 
   @ApiProperty({
     enum: WEBHOOK_EVENTS,

@@ -64,38 +64,48 @@ async function main(): Promise<void> {
     const temporaryPassword = generate ? generateTemporaryPassword() : null;
     const password = typed ?? temporaryPassword;
 
-    if (existing) {
-      await prisma.user.update({
-        where: { id: existing.id },
-        data: { role: UserRole.ADMIN, active: true },
-      });
-      if (password) await users.replacePassword(existing.id, await hasher.hash(password));
-      await audit.record(CLI_ACTOR, {
-        action: 'user.role',
-        targetType: 'user',
-        targetId: existing.id,
-        summary: existing.email,
-        details: {
-          role: { from: existing.role, to: UserRole.ADMIN },
-          active: { from: existing.active, to: true },
-          passwordChanged: password !== null,
-        },
-      });
-    } else {
-      const user = await users.create({
-        email,
-        name,
-        role: UserRole.ADMIN,
-        passwordHash: await hasher.hash(password!),
-      });
-      await audit.record(CLI_ACTOR, {
-        action: 'user.create',
-        targetType: 'user',
-        targetId: user.id,
-        summary: user.email,
-        details: { role: UserRole.ADMIN, generatedPassword: temporaryPassword !== null },
-      });
-    }
+    const passwordHash = password ? await hasher.hash(password) : null;
+    // With its audit entry: a failure must not leave a password that was never printed.
+    await prisma.$transaction(async (tx) => {
+      if (existing) {
+        await tx.user.update({
+          where: { id: existing.id },
+          data: { role: UserRole.ADMIN, active: true },
+        });
+        if (passwordHash) await users.replacePassword(existing.id, passwordHash, tx);
+        await audit.record(
+          CLI_ACTOR,
+          {
+            action: 'user.role',
+            targetType: 'user',
+            targetId: existing.id,
+            summary: existing.email,
+            details: {
+              role: { from: existing.role, to: UserRole.ADMIN },
+              active: { from: existing.active, to: true },
+              passwordChanged: password !== null,
+            },
+          },
+          tx,
+        );
+      } else {
+        const user = await users.create(
+          { email, name, role: UserRole.ADMIN, passwordHash: passwordHash! },
+          tx,
+        );
+        await audit.record(
+          CLI_ACTOR,
+          {
+            action: 'user.create',
+            targetType: 'user',
+            targetId: user.id,
+            summary: user.email,
+            details: { role: UserRole.ADMIN, generatedPassword: temporaryPassword !== null },
+          },
+          tx,
+        );
+      }
+    });
 
     process.stdout.write(`Administrator ready: ${email}\n`);
     if (temporaryPassword) {

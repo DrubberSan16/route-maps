@@ -12,6 +12,7 @@ import {
   MapRegion,
   type MapRegionRepository,
   REGION_ASSET_KINDS,
+  RegionAnnouncement,
   RegionAsset,
   RegionAssetKind,
 } from '../domain/map-region.entity';
@@ -136,10 +137,7 @@ export class MapRegionService {
   async setEnabled(idOrCode: string, enabled: boolean): Promise<MapRegion> {
     const region = await this.get(idOrCode);
     if (region.enabled === enabled) return region;
-    await this.regions.setEnabled(region.code, enabled);
-    const updated = await this.get(region.code);
-    await this.announce(updated);
-    return updated;
+    return this.regions.setEnabled(region.code, enabled, this.announce);
   }
 
   /**
@@ -157,7 +155,6 @@ export class MapRegionService {
         const outcome = await this.syncManifest(manifest, options.force ?? false);
         seen.add(manifest.code);
         report[outcome].push(manifest.code);
-        if (outcome === 'registered') await this.announce(await this.get(manifest.code));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.error({ err: error }, `Could not register region ${manifest.code}`);
@@ -169,9 +166,8 @@ export class MapRegionService {
       if (seen.has(region.code)) continue;
       const file = await this.storage.stat('map', region.fileName);
       if (!file) {
-        await this.regions.setEnabled(region.code, false);
+        await this.regions.setEnabled(region.code, false, this.announce);
         report.disabled.push(region.code);
-        await this.announce({ ...region, enabled: false });
       }
     }
     this.logger.log(
@@ -181,13 +177,16 @@ export class MapRegionService {
     return report;
   }
 
-  private async announce(region: MapRegion): Promise<void> {
-    await this.events.emit({
-      type: region.enabled ? 'region.published' : 'region.disabled',
-      accountId: null,
-      data: regionEventData(region),
-    });
-  }
+  /** Stored with each change of a region (registered, updated, enabled or disabled). */
+  private readonly announce: RegionAnnouncement = (region, tx) =>
+    this.events.emit(
+      {
+        type: region.enabled ? 'region.published' : 'region.disabled',
+        accountId: null,
+        data: regionEventData(region),
+      },
+      tx,
+    );
 
   private async syncManifest(
     manifest: RegionManifest,
@@ -245,25 +244,28 @@ export class MapRegionService {
           : await this.storage.sha256('routing', manifest.routingFile)
         : null;
 
-    await this.regions.upsert({
-      code: manifest.code,
-      name: manifest.name,
-      country: manifest.country,
-      province: manifest.province ?? null,
-      city: manifest.city ?? null,
-      version: manifest.version,
-      fileName: manifest.mapFile,
-      fileSize: mapFile.size,
-      checksum,
-      bbox: manifest.bbox,
-      minZoom: manifest.minZoom ?? 0,
-      maxZoom: manifest.maxZoom ?? 14,
-      routingFile: routingFile ? manifest.routingFile : null,
-      routingFileSize: routingFile?.size ?? null,
-      routingChecksum,
-      assets,
-      enabled: true,
-    });
+    await this.regions.upsert(
+      {
+        code: manifest.code,
+        name: manifest.name,
+        country: manifest.country,
+        province: manifest.province ?? null,
+        city: manifest.city ?? null,
+        version: manifest.version,
+        fileName: manifest.mapFile,
+        fileSize: mapFile.size,
+        checksum,
+        bbox: manifest.bbox,
+        minZoom: manifest.minZoom ?? 0,
+        maxZoom: manifest.maxZoom ?? 14,
+        routingFile: routingFile ? manifest.routingFile : null,
+        routingFileSize: routingFile?.size ?? null,
+        routingChecksum,
+        assets,
+        enabled: true,
+      },
+      this.announce,
+    );
     return 'registered';
   }
 

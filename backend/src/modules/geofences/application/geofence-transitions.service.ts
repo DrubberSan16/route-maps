@@ -70,24 +70,39 @@ export function detectTransitions(state: Map<string, Date>, fixes: CheckedFix[])
 export class GeofenceTransitionsService {
   constructor(private readonly events: PlatformEventsService) {}
 
-  /** Runs inside the transaction that stored the fixes; returns how many events it emitted. */
+  /**
+   * Runs inside the transaction that stored the fixes, with their trips locked by the caller, as
+   * its last step; returns how many events it emitted.
+   */
   async process(
+    tx: Prisma.TransactionClient,
+    uploads: { trip: TransitionTrip; fixIds: string[] }[],
+  ): Promise<number> {
+    const events: PlatformEventInput[] = [];
+    for (const { trip, fixIds } of uploads) events.push(...(await this.check(tx, trip, fixIds)));
+    // Emitted together at the end: other changes wait for this transaction from the first one.
+    for (const event of events) await this.events.emit(event, tx);
+    return events.length;
+  }
+
+  /** Updates the geofences the trip is inside of; returns the events of its transitions. */
+  private async check(
     tx: Prisma.TransactionClient,
     trip: TransitionTrip,
     fixIds: string[],
-  ): Promise<number> {
-    if (fixIds.length === 0) return 0;
+  ): Promise<PlatformEventInput[]> {
+    if (fixIds.length === 0) return [];
     const states = await tx.tripGeofenceState.findMany({
       where: { tripId: trip.id },
       include: { geofence: { select: { active: true } } },
     });
     if (states.length === 0) {
       const watched = await tx.geofence.count({ where: { userId: trip.userId, active: true } });
-      if (watched === 0) return 0;
+      if (watched === 0) return [];
     }
 
     const fixes = await this.checkFixes(tx, trip, fixIds);
-    if (fixes.length === 0) return 0;
+    if (fixes.length === 0) return [];
 
     // Geofences disabled meanwhile are forgotten without an exit event.
     const state = new Map(
@@ -109,16 +124,15 @@ export class GeofenceTransitionsService {
       UPDATE trips SET geofences_checked_at = ${fixes[fixes.length - 1].recordedAt}::timestamptz
       WHERE id = ${trip.id}::uuid`;
 
-    if (transitions.length === 0) return 0;
+    if (transitions.length === 0) return [];
     const geofences = await tx.geofence.findMany({
       where: { id: { in: [...new Set(transitions.map((item) => item.geofenceId))] } },
       select: { id: true, name: true, type: true, metadata: true },
     });
     const byId = new Map(geofences.map((geofence) => [geofence.id, geofence]));
-    for (const transition of transitions) {
-      await this.events.emit(this.toEvent(trip, transition, byId.get(transition.geofenceId)), tx);
-    }
-    return transitions.length;
+    return transitions.map((transition) =>
+      this.toEvent(trip, transition, byId.get(transition.geofenceId)),
+    );
   }
 
   private async checkFixes(

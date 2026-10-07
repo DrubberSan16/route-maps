@@ -133,31 +133,35 @@ export class ApiKeyAuthenticatorService
     const uses = [...this.lastUses.entries()];
     this.usage.clear();
     this.lastUses.clear();
+    const statements: Prisma.PrismaPromise<number>[] = [];
+    if (counters.length > 0) {
+      // Keys deleted in the meantime (their integration was removed) are skipped by the join.
+      const rows = counters.map(
+        (counter) =>
+          Prisma.sql`(${counter.keyId}::uuid, ${counter.day}::date, ${counter.requests}::int, ${counter.errors}::int)`,
+      );
+      statements.push(this.prisma.$executeRaw`
+        INSERT INTO api_usage_daily (api_key_id, day, requests, errors)
+        SELECT v.key_id, v.day, v.requests, v.errors
+        FROM (VALUES ${Prisma.join(rows)}) AS v (key_id, day, requests, errors)
+        JOIN api_keys k ON k.id = v.key_id
+        ON CONFLICT (api_key_id, day) DO UPDATE
+          SET requests = api_usage_daily.requests + EXCLUDED.requests,
+              errors = api_usage_daily.errors + EXCLUDED.errors`);
+    }
+    if (uses.length > 0) {
+      const rows = uses.map(
+        ([keyId, use]) => Prisma.sql`(${keyId}::uuid, ${use.at}::timestamptz, ${use.ip}::text)`,
+      );
+      statements.push(this.prisma.$executeRaw`
+        UPDATE api_keys k SET last_used_at = v.at, last_used_ip = v.ip
+        FROM (VALUES ${Prisma.join(rows)}) AS v (id, at, ip)
+        WHERE k.id = v.id`);
+    }
+    if (statements.length === 0) return;
     try {
-      if (counters.length > 0) {
-        // Keys deleted in the meantime (their integration was removed) are skipped by the join.
-        const rows = counters.map(
-          (counter) =>
-            Prisma.sql`(${counter.keyId}::uuid, ${counter.day}::date, ${counter.requests}::int, ${counter.errors}::int)`,
-        );
-        await this.prisma.$executeRaw`
-          INSERT INTO api_usage_daily (api_key_id, day, requests, errors)
-          SELECT v.key_id, v.day, v.requests, v.errors
-          FROM (VALUES ${Prisma.join(rows)}) AS v (key_id, day, requests, errors)
-          JOIN api_keys k ON k.id = v.key_id
-          ON CONFLICT (api_key_id, day) DO UPDATE
-            SET requests = api_usage_daily.requests + EXCLUDED.requests,
-                errors = api_usage_daily.errors + EXCLUDED.errors`;
-      }
-      if (uses.length > 0) {
-        const rows = uses.map(
-          ([keyId, use]) => Prisma.sql`(${keyId}::uuid, ${use.at}::timestamptz, ${use.ip}::text)`,
-        );
-        await this.prisma.$executeRaw`
-          UPDATE api_keys k SET last_used_at = v.at, last_used_ip = v.ip
-          FROM (VALUES ${Prisma.join(rows)}) AS v (id, at, ip)
-          WHERE k.id = v.id`;
-      }
+      // One transaction: when it fails nothing was counted, so the counters can be put back.
+      await this.prisma.$transaction(statements);
     } catch (error) {
       this.logger.warn({ err: error }, 'Could not save API key usage; it will be retried');
       for (const counter of counters) {

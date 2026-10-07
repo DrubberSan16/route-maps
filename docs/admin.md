@@ -95,4 +95,5 @@ guarda los filtros, así que un enlace copiado abre la misma vista.
 - No tiene inicio de sesión con proveedores externos ni segundo factor.
 - No genera mapas: las regiones se preparan con `make prepare-region` o se
   suben con `publish-region.sh`; el panel las registra y las habilita.
-- Los eventos se guardan `EVENTS_RETENTION_DAYS` días (30 por defecto).
+- Los eventos se guardan `EVENTS_RETENTION_DAYS` días (30 por defecto), y más
+  mientras algún webhook tenga pendiente recibirlos.

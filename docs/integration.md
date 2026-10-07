@@ -216,14 +216,16 @@ eventos posteriores a una posición, del más antiguo al más nuevo. Parámetros
 `after` (la posición, `0` al empezar), `limit` (1 a 500, 100 por defecto) y
 `types` (tipos separados por comas). `data` trae `items`, `next` y `hasMore`:
 guarda `next` y vuelve a pedir con `after=next`; mientras `hasMore` sea `true`
-hay más esperando.
+hay más esperando. Los eventos aparecen en el orden de su `seq`, así que la
+posición guardada nunca deja uno atrás.
 
 ```bash
 curl "https://route-map.softwareeasydev.com/api/v1/events?after=1286&types=trip.finished,geofence.entered" \
   -H "X-API-Key: $ROUTE_MAPS_KEY"
 ```
 
-Los eventos se guardan `EVENTS_RETENTION_DAYS` días (30 por defecto).
+Los eventos se guardan `EVENTS_RETENTION_DAYS` días (30 por defecto), y más
+mientras algún webhook tenga pendiente recibirlos.
 
 ### Webhooks
 

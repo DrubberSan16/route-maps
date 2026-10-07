@@ -470,6 +470,26 @@ describe('AuthService', () => {
       expect(payload.sv).toBe(stored.sessionsRevokedAt!.getTime());
     });
 
+    it('keeps the new session when another device still tries the closed one', async () => {
+      const { user, refreshToken: otherDevice } = await register();
+      const result = await service.changePassword(user.id, {
+        currentPassword: 'S3cure-password',
+        newPassword: 'An0ther-password',
+      });
+
+      // A token closed by the new password is just invalid, not a stolen copy that has been
+      // used: the session that changed the password goes on.
+      await expectAppError(
+        service.refresh(otherDevice),
+        ErrorCode.INVALID_REFRESH_TOKEN,
+        HttpStatus.UNAUTHORIZED,
+      );
+      await expect(service.refresh(result.refreshToken)).resolves.toMatchObject({
+        refreshToken: expect.any(String),
+      });
+      expect(warn).not.toHaveBeenCalled();
+    });
+
     it('refuses a wrong current password', async () => {
       const { user } = await register();
       await expectAppError(

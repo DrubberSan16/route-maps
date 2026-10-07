@@ -349,23 +349,36 @@ export class IntegrationsService {
       throw new AppException(ErrorCode.VALIDATION_ERROR, 'expiresAt must be in the future');
     }
     const generated = generateApiKey();
-    const apiKey = await this.prisma.apiKey.create({
-      data: {
-        integrationId,
-        name: dto.name,
-        prefix: generated.prefix,
-        keyHash: generated.hash,
-        lastFour: generated.lastFour,
-        scopes: dto.scopes,
-        expiresAt,
-      },
-    });
-    await this.audit.record(actor, {
-      action: 'integration.key.create',
-      targetType: 'integration',
-      targetId: integrationId,
-      summary: integration.name,
-      details: { keyId: apiKey.id, name: apiKey.name, prefix: apiKey.prefix, scopes: dto.scopes },
+    // With its audit entry: a failure must not leave a working key nobody saw.
+    const apiKey = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.apiKey.create({
+        data: {
+          integrationId,
+          name: dto.name,
+          prefix: generated.prefix,
+          keyHash: generated.hash,
+          lastFour: generated.lastFour,
+          scopes: dto.scopes,
+          expiresAt,
+        },
+      });
+      await this.audit.record(
+        actor,
+        {
+          action: 'integration.key.create',
+          targetType: 'integration',
+          targetId: integrationId,
+          summary: integration.name,
+          details: {
+            keyId: created.id,
+            name: created.name,
+            prefix: created.prefix,
+            scopes: dto.scopes,
+          },
+        },
+        tx,
+      );
+      return created;
     });
     return { key: generated.key, apiKey: toApiKeyView(apiKey) };
   }

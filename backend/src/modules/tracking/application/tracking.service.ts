@@ -5,10 +5,7 @@ import { ErrorCode } from '../../../common/errors/error-codes';
 import { isValidCoordinate, PointGeometry } from '../../../common/geo/geojson';
 import { TripStatus } from '../../../generated/prisma/enums';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
-import {
-  GeofenceTransitionsService,
-  TransitionTrip,
-} from '../../geofences/application/geofence-transitions.service';
+import { GeofenceTransitionsService } from '../../geofences/application/geofence-transitions.service';
 import { TripsService } from '../../trips/application/trips.service';
 import { LocationPoint, TrackingBatchResult } from '../domain/location-point';
 
@@ -77,20 +74,20 @@ export class TrackingService {
           VALUES ${Prisma.join(rows, ', ')}
           ON CONFLICT (trip_id, recorded_at) DO NOTHING
           RETURNING id, trip_id`;
-        for (const row of locked) {
-          const trip: TransitionTrip = {
-            id: row.id,
-            userId: row.user_id,
-            name: row.name,
-            deviceId: row.device_id,
-            metadata: row.metadata,
-            geofencesCheckedAt: row.geofences_checked_at,
-          };
-          const fixIds = stored
-            .filter((point) => point.trip_id === row.id)
-            .map((point) => point.id);
-          await this.transitions.process(tx, trip, fixIds);
-        }
+        await this.transitions.process(
+          tx,
+          locked.map((row) => ({
+            trip: {
+              id: row.id,
+              userId: row.user_id,
+              name: row.name,
+              deviceId: row.device_id,
+              metadata: row.metadata,
+              geofencesCheckedAt: row.geofences_checked_at,
+            },
+            fixIds: stored.filter((point) => point.trip_id === row.id).map((point) => point.id),
+          })),
+        );
         return stored;
       },
       { timeout: 30_000 },

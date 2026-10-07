@@ -9,16 +9,33 @@ import {
   StorageKind,
   StoredFileInfo,
 } from '../../maps/domain/map-storage.provider';
-import { PlatformEventsService } from '../../events/application/platform-events.service';
+import {
+  EventsSqlClient,
+  PlatformEventsService,
+} from '../../events/application/platform-events.service';
 import { PlatformEventInput } from '../../events/domain/platform-event';
-import { MapRegion, MapRegionRepository, UpsertMapRegion } from '../domain/map-region.entity';
+import {
+  MapRegion,
+  MapRegionRepository,
+  RegionAnnouncement,
+  UpsertMapRegion,
+} from '../domain/map-region.entity';
 import { MapRegionService } from './map-region.service';
 
-/** Collects the emitted events instead of storing them. */
+/** Stands for the transaction the repository hands to the announcement. */
+const TRANSACTION = { $executeRaw: () => Promise.resolve(1) } as unknown as EventsSqlClient;
+
+/** Collects the emitted events instead of storing them; `failing` makes the next one fail. */
 class RecordedEvents {
   readonly emitted: PlatformEventInput[] = [];
+  failing = false;
 
-  emit(event: PlatformEventInput) {
+  emit(event: PlatformEventInput, tx: EventsSqlClient) {
+    expect(tx).toBe(TRANSACTION);
+    if (this.failing) {
+      this.failing = false;
+      return Promise.reject(new Error('The database went away'));
+    }
     this.emitted.push(event);
     return Promise.resolve(randomUUID());
   }
@@ -52,7 +69,8 @@ class InMemoryRegions implements MapRegionRepository {
     );
   }
 
-  upsert(data: UpsertMapRegion) {
+  /** Like the database: a change is kept only when its announcement is stored too. */
+  async upsert(data: UpsertMapRegion, announce: RegionAnnouncement) {
     const existing = this.regions.get(data.code);
     const region: MapRegion = {
       id: existing?.id ?? randomUUID(),
@@ -67,14 +85,16 @@ class InMemoryRegions implements MapRegionRepository {
       routingChecksum: data.routingChecksum ?? null,
       assets: data.assets ?? [],
     };
+    await announce(region, TRANSACTION);
     this.regions.set(data.code, region);
-    return Promise.resolve(region);
+    return region;
   }
 
-  setEnabled(code: string, enabled: boolean) {
-    const region = this.regions.get(code);
-    if (region) region.enabled = enabled;
-    return Promise.resolve();
+  async setEnabled(code: string, enabled: boolean, announce: RegionAnnouncement) {
+    const region = { ...this.regions.get(code)!, enabled };
+    await announce(region, TRANSACTION);
+    this.regions.set(code, region);
+    return region;
   }
 }
 
@@ -455,6 +475,37 @@ describe('MapRegionService', () => {
         'region.disabled',
       ]);
     });
+
+    it('leaves a region as it was when its event cannot be stored, so a retry announces it', async () => {
+      await service.syncFromStorage();
+      events.failing = true;
+
+      await expect(service.setEnabled('guayaquil', false)).rejects.toThrow(
+        'The database went away',
+      );
+      expect(regions.regions.get('guayaquil')?.enabled).toBe(true);
+
+      await service.setEnabled('guayaquil', false);
+      expect(events.emitted.map((event) => event.type)).toEqual([
+        'region.published',
+        'region.disabled',
+      ]);
+    });
+
+    it('registers a region on the next sync when its event could not be stored', async () => {
+      events.failing = true;
+
+      await expect(service.syncFromStorage()).resolves.toMatchObject({
+        registered: [],
+        errors: [{ code: 'guayaquil', message: 'The database went away' }],
+      });
+      expect(regions.regions.has('guayaquil')).toBe(false);
+
+      await expect(service.syncFromStorage()).resolves.toMatchObject({
+        registered: ['guayaquil'],
+      });
+      expect(events.emitted.map((event) => event.type)).toEqual(['region.published']);
+    });
   });
 
   describe('queries', () => {
@@ -466,7 +517,7 @@ describe('MapRegionService', () => {
     });
 
     it('answers MAP_REGION_NOT_FOUND for unknown or disabled regions', async () => {
-      await regions.setEnabled('guayaquil', false);
+      await regions.setEnabled('guayaquil', false, () => Promise.resolve());
       for (const promise of [service.get('quito'), service.getEnabled('guayaquil')]) {
         const error = await promise.catch((e: unknown) => e);
         expect(error).toBeInstanceOf(AppException);

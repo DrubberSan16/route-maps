@@ -16,7 +16,9 @@ const USAGE_RETENTION_DAYS = 400;
 
 /**
  * Hourly clean-up (worker process): platform events older than EVENTS_RETENTION_DAYS, with their
- * webhook deliveries, and API usage older than USAGE_RETENTION_DAYS. The audit log is kept.
+ * webhook deliveries, and API usage older than USAGE_RETENTION_DAYS. The audit log is kept. An
+ * event a webhook has yet to receive (retries, paused endpoints) stays until it is delivered or
+ * fails for good, whatever the retention.
  */
 @Injectable()
 export class Housekeeping implements OnApplicationBootstrap, BeforeApplicationShutdown {
@@ -57,8 +59,11 @@ export class Housekeeping implements OnApplicationBootstrap, BeforeApplicationSh
     for (;;) {
       const deleted = await this.prisma.$executeRaw`
         DELETE FROM platform_events WHERE id IN (
-          SELECT id FROM platform_events
-          WHERE created_at < now() - make_interval(days => ${days}::int)
+          SELECT e.id FROM platform_events e
+          WHERE e.created_at < now() - make_interval(days => ${days}::int)
+            AND NOT EXISTS (
+              SELECT 1 FROM webhook_deliveries d
+              WHERE d.event_id = e.id AND d.status IN ('PENDING', 'SENDING'))
           LIMIT ${BATCH})`;
       events += deleted;
       if (deleted < BATCH) break;

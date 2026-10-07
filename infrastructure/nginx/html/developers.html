@@ -135,7 +135,7 @@ const url = offlineMapUrl('ecuador');
     "enteredAt": "2026-10-07T14:03:09.000Z"
   }
 }</code></pre>
-    <p>Para leerlos sin webhooks, o ponerse al día después de una caída, usa una llave con <code>events:read</code>. Guarda la posición que devuelve la función y vuelve a llamarla cada pocos segundos (la primera vez, con <code>'0'</code>):</p>
+    <p>Para leerlos sin webhooks, o ponerse al día después de una caída, usa una llave con <code>events:read</code>. Guarda la posición que devuelve la función y vuelve a llamarla cada pocos segundos (la primera vez, con <code>'0'</code>). Los eventos aparecen en el orden de su <code>seq</code>, así que la posición guardada nunca deja uno atrás:</p>
     <pre><code>// Procesa los eventos posteriores a `after` y devuelve la posición que hay que guardar.
 async function readEvents(after, handle) {
   for (;;) {

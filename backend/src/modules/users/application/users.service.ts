@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { AppException } from '../../../common/errors/app.exception';
 import { ErrorCode } from '../../../common/errors/error-codes';
+import { Prisma } from '../../../generated/prisma/client';
 import { DevicePlatform, UserRole } from '../../../generated/prisma/enums';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 import { UserEntity } from '../domain/user.entity';
@@ -26,14 +27,17 @@ export class UsersService {
     return user;
   }
 
-  create(input: {
-    email: string;
-    name: string;
-    passwordHash: string;
-    role?: UserRole;
-    serviceAccount?: boolean;
-  }): Promise<UserEntity> {
-    return this.prisma.user.create({
+  create(
+    input: {
+      email: string;
+      name: string;
+      passwordHash: string;
+      role?: UserRole;
+      serviceAccount?: boolean;
+    },
+    tx?: Prisma.TransactionClient,
+  ): Promise<UserEntity> {
+    return (tx ?? this.prisma).user.create({
       data: {
         email: input.email.toLowerCase(),
         name: input.name,
@@ -54,19 +58,22 @@ export class UsersService {
 
   /**
    * Replaces the password and closes every session of the account: its refresh tokens are
-   * revoked and the access tokens issued until now stop being accepted.
+   * revoked and the access tokens issued until now stop being accepted. Runs in `tx` when given.
    */
-  async replacePassword(id: string, passwordHash: string): Promise<UserEntity> {
-    const [user] = await this.prisma.$transaction([
-      this.prisma.user.update({
-        where: { id },
-        data: { passwordHash, sessionsRevokedAt: new Date() },
-      }),
-      this.prisma.refreshToken.updateMany({
-        where: { userId: id, revokedAt: null },
-        data: { revokedAt: new Date() },
-      }),
-    ]);
+  async replacePassword(
+    id: string,
+    passwordHash: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<UserEntity> {
+    if (!tx) return this.prisma.$transaction((own) => this.replacePassword(id, passwordHash, own));
+    const user = await tx.user.update({
+      where: { id },
+      data: { passwordHash, sessionsRevokedAt: new Date() },
+    });
+    await tx.refreshToken.updateMany({
+      where: { userId: id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
     return user;
   }
 

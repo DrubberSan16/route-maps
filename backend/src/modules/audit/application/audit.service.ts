@@ -45,13 +45,21 @@ export interface AuditQuery {
   offset: number;
 }
 
+/** The transaction of the change an audit entry describes. */
+export type AuditSqlClient = Pick<Prisma.TransactionClient, 'auditLog'>;
+
 /** Record of what administrators and operators changed (accounts, integrations, regions...). */
 @Injectable()
 export class AuditService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async record(actor: AuditActor, entry: AuditEntry): Promise<void> {
-    await this.prisma.auditLog.create({
+  /**
+   * Pass the transaction of the change when the response carries something shown only once (a
+   * password, a key, a secret): if the entry cannot be written the change is undone too, instead
+   * of leaving it done with its secret lost in a failed response.
+   */
+  async record(actor: AuditActor, entry: AuditEntry, tx?: AuditSqlClient): Promise<void> {
+    await (tx ?? this.prisma).auditLog.create({
       data: {
         actorId: actor.id,
         actorEmail: actor.email,
