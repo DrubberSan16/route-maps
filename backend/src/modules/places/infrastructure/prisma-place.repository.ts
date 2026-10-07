@@ -2,7 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '../../../generated/prisma/client';
 import { fromPoint, PointGeometry } from '../../../common/geo/geojson';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
-import { Place, PlaceInput, PlaceRepository, PlaceSearch } from '../domain/place.entity';
+import {
+  Place,
+  PlaceFilter,
+  PlaceInput,
+  PlaceRepository,
+  PlaceSearch,
+  PlaceWithUsage,
+} from '../domain/place.entity';
 
 interface PlaceRow {
   id: string;
@@ -37,7 +44,7 @@ const toEntity = (row: PlaceRow): Place => ({
 export class PrismaPlaceRepository implements PlaceRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  private select(userId: string, distanceFrom?: { latitude: number; longitude: number }) {
+  private select(userId: string | null, distanceFrom?: { latitude: number; longitude: number }) {
     const distance = distanceFrom
       ? Prisma.sql`ST_Distance(p.location::geography,
           ST_SetSRID(ST_MakePoint(${distanceFrom.longitude}, ${distanceFrom.latitude}), 4326)::geography)`
@@ -52,20 +59,24 @@ export class PrismaPlaceRepository implements PlaceRepository {
       LEFT JOIN favorite_places f ON f.place_id = p.id AND f.user_id = ${userId}::uuid`;
   }
 
-  async create(userId: string, input: PlaceInput & { id?: string }): Promise<Place> {
+  async create(owner: string | null, input: PlaceInput & { id?: string }): Promise<Place> {
     const rows = await this.prisma.$queryRaw<{ id: string }[]>`
       INSERT INTO places (id, user_id, name, description, category, address, location,
                           created_at, updated_at)
-      VALUES (COALESCE(${input.id ?? null}::uuid, gen_random_uuid()), ${userId}::uuid,
+      VALUES (COALESCE(${input.id ?? null}::uuid, gen_random_uuid()), ${owner}::uuid,
               ${input.name}, ${input.description ?? null}, ${input.category ?? null},
               ${input.address ?? null},
               ST_SetSRID(ST_MakePoint(${input.location.longitude}, ${input.location.latitude}), 4326),
               now(), now())
       RETURNING id`;
-    return (await this.findVisible(userId, rows[0].id))!;
+    return (await this.findVisible(owner, rows[0].id))!;
   }
 
-  async update(userId: string, id: string, input: Partial<PlaceInput>): Promise<Place | null> {
+  async update(
+    owner: string | null,
+    id: string,
+    input: Partial<PlaceInput>,
+  ): Promise<Place | null> {
     const sets: Prisma.Sql[] = [];
     if (input.name !== undefined) sets.push(Prisma.sql`name = ${input.name}`);
     if (input.description !== undefined) sets.push(Prisma.sql`description = ${input.description}`);
@@ -79,17 +90,17 @@ export class PrismaPlaceRepository implements PlaceRepository {
     sets.push(Prisma.sql`updated_at = now()`);
     const updated = await this.prisma.$executeRaw`
       UPDATE places SET ${Prisma.join(sets, ', ')}
-      WHERE id = ${id}::uuid AND user_id = ${userId}::uuid`;
-    return updated > 0 ? this.findVisible(userId, id) : null;
+      WHERE id = ${id}::uuid AND user_id IS NOT DISTINCT FROM ${owner}::uuid`;
+    return updated > 0 ? this.findVisible(owner, id) : null;
   }
 
-  async delete(userId: string, id: string): Promise<boolean> {
-    const result = await this.prisma.place.deleteMany({ where: { id, userId } });
+  async delete(owner: string | null, id: string): Promise<boolean> {
+    const result = await this.prisma.place.deleteMany({ where: { id, userId: owner } });
     return result.count > 0;
   }
 
   /** A place is visible to its owner, and shared places (user_id NULL) to everyone. */
-  async findVisible(userId: string, id: string): Promise<Place | null> {
+  async findVisible(userId: string | null, id: string): Promise<Place | null> {
     const rows = await this.prisma.$queryRaw<PlaceRow[]>`${this.select(userId)}
       WHERE p.id = ${id}::uuid AND (p.user_id = ${userId}::uuid OR p.user_id IS NULL)`;
     return rows[0] ? toEntity(rows[0]) : null;
@@ -117,6 +128,54 @@ export class PrismaPlaceRepository implements PlaceRepository {
       ORDER BY ${order}
       LIMIT ${search.limit} OFFSET ${search.offset}`;
     return rows.map(toEntity);
+  }
+
+  async searchAll(filter: PlaceFilter): Promise<{ items: PlaceWithUsage[]; total: number }> {
+    const conditions: Prisma.Sql[] = [Prisma.sql`true`];
+    if (filter.scope === 'shared') conditions.push(Prisma.sql`p.user_id IS NULL`);
+    if (filter.scope === 'private') conditions.push(Prisma.sql`p.user_id IS NOT NULL`);
+    if (filter.userId) conditions.push(Prisma.sql`p.user_id = ${filter.userId}::uuid`);
+    if (filter.text) {
+      const pattern = `%${filter.text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+      conditions.push(
+        Prisma.sql`(p.name ILIKE ${pattern} OR p.address ILIKE ${pattern} OR p.category ILIKE ${pattern})`,
+      );
+    }
+    const where = Prisma.join(conditions, ' AND ');
+    const [rows, count] = await Promise.all([
+      this.prisma.$queryRaw<
+        (Omit<PlaceRow, 'distance_meters' | 'is_favorite' | 'alias'> & {
+          owner_email: string | null;
+          favorites: bigint;
+        })[]
+      >`
+        SELECT p.id, p.user_id, u.email AS owner_email, p.name, p.description, p.category,
+               p.address, ST_AsGeoJSON(p.location)::json AS location,
+               (SELECT count(*) FROM favorite_places f WHERE f.place_id = p.id) AS favorites,
+               p.created_at, p.updated_at
+        FROM places p LEFT JOIN users u ON u.id = p.user_id
+        WHERE ${where}
+        ORDER BY p.created_at DESC, p.id
+        LIMIT ${filter.limit} OFFSET ${filter.offset}`,
+      this.prisma.$queryRaw<{ total: bigint }[]>`
+        SELECT count(*) AS total FROM places p WHERE ${where}`,
+    ]);
+    return {
+      items: rows.map((row) => ({
+        id: row.id,
+        userId: row.user_id,
+        owner: row.user_id ? { id: row.user_id, email: row.owner_email ?? '' } : null,
+        name: row.name,
+        description: row.description,
+        category: row.category,
+        address: row.address,
+        location: fromPoint(row.location),
+        favorites: Number(row.favorites),
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      })),
+      total: Number(count[0]?.total ?? 0),
+    };
   }
 
   async setFavorite(userId: string, placeId: string, alias: string | null): Promise<void> {

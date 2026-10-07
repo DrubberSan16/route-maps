@@ -13,6 +13,8 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/src/main.js",
+    "start:worker": "node dist/src/worker.js",
+    "start:worker:dev": "tsx src/worker.ts",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"prisma/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"prisma/**/*.ts\"",
     "lint": "eslint \"{src,test,prisma}/**/*.ts\"",
@@ -28,6 +30,8 @@
     "prisma:seed": "prisma db seed",
     "regions:sync": "node dist/src/cli/sync-regions.js",
     "regions:sync:dev": "tsx src/cli/sync-regions.ts",
+    "admin:create": "node dist/src/cli/create-admin.js",
+    "admin:create:dev": "tsx src/cli/create-admin.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

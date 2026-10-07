@@ -65,6 +65,22 @@ export interface AppConfig {
     timeZone: string;
   };
   rateLimit: { ttlMs: number; limit: number };
+  integrations: {
+    /**
+     * Key material that encrypts the webhook signing secrets at rest (INTEGRATIONS_SECRET_KEY;
+     * JWT_SECRET when unset). The API and the worker must use the same value.
+     */
+    secretKey: string;
+    webhooks: {
+      /** Accept http:// URLs (otherwise only https://). */
+      allowInsecure: boolean;
+      /** Accept receivers on private, loopback or link-local addresses. */
+      allowPrivateNetworks: boolean;
+      timeoutMs: number;
+    };
+    /** Platform events (and their webhook deliveries) older than this are deleted. */
+    eventsRetentionDays: number;
+  };
 }
 
 const bool = (value: string | undefined, fallback: boolean): boolean => {
@@ -158,6 +174,15 @@ export const loadConfiguration = (): AppConfig => {
     rateLimit: {
       ttlMs: int(env.RATE_LIMIT_TTL_MS, 60000),
       limit: int(env.RATE_LIMIT_MAX, 120),
+    },
+    integrations: {
+      secretKey: optional(env.INTEGRATIONS_SECRET_KEY) ?? env.JWT_SECRET ?? '',
+      webhooks: {
+        allowInsecure: bool(env.WEBHOOKS_ALLOW_INSECURE, false),
+        allowPrivateNetworks: bool(env.WEBHOOKS_ALLOW_PRIVATE_NETWORKS, false),
+        timeoutMs: int(env.WEBHOOK_TIMEOUT_MS, 10000),
+      },
+      eventsRetentionDays: int(env.EVENTS_RETENTION_DAYS, 30),
     },
   };
 };

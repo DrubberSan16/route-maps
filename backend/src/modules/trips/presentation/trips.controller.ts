@@ -1,5 +1,6 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiScopes } from '../../../common/decorators/api-scopes.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user';
 import {
@@ -17,6 +18,7 @@ export class TripsController {
   constructor(private readonly trips: TripsService) {}
 
   @Post()
+  @ApiScopes('trips:write')
   @ApiOperation({ summary: 'Start a trip (recorded track)' })
   start(@CurrentUser() user: AuthenticatedUser, @Body() dto: StartTripDto) {
     return this.trips.start(user.id, {
@@ -26,18 +28,21 @@ export class TripsController {
   }
 
   @Get()
+  @ApiScopes('trips:read')
   @ApiOperation({ summary: 'List trips' })
   list(@CurrentUser() user: AuthenticatedUser, @Query() query: ListTripsQueryDto) {
     return this.trips.list(user.id, query);
   }
 
   @Get(':id')
+  @ApiScopes('trips:read')
   @ApiOperation({ summary: 'Trip detail' })
   get(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.trips.get(user.id, id);
   }
 
   @Get(':id/path')
+  @ApiScopes('trips:read')
   @ApiOperation({
     summary: 'Recorded track as a GeoJSON LineString through the returned points',
     description:
@@ -53,6 +58,7 @@ export class TripsController {
   }
 
   @Post(':id/finish')
+  @ApiScopes('trips:write')
   @HttpCode(200)
   @ApiOperation({ summary: 'Finish a trip and compute its travelled distance' })
   finish(
@@ -64,6 +70,7 @@ export class TripsController {
   }
 
   @Post(':id/cancel')
+  @ApiScopes('trips:write')
   @HttpCode(200)
   @ApiOperation({ summary: 'Cancel an active trip' })
   cancel(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {

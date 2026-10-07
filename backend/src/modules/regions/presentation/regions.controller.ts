@@ -26,6 +26,8 @@ import { Roles } from '../../../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user';
 import { AppConfigService } from '../../../config/app-config.service';
 import { UserRole } from '../../../generated/prisma/enums';
+import { AuditActor, AuditService } from '../../audit/application/audit.service';
+import { Actor } from '../../audit/presentation/actor.decorator';
 import {
   CheckUpdatesDto,
   ListRegionsQueryDto,
@@ -49,6 +51,7 @@ export class RegionsController {
     private readonly downloads: RegionDownloadService,
     private readonly downloaded: DownloadedRegionsService,
     private readonly config: AppConfigService,
+    private readonly audit: AuditService,
   ) {}
 
   private get tilesBase(): string {
@@ -95,8 +98,20 @@ export class RegionsController {
   @Post('sync')
   @HttpCode(200)
   @ApiOperation({ summary: '[admin] Register regions from the manifests found in map storage' })
-  sync(@Body() dto: SyncRegionsDto) {
-    return this.regions.syncFromStorage({ force: dto.force });
+  async sync(@Actor() actor: AuditActor, @Body() dto: SyncRegionsDto) {
+    const report = await this.regions.syncFromStorage({ force: dto.force });
+    await this.audit.record(actor, {
+      action: 'region.sync',
+      targetType: 'region',
+      summary: 'map storage',
+      details: {
+        force: dto.force ?? false,
+        registered: report.registered,
+        disabled: report.disabled,
+        errors: report.errors.length,
+      },
+    });
+    return report;
   }
 
   @Public()
@@ -165,7 +180,22 @@ export class RegionsController {
   @Patch(':id')
   @ApiOperation({ summary: '[admin] Enable or disable a region' })
   @ApiOkResponse({ type: MapRegionResponse })
-  async setEnabled(@Param('id') id: string, @Body() dto: SetRegionEnabledDto) {
-    return toRegionResponse(await this.regions.setEnabled(id, dto.enabled), this.tilesBase);
+  async setEnabled(
+    @Actor() actor: AuditActor,
+    @Param('id') id: string,
+    @Body() dto: SetRegionEnabledDto,
+  ) {
+    const before = await this.regions.get(id);
+    const region = await this.regions.setEnabled(id, dto.enabled);
+    if (before.enabled !== region.enabled) {
+      await this.audit.record(actor, {
+        action: region.enabled ? 'region.enable' : 'region.disable',
+        targetType: 'region',
+        targetId: region.id,
+        summary: region.name,
+        details: { code: region.code, version: region.version },
+      });
+    }
+    return toRegionResponse(region, this.tilesBase);
   }
 }

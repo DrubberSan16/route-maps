@@ -14,6 +14,7 @@ import { UserProfileResponse } from '../../users/application/dto/users.dto';
 import { AuthService } from '../application/auth.service';
 import {
   AuthTokensResponse,
+  ChangePasswordDto,
   LoginDto,
   RefreshTokenDto,
   RegisterDto,
@@ -69,5 +70,21 @@ export class AuthController {
   @ApiOkResponse({ type: UserProfileResponse })
   me(@CurrentUser() user: AuthenticatedUser) {
     return this.auth.me(user.id);
+  }
+
+  @Throttle(AUTH_THROTTLE)
+  @Post('password')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Change the password: closes every session and returns a new token pair',
+  })
+  @ApiOkResponse({ type: AuthTokensResponse })
+  changePassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ChangePasswordDto,
+    @Headers('user-agent') userAgent?: string,
+  ) {
+    return this.auth.changePassword(user.id, dto, userAgent);
   }
 }

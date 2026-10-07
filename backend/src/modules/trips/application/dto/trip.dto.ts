@@ -4,6 +4,7 @@ import {
   IsEnum,
   IsInt,
   IsISO8601,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -12,6 +13,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
+import { MaxJsonSize } from '../../../../common/dto/max-json-size.validator';
 import { RoutingProfile, TripStatus } from '../../../../generated/prisma/enums';
 import { MAX_PATH_POINTS } from '../../domain/trip.entity';
 
@@ -46,6 +48,19 @@ export class StartTripDto {
   @IsOptional()
   @IsISO8601({ strict: true })
   startedAt?: string;
+
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: true,
+    example: { vehicle: 'GYE-1234', order: 'PED-2041' },
+    description:
+      'Data of the client application (at most 4 KB of JSON), returned with the trip and in ' +
+      'its events (trip.*, geofence.*)',
+  })
+  @IsOptional()
+  @IsObject()
+  @MaxJsonSize(4096)
+  metadata?: Record<string, unknown>;
 }
 
 export class FinishTripDto {

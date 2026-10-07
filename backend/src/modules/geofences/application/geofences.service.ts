@@ -10,6 +10,7 @@ import {
 import { GeofenceType } from '../../../generated/prisma/enums';
 import {
   Geofence,
+  GeofenceFilter,
   GEOFENCE_REPOSITORY,
   GeofenceInput,
   type GeofenceRepository,
@@ -75,6 +76,11 @@ export class GeofencesService {
 
   list(userId: string, activeOnly = false): Promise<Geofence[]> {
     return this.geofences.list(userId, { activeOnly });
+  }
+
+  /** Geofences of every account (administration). */
+  search(filter: GeofenceFilter): Promise<{ items: Geofence[]; total: number }> {
+    return this.geofences.search(filter);
   }
 
   async delete(userId: string, id: string): Promise<{ deleted: boolean }> {

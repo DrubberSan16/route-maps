@@ -3,10 +3,19 @@ import { randomUUID } from 'node:crypto';
 import { AppException } from '../../../common/errors/app.exception';
 import { ErrorCode } from '../../../common/errors/error-codes';
 import { PointGeometry } from '../../../common/geo/geojson';
+import { Prisma } from '../../../generated/prisma/client';
 import { RoutingProfile, TripStatus } from '../../../generated/prisma/enums';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
+import { PlatformEventsService } from '../../events/application/platform-events.service';
 import { UsersService } from '../../users/application/users.service';
-import { MAX_PATH_POINTS, Trip, TripPath } from '../domain/trip.entity';
+import {
+  LiveTrip,
+  MAX_PATH_POINTS,
+  toTrip,
+  Trip,
+  tripEventData,
+  TripPath,
+} from '../domain/trip.entity';
 
 export interface StartTripInput {
   id?: string;
@@ -15,13 +24,22 @@ export interface StartTripInput {
   routeId?: string;
   installationId?: string;
   startedAt?: Date;
+  /** Data of the client application (vehicle, driver, order ids), echoed in the trip's events. */
+  metadata?: Record<string, unknown>;
 }
+
+/** The Prisma client or an open transaction. */
+type SqlClient = Pick<Prisma.TransactionClient, '$executeRaw'>;
+
+/** Most trips `GET /tracking/live` returns. */
+const MAX_LIVE_TRIPS = 1000;
 
 @Injectable()
 export class TripsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly users: UsersService,
+    private readonly events: PlatformEventsService,
   ) {}
 
   /** Starts a trip. Idempotent when the client supplies the id (offline queue retries). */
@@ -41,16 +59,23 @@ export class TripsService {
       input.routeId && (await this.prisma.route.count({ where: { id: input.routeId, userId } })) > 0
         ? input.routeId
         : null;
-    await this.prisma.trip.create({
-      data: {
-        id,
-        userId,
-        deviceId: device?.id ?? null,
-        routeId,
-        name: input.name,
-        profile: input.profile ?? RoutingProfile.CAR,
-        startedAt: input.startedAt ?? new Date(),
-      },
+    await this.prisma.$transaction(async (tx) => {
+      const trip = await tx.trip.create({
+        data: {
+          id,
+          userId,
+          deviceId: device?.id ?? null,
+          routeId,
+          name: input.name,
+          profile: input.profile ?? RoutingProfile.CAR,
+          startedAt: input.startedAt ?? new Date(),
+          metadata: input.metadata as Prisma.InputJsonValue | undefined,
+        },
+      });
+      await this.events.emit(
+        { type: 'trip.started', accountId: userId, data: tripEventData(trip) },
+        tx,
+      );
     });
     return this.get(userId, id);
   }
@@ -61,8 +86,7 @@ export class TripsService {
       include: { _count: { select: { points: true } } },
     });
     if (!trip) throw AppException.notFound(ErrorCode.TRIP_NOT_FOUND, 'Trip not found');
-    const { _count, ...rest } = trip;
-    return { ...rest, pointCount: _count.points };
+    return toTrip(trip);
   }
 
   async list(
@@ -81,7 +105,7 @@ export class TripsService {
       this.prisma.trip.count({ where }),
     ]);
     return {
-      items: trips.map(({ _count, ...trip }) => ({ ...trip, pointCount: _count.points })),
+      items: trips.map(toTrip),
       total,
       limit: options.limit,
       offset: options.offset,
@@ -90,34 +114,110 @@ export class TripsService {
 
   /** Completes the trip and stores its travelled distance (geodesic length of the track). */
   async finish(userId: string, id: string, endedAt?: Date): Promise<Trip> {
-    const trip = await this.get(userId, id);
-    if (trip.status === TripStatus.COMPLETED) return trip;
-    if (trip.status !== TripStatus.ACTIVE) {
-      throw new AppException(ErrorCode.TRIP_NOT_ACTIVE, 'Trip is not active', HttpStatus.CONFLICT);
-    }
-    await this.prisma.trip.update({
-      where: { id },
-      data: { status: TripStatus.COMPLETED, endedAt: endedAt ?? new Date() },
-    });
-    await this.recomputeDistance(id);
-    return this.get(userId, id);
+    return this.close(userId, id, TripStatus.COMPLETED, endedAt ?? new Date());
   }
 
   async cancel(userId: string, id: string): Promise<Trip> {
-    const trip = await this.get(userId, id);
-    if (trip.status === TripStatus.CANCELLED) return trip;
-    if (trip.status !== TripStatus.ACTIVE) {
-      throw new AppException(ErrorCode.TRIP_NOT_ACTIVE, 'Trip is not active', HttpStatus.CONFLICT);
-    }
-    await this.prisma.trip.update({
-      where: { id },
-      data: { status: TripStatus.CANCELLED, endedAt: new Date() },
-    });
-    return this.get(userId, id);
+    return this.close(userId, id, TripStatus.CANCELLED, new Date());
   }
 
-  async recomputeDistance(tripId: string): Promise<void> {
-    await this.prisma.$executeRaw`
+  /**
+   * Ends an active trip once: when two requests race (a retried upload, the app and an
+   * integration), only the one that changes the status emits the event; the other gets the trip
+   * as it ended, or TRIP_NOT_ACTIVE if it ended the other way.
+   */
+  private async close(
+    userId: string,
+    id: string,
+    status: typeof TripStatus.COMPLETED | typeof TripStatus.CANCELLED,
+    endedAt: Date,
+  ): Promise<Trip> {
+    const trip = await this.get(userId, id);
+    if (trip.status === TripStatus.ACTIVE) {
+      await this.prisma.$transaction(async (tx) => {
+        const claimed = await tx.trip.updateMany({
+          where: { id, status: TripStatus.ACTIVE },
+          data: { status, endedAt },
+        });
+        if (claimed.count === 0) return;
+        if (status === TripStatus.COMPLETED) await this.recomputeDistance(id, tx);
+        const closed = await tx.trip.findUniqueOrThrow({ where: { id } });
+        await this.events.emit(
+          {
+            type: status === TripStatus.COMPLETED ? 'trip.finished' : 'trip.cancelled',
+            accountId: userId,
+            data: tripEventData(closed),
+          },
+          tx,
+        );
+      });
+    }
+    const result = trip.status === TripStatus.ACTIVE ? await this.get(userId, id) : trip;
+    if (result.status !== status) {
+      throw new AppException(ErrorCode.TRIP_NOT_ACTIVE, 'Trip is not active', HttpStatus.CONFLICT);
+    }
+    return result;
+  }
+
+  /**
+   * Active trips of an account with their last position, most recently seen first (fleet
+   * monitoring by integrations, the administration panel's live map with every account).
+   */
+  async live(userId?: string): Promise<LiveTrip[]> {
+    const owner = userId ? Prisma.sql`AND t.user_id = ${userId}::uuid` : Prisma.empty;
+    const rows = await this.prisma.$queryRaw<
+      {
+        id: string;
+        user_id: string;
+        email: string;
+        name: string | null;
+        profile: RoutingProfile;
+        device_id: string | null;
+        metadata: unknown;
+        started_at: Date;
+        location: PointGeometry | null;
+        accuracy: number | null;
+        speed: number | null;
+        heading: number | null;
+        recorded_at: Date | null;
+      }[]
+    >`
+      SELECT t.id, t.user_id, u.email, t.name, t.profile, t.device_id, t.metadata, t.started_at,
+             p.location, p.accuracy, p.speed, p.heading, p.recorded_at
+      FROM trips t
+      JOIN users u ON u.id = t.user_id
+      LEFT JOIN LATERAL (
+        SELECT ST_AsGeoJSON(location)::json AS location, accuracy, speed, heading, recorded_at
+        FROM trip_points WHERE trip_id = t.id ORDER BY recorded_at DESC LIMIT 1
+      ) p ON true
+      WHERE t.status = 'ACTIVE' ${owner}
+      ORDER BY p.recorded_at DESC NULLS LAST, t.started_at DESC
+      LIMIT ${MAX_LIVE_TRIPS}`;
+    return rows.map((row) => ({
+      tripId: row.id,
+      userId: row.user_id,
+      userEmail: row.email,
+      name: row.name,
+      profile: row.profile,
+      deviceId: row.device_id,
+      metadata: row.metadata,
+      startedAt: row.started_at,
+      position:
+        row.location && row.recorded_at
+          ? {
+              longitude: row.location.coordinates[0],
+              latitude: row.location.coordinates[1],
+              accuracy: row.accuracy,
+              speed: row.speed,
+              heading: row.heading,
+              recordedAt: row.recorded_at,
+            }
+          : null,
+    }));
+  }
+
+  async recomputeDistance(tripId: string, client: SqlClient = this.prisma): Promise<void> {
+    await client.$executeRaw`
       UPDATE trips SET distance_meters = COALESCE((
         SELECT ST_Length(ST_MakeLine(location ORDER BY recorded_at)::geography)
         FROM trip_points WHERE trip_id = ${tripId}::uuid

@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AppException } from '../../../common/errors/app.exception';
 import { ErrorCode } from '../../../common/errors/error-codes';
+import { PlatformEventsService } from '../../events/application/platform-events.service';
 import {
   MAP_STORAGE_PROVIDER,
   type MapStorageProvider,
@@ -24,6 +25,25 @@ export interface RegionSyncReport {
 }
 
 const CODE_PATTERN = /^[a-z0-9][a-z0-9-]{1,62}$/;
+
+/** `data` of the region.published and region.disabled events. */
+export const regionEventData = (region: MapRegion): Record<string, unknown> => ({
+  region: {
+    id: region.id,
+    code: region.code,
+    name: region.name,
+    country: region.country,
+    province: region.province,
+    city: region.city,
+    version: region.version,
+    enabled: region.enabled,
+    mapFileSize: region.fileSize,
+    mapChecksum: region.checksum,
+    routing: region.routingFile !== null,
+    assets: region.assets.map((asset) => asset.kind),
+    bbox: region.bbox,
+  },
+});
 const FORMAT_PATTERN = /^[a-z0-9]{2,8}$/;
 
 /** Field by field: JSONB does not keep the key order the assets were written with. */
@@ -49,6 +69,7 @@ export class MapRegionService {
   constructor(
     @Inject(MAP_REGION_REPOSITORY) private readonly regions: MapRegionRepository,
     @Inject(MAP_STORAGE_PROVIDER) private readonly storage: MapStorageProvider,
+    private readonly events: PlatformEventsService,
   ) {}
 
   list(includeDisabled = false): Promise<MapRegion[]> {
@@ -111,10 +132,14 @@ export class MapRegionService {
     return { region, asset };
   }
 
+  /** Enables or disables a region; integrations hear about it (region.published / disabled). */
   async setEnabled(idOrCode: string, enabled: boolean): Promise<MapRegion> {
     const region = await this.get(idOrCode);
+    if (region.enabled === enabled) return region;
     await this.regions.setEnabled(region.code, enabled);
-    return this.get(region.code);
+    const updated = await this.get(region.code);
+    await this.announce(updated);
+    return updated;
   }
 
   /**
@@ -132,6 +157,7 @@ export class MapRegionService {
         const outcome = await this.syncManifest(manifest, options.force ?? false);
         seen.add(manifest.code);
         report[outcome].push(manifest.code);
+        if (outcome === 'registered') await this.announce(await this.get(manifest.code));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.error({ err: error }, `Could not register region ${manifest.code}`);
@@ -145,6 +171,7 @@ export class MapRegionService {
       if (!file) {
         await this.regions.setEnabled(region.code, false);
         report.disabled.push(region.code);
+        await this.announce({ ...region, enabled: false });
       }
     }
     this.logger.log(
@@ -152,6 +179,14 @@ export class MapRegionService {
         `${report.disabled.length} disabled, ${report.errors.length} errors`,
     );
     return report;
+  }
+
+  private async announce(region: MapRegion): Promise<void> {
+    await this.events.emit({
+      type: region.enabled ? 'region.published' : 'region.disabled',
+      accountId: null,
+      data: regionEventData(region),
+    });
   }
 
   private async syncManifest(

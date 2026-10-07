@@ -1,0 +1,192 @@
+import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { Paginated } from '../../../common/dto/pagination.dto';
+import { AppException } from '../../../common/errors/app.exception';
+import { ErrorCode } from '../../../common/errors/error-codes';
+import { Prisma } from '../../../generated/prisma/client';
+import { WebhookDeliveryStatus } from '../../../generated/prisma/enums';
+import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
+import {
+  ALL_EVENTS,
+  PLATFORM_EVENT_TYPES,
+  PlatformEventInput,
+  PlatformEventView,
+  toEventView,
+} from '../domain/platform-event';
+
+/** The Prisma client or the transaction of the change an event describes. */
+export type EventsSqlClient = Pick<Prisma.TransactionClient, '$executeRaw'>;
+
+export interface EventFeed {
+  items: PlatformEventView[];
+  /** Cursor for the next request (`after`): the last event returned, or the one received. */
+  next: string;
+  hasMore: boolean;
+}
+
+export type DeliveryCounts = Record<WebhookDeliveryStatus, number>;
+
+export interface AdminEventView extends PlatformEventView {
+  accountEmail: string | null;
+  deliveries: DeliveryCounts;
+}
+
+export interface EventDeliveryView {
+  id: string;
+  status: WebhookDeliveryStatus;
+  attempts: number;
+  nextAttemptAt: Date;
+  lastAttemptAt: Date | null;
+  responseStatus: number | null;
+  error: string | null;
+  webhook: { id: string; url: string };
+  integration: { id: string; name: string };
+}
+
+export interface AdminEventDetail extends Omit<AdminEventView, 'deliveries'> {
+  deliveries: EventDeliveryView[];
+}
+
+const emptyCounts = (): DeliveryCounts => ({ PENDING: 0, SENDING: 0, SUCCEEDED: 0, FAILED: 0 });
+
+/**
+ * Platform events: stored for `GET /events`, the administration panel and the webhooks of the
+ * integrations, which the worker process delivers (the API itself never calls other servers).
+ */
+@Injectable()
+export class PlatformEventsService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Stores the event and, in the same statement, queues one delivery for every active webhook
+   * subscribed to it: those of the account's integrations, or of every integration for platform
+   * events. Pass the transaction of the change it describes so that both are kept or neither.
+   */
+  async emit(event: PlatformEventInput, client: EventsSqlClient = this.prisma): Promise<string> {
+    const id = randomUUID();
+    await client.$executeRaw`
+      WITH event AS (
+        INSERT INTO platform_events (id, type, account_id, data)
+        VALUES (${id}::uuid, ${event.type}, ${event.accountId}::uuid,
+                ${JSON.stringify(event.data)}::jsonb)
+        RETURNING id, type, account_id
+      )
+      INSERT INTO webhook_deliveries (id, event_id, endpoint_id, updated_at)
+      SELECT gen_random_uuid(), event.id, w.id, now()
+      FROM event
+      JOIN webhook_endpoints w
+        ON w.active AND (event.type = ANY (w.events) OR ${ALL_EVENTS} = ANY (w.events))
+      JOIN integrations i ON i.id = w.integration_id AND i.active
+      JOIN users u ON u.id = i.user_id AND u.active
+      WHERE event.account_id IS NULL OR event.account_id = i.user_id`;
+    return id;
+  }
+
+  /** Events of an account and of the platform after a position, oldest first (`GET /events`). */
+  async feed(
+    accountId: string,
+    options: { after: bigint; limit: number; types?: string[] },
+  ): Promise<EventFeed> {
+    const rows = await this.prisma.platformEvent.findMany({
+      where: {
+        seq: { gt: options.after },
+        OR: [{ accountId }, { accountId: null }],
+        // Webhook tests are not part of the feed.
+        type: { in: options.types?.length ? options.types : [...PLATFORM_EVENT_TYPES] },
+      },
+      orderBy: { seq: 'asc' },
+      take: options.limit + 1,
+    });
+    const items = rows.slice(0, options.limit).map(toEventView);
+    return {
+      items,
+      next: items.at(-1)?.seq ?? options.after.toString(),
+      hasMore: rows.length > options.limit,
+    };
+  }
+
+  /** Every event, newest first, with how its webhook deliveries went (administration). */
+  async list(query: {
+    type?: string;
+    accountId?: string;
+    limit: number;
+    offset: number;
+  }): Promise<Paginated<AdminEventView>> {
+    const where: Prisma.PlatformEventWhereInput = {
+      ...(query.type ? { type: query.type } : {}),
+      ...(query.accountId ? { accountId: query.accountId } : {}),
+    };
+    const [rows, total] = await Promise.all([
+      this.prisma.platformEvent.findMany({
+        where,
+        orderBy: { seq: 'desc' },
+        take: query.limit,
+        skip: query.offset,
+        include: { account: { select: { email: true } } },
+      }),
+      this.prisma.platformEvent.count({ where }),
+    ]);
+    const counts = await this.deliveryCounts(rows.map((row) => row.id));
+    return {
+      items: rows.map(({ account, ...row }) => ({
+        ...toEventView(row),
+        accountEmail: account?.email ?? null,
+        deliveries: counts.get(row.id) ?? emptyCounts(),
+      })),
+      total,
+      limit: query.limit,
+      offset: query.offset,
+    };
+  }
+
+  /** One event with each webhook delivery it produced (administration). */
+  async detail(id: string): Promise<AdminEventDetail> {
+    const row = await this.prisma.platformEvent.findUnique({
+      where: { id },
+      include: {
+        account: { select: { email: true } },
+        deliveries: {
+          orderBy: { createdAt: 'asc' },
+          include: {
+            endpoint: {
+              select: { id: true, url: true, integration: { select: { id: true, name: true } } },
+            },
+          },
+        },
+      },
+    });
+    if (!row) throw AppException.notFound(ErrorCode.NOT_FOUND, 'Event not found');
+    const { account, deliveries, ...event } = row;
+    return {
+      ...toEventView(event),
+      accountEmail: account?.email ?? null,
+      deliveries: deliveries.map((delivery) => ({
+        id: delivery.id,
+        status: delivery.status,
+        attempts: delivery.attempts,
+        nextAttemptAt: delivery.nextAttemptAt,
+        lastAttemptAt: delivery.lastAttemptAt,
+        responseStatus: delivery.responseStatus,
+        error: delivery.error,
+        webhook: { id: delivery.endpoint.id, url: delivery.endpoint.url },
+        integration: delivery.endpoint.integration,
+      })),
+    };
+  }
+
+  private async deliveryCounts(eventIds: string[]): Promise<Map<string, DeliveryCounts>> {
+    const counts = new Map<string, DeliveryCounts>();
+    if (eventIds.length === 0) return counts;
+    const groups = await this.prisma.webhookDelivery.groupBy({
+      by: ['eventId', 'status'],
+      where: { eventId: { in: eventIds } },
+      _count: { _all: true },
+    });
+    for (const group of groups) {
+      const entry = counts.get(group.eventId) ?? emptyCounts();
+      entry[group.status] = group._count._all;
+      counts.set(group.eventId, entry);
+    }
+    return counts;
+  }
+}

@@ -22,7 +22,7 @@ export class UsersService {
 
   async getById(id: string): Promise<UserEntity> {
     const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user) throw AppException.notFound(ErrorCode.NOT_FOUND, 'User not found');
+    if (!user) throw AppException.notFound(ErrorCode.USER_NOT_FOUND, 'User not found');
     return user;
   }
 
@@ -31,6 +31,7 @@ export class UsersService {
     name: string;
     passwordHash: string;
     role?: UserRole;
+    serviceAccount?: boolean;
   }): Promise<UserEntity> {
     return this.prisma.user.create({
       data: {
@@ -38,12 +39,46 @@ export class UsersService {
         name: input.name,
         passwordHash: input.passwordHash,
         role: input.role ?? UserRole.USER,
+        serviceAccount: input.serviceAccount ?? false,
       },
     });
   }
 
   updateProfile(id: string, data: { name?: string }): Promise<UserEntity> {
     return this.prisma.user.update({ where: { id }, data });
+  }
+
+  async recordLogin(id: string): Promise<void> {
+    await this.prisma.user.update({ where: { id }, data: { lastLoginAt: new Date() } });
+  }
+
+  /**
+   * Replaces the password and closes every session of the account: its refresh tokens are
+   * revoked and the access tokens issued until now stop being accepted.
+   */
+  async replacePassword(id: string, passwordHash: string): Promise<UserEntity> {
+    const [user] = await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id },
+        data: { passwordHash, sessionsRevokedAt: new Date() },
+      }),
+      this.prisma.refreshToken.updateMany({
+        where: { userId: id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+    return user;
+  }
+
+  /** Closes every session of the account without touching its password. */
+  async revokeSessions(id: string): Promise<void> {
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id }, data: { sessionsRevokedAt: new Date() } }),
+      this.prisma.refreshToken.updateMany({
+        where: { userId: id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
   }
 
   /** Creates or refreshes the device record identified by its installation id. */

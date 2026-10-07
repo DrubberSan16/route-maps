@@ -9,8 +9,20 @@ import {
   StorageKind,
   StoredFileInfo,
 } from '../../maps/domain/map-storage.provider';
+import { PlatformEventsService } from '../../events/application/platform-events.service';
+import { PlatformEventInput } from '../../events/domain/platform-event';
 import { MapRegion, MapRegionRepository, UpsertMapRegion } from '../domain/map-region.entity';
 import { MapRegionService } from './map-region.service';
+
+/** Collects the emitted events instead of storing them. */
+class RecordedEvents {
+  readonly emitted: PlatformEventInput[] = [];
+
+  emit(event: PlatformEventInput) {
+    this.emitted.push(event);
+    return Promise.resolve(randomUUID());
+  }
+}
 
 class InMemoryRegions implements MapRegionRepository {
   readonly regions = new Map<string, MapRegion>();
@@ -118,6 +130,7 @@ const GUAYAQUIL: RegionManifest = {
 describe('MapRegionService', () => {
   let regions: InMemoryRegions;
   let storage: MemoryStorage;
+  let events: RecordedEvents;
   let service: MapRegionService;
 
   beforeEach(() => {
@@ -128,7 +141,8 @@ describe('MapRegionService', () => {
     storage.put('map', GUAYAQUIL.mapFile, 'pmtiles v1');
     storage.put('routing', GUAYAQUIL.routingFile!, 'valhalla tiles v1');
     storage.manifests = [GUAYAQUIL];
-    service = new MapRegionService(regions, storage);
+    events = new RecordedEvents();
+    service = new MapRegionService(regions, storage, events as unknown as PlatformEventsService);
   });
 
   afterEach(() => jest.restoreAllMocks());
@@ -272,6 +286,24 @@ describe('MapRegionService', () => {
 
       expect(report.disabled).toEqual(['guayaquil']);
       expect(regions.regions.get('guayaquil')?.enabled).toBe(false);
+      expect(events.emitted.map((event) => event.type)).toEqual([
+        'region.published',
+        'region.disabled',
+      ]);
+    });
+
+    it('announces new regions and versions to the integrations, not unchanged ones', async () => {
+      await service.syncFromStorage();
+      await service.syncFromStorage();
+      storage.manifests = [{ ...GUAYAQUIL, version: '2026.10.01.0900' }];
+      await service.syncFromStorage();
+
+      expect(events.emitted).toHaveLength(2);
+      expect(events.emitted[1]).toMatchObject({
+        type: 'region.published',
+        accountId: null,
+        data: { region: { code: 'guayaquil', version: '2026.10.01.0900', routing: true } },
+      });
     });
 
     describe('assets (relief, satellite, overlays)', () => {
@@ -410,6 +442,18 @@ describe('MapRegionService', () => {
         registered: ['guayaquil'],
       });
       expect(regions.regions.get('guayaquil')?.enabled).toBe(true);
+    });
+
+    it('announces enabling and disabling only when the state changes', async () => {
+      await service.syncFromStorage();
+      await service.setEnabled('guayaquil', true);
+      await service.setEnabled('guayaquil', false);
+      await service.setEnabled('guayaquil', false);
+
+      expect(events.emitted.map((event) => event.type)).toEqual([
+        'region.published',
+        'region.disabled',
+      ]);
     });
   });
 

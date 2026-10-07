@@ -20,8 +20,11 @@ datasource db {
   extensions = [postgis]
 }
 
+/// USER: the app's people. OPERATOR: operations in the administration panel (monitoring, trips,
+/// geofences, places). ADMIN: everything, including accounts, integrations and region publishing.
 enum UserRole {
   USER
+  OPERATOR
   ADMIN
 }
 
@@ -68,14 +71,28 @@ enum SyncEventStatus {
   FAILED
 }
 
+enum WebhookDeliveryStatus {
+  PENDING
+  SENDING
+  SUCCEEDED
+  FAILED
+}
+
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
-  email        String   @unique
-  passwordHash String   @map("password_hash")
-  name         String
-  role         UserRole @default(USER)
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                String    @id @default(uuid()) @db.Uuid
+  email             String    @unique
+  passwordHash      String    @map("password_hash")
+  name              String
+  role              UserRole  @default(USER)
+  /// Disabled accounts cannot log in, and their open sessions stop working.
+  active            Boolean   @default(true)
+  /// Account an integration acts as: it never logs in with a password.
+  serviceAccount    Boolean   @default(false) @map("service_account")
+  /// Access tokens issued before this instant are refused (sessions closed by an administrator).
+  sessionsRevokedAt DateTime? @map("sessions_revoked_at") @db.Timestamptz(3)
+  lastLoginAt       DateTime? @map("last_login_at") @db.Timestamptz(3)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   refreshTokens     RefreshToken[]
   devices           Device[]
@@ -87,7 +104,11 @@ model User {
   downloadedRegions DownloadedRegion[]
   syncEvents        SynchronizationEvent[]
   routeTombstones   RouteTombstone[]
+  integrations      Integration[]
+  platformEvents    PlatformEvent[]
+  auditLogs         AuditLog[]
 
+  @@index([role])
   @@map("users")
 }
 
@@ -282,26 +303,47 @@ model RoutePoint {
 }
 
 model Trip {
-  id             String         @id @default(uuid()) @db.Uuid
-  userId         String         @map("user_id") @db.Uuid
-  deviceId       String?        @map("device_id") @db.Uuid
-  routeId        String?        @map("route_id") @db.Uuid
-  name           String?
-  profile        RoutingProfile @default(CAR)
-  status         TripStatus     @default(ACTIVE)
-  startedAt      DateTime       @default(now()) @map("started_at") @db.Timestamptz(3)
-  endedAt        DateTime?      @map("ended_at") @db.Timestamptz(3)
-  distanceMeters Float?         @map("distance_meters")
-  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                 String         @id @default(uuid()) @db.Uuid
+  userId             String         @map("user_id") @db.Uuid
+  deviceId           String?        @map("device_id") @db.Uuid
+  routeId            String?        @map("route_id") @db.Uuid
+  name               String?
+  profile            RoutingProfile @default(CAR)
+  status             TripStatus     @default(ACTIVE)
+  startedAt          DateTime       @default(now()) @map("started_at") @db.Timestamptz(3)
+  endedAt            DateTime?      @map("ended_at") @db.Timestamptz(3)
+  distanceMeters     Float?         @map("distance_meters")
+  /// Data of the client application (vehicle, driver or order ids), returned in its events.
+  metadata           Json?
+  /// Time of the last fix checked against the account's geofences (enter/exit events).
+  geofencesCheckedAt DateTime?      @map("geofences_checked_at") @db.Timestamptz(3)
+  createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  user   User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  device Device?     @relation(fields: [deviceId], references: [id], onDelete: SetNull)
-  route  Route?      @relation(fields: [routeId], references: [id], onDelete: SetNull)
-  points TripPoint[]
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device         Device?             @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  route          Route?              @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  points         TripPoint[]
+  geofenceStates TripGeofenceState[]
 
   @@index([userId, startedAt])
+  /// Administration lists and live monitoring read trips by status and time.
+  @@index([status, startedAt])
   @@map("trips")
+}
+
+/// Geofences a trip is currently inside of; a change emits geofence.entered or geofence.exited.
+model TripGeofenceState {
+  tripId     String   @map("trip_id") @db.Uuid
+  geofenceId String   @map("geofence_id") @db.Uuid
+  enteredAt  DateTime @map("entered_at") @db.Timestamptz(3)
+
+  trip     Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  geofence Geofence @relation(fields: [geofenceId], references: [id], onDelete: Cascade)
+
+  @@id([tripId, geofenceId])
+  @@index([geofenceId])
+  @@map("trip_geofence_states")
 }
 
 /// GPS fix recorded during a trip. (trip_id, recorded_at) is unique so that
@@ -342,7 +384,8 @@ model Geofence {
   createdAt    DateTime                               @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime                               @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tripStates TripGeofenceState[]
 
   @@index([userId])
   @@index([area], type: Gist)
@@ -371,4 +414,161 @@ model SynchronizationEvent {
   @@unique([userId, clientOperationId])
   @@index([userId, processedAt])
   @@map("synchronization_events")
+}
+
+/// External application connected to the platform. It acts as one account (`userId`): through its
+/// API keys it reads and writes that account's trips, positions, geofences, places and routes, and
+/// its webhooks receive that account's events plus the platform's (regions).
+model Integration {
+  id                 String   @id @default(uuid()) @db.Uuid
+  name               String
+  description        String?
+  contactEmail       String?  @map("contact_email")
+  userId             String   @map("user_id") @db.Uuid
+  active             Boolean  @default(true)
+  /// Requests per minute shared by all its keys.
+  rateLimitPerMinute Int      @default(600) @map("rate_limit_per_minute")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  apiKeys  ApiKey[]
+  webhooks WebhookEndpoint[]
+
+  @@index([userId])
+  @@map("integrations")
+}
+
+/// API key of an integration. The key is shown once; only its SHA-256 is kept.
+model ApiKey {
+  id            String    @id @default(uuid()) @db.Uuid
+  integrationId String    @map("integration_id") @db.Uuid
+  name          String
+  /// Public start of the key ("rmk_" + 12 hex characters), used to find it.
+  prefix        String    @unique
+  /// SHA-256 (hex) of the whole key.
+  keyHash       String    @map("key_hash")
+  /// Last characters of the key, so people can tell keys apart.
+  lastFour      String    @map("last_four")
+  scopes        String[]
+  expiresAt     DateTime? @map("expires_at") @db.Timestamptz(3)
+  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz(3)
+  lastUsedAt    DateTime? @map("last_used_at") @db.Timestamptz(3)
+  lastUsedIp    String?   @map("last_used_ip")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  integration Integration     @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  usage       ApiUsageDaily[]
+
+  @@index([integrationId])
+  @@map("api_keys")
+}
+
+/// Requests made with an API key per day (in the platform's time zone).
+model ApiUsageDaily {
+  apiKeyId String   @map("api_key_id") @db.Uuid
+  day      DateTime @db.Date
+  requests Int      @default(0)
+  errors   Int      @default(0)
+
+  apiKey ApiKey @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+
+  @@id([apiKeyId, day])
+  @@index([day])
+  @@map("api_usage_daily")
+}
+
+/// URL of an integration that receives events (HTTP POST signed with HMAC-SHA256).
+model WebhookEndpoint {
+  id                  String    @id @default(uuid()) @db.Uuid
+  integrationId       String    @map("integration_id") @db.Uuid
+  url                 String
+  description         String?
+  /// Event types delivered; "*" for all of them.
+  events              String[]
+  active              Boolean   @default(true)
+  /// Signing secret, encrypted (AES-256-GCM) with INTEGRATIONS_SECRET_KEY.
+  secret              String
+  consecutiveFailures Int       @default(0) @map("consecutive_failures")
+  lastSuccessAt       DateTime? @map("last_success_at") @db.Timestamptz(3)
+  lastFailureAt       DateTime? @map("last_failure_at") @db.Timestamptz(3)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  integration Integration       @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  deliveries  WebhookDelivery[]
+
+  @@index([integrationId])
+  @@map("webhook_endpoints")
+}
+
+/// Something that happened on the platform (trip finished, geofence entered, region published),
+/// kept for the administration panel, `GET /events` and webhook deliveries.
+model PlatformEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  /// Increasing number, the cursor of `GET /events?after=`.
+  seq       BigInt   @unique @default(autoincrement())
+  type      String
+  /// Account the event is about; null for platform events (regions).
+  accountId String?  @map("account_id") @db.Uuid
+  data      Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  account    User?             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@index([createdAt])
+  @@index([accountId, seq])
+  @@index([type, createdAt])
+  @@map("platform_events")
+}
+
+/// One event sent to one webhook endpoint, retried with increasing waits until it succeeds.
+model WebhookDelivery {
+  id             String                @id @default(uuid()) @db.Uuid
+  eventId        String                @map("event_id") @db.Uuid
+  endpointId     String                @map("endpoint_id") @db.Uuid
+  status         WebhookDeliveryStatus @default(PENDING)
+  attempts       Int                   @default(0)
+  nextAttemptAt  DateTime              @default(now()) @map("next_attempt_at") @db.Timestamptz(3)
+  lockedAt       DateTime?             @map("locked_at") @db.Timestamptz(3)
+  lastAttemptAt  DateTime?             @map("last_attempt_at") @db.Timestamptz(3)
+  responseStatus Int?                  @map("response_status")
+  /// Start of the receiver's answer (at most 1 KB).
+  responseBody   String?               @map("response_body")
+  error          String?
+  durationMs     Int?                  @map("duration_ms")
+  createdAt      DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  event    PlatformEvent   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, endpointId])
+  @@index([status, nextAttemptAt])
+  @@index([endpointId, createdAt])
+  @@map("webhook_deliveries")
+}
+
+/// What administrators and operators changed, and when.
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @map("actor_id") @db.Uuid
+  actorEmail String   @map("actor_email")
+  /// e.g. "user.update", "integration.key.create".
+  action     String
+  targetType String   @map("target_type")
+  targetId   String?  @map("target_id")
+  /// Name of the target at that moment (email, integration name), shown in the panel.
+  summary    String
+  details    Json?
+  ip         String?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@index([targetType, targetId])
+  @@map("audit_logs")
 }

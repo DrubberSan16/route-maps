@@ -22,6 +22,13 @@ describe('validateEnv', () => {
     ['an unknown routing engine', { ROUTING_PROVIDER: 'graphhopper' }, /ROUTING_PROVIDER/],
     ['an invalid port', { APP_PORT: '70000' }, /APP_PORT/],
     ['an unknown NODE_ENV', { NODE_ENV: 'staging' }, /NODE_ENV/],
+    [
+      'a short integrations key',
+      { INTEGRATIONS_SECRET_KEY: 'too-short' },
+      /INTEGRATIONS_SECRET_KEY must be at least 32/,
+    ],
+    ['a webhook timeout below 1 s', { WEBHOOK_TIMEOUT_MS: '500' }, /WEBHOOK_TIMEOUT_MS/],
+    ['an event retention of 0 days', { EVENTS_RETENTION_DAYS: '0' }, /EVENTS_RETENTION_DAYS/],
   ])('rejects %s', (_label, overrides, message) => {
     expect(() => validateEnv(env(overrides))).toThrow(message);
   });
@@ -47,6 +54,17 @@ describe('validateEnv', () => {
       expect(() => validateEnv(production({ JWT_SECRET: secret }))).toThrow(
         'JWT_SECRET must be a strong secret (>= 32 chars) in production',
       );
+    });
+
+    it('rejects the .env.example placeholder of the integrations key', () => {
+      expect(() =>
+        validateEnv(production({ INTEGRATIONS_SECRET_KEY: 'CHANGE_ME_integrations_key_00000000' })),
+      ).toThrow('INTEGRATIONS_SECRET_KEY must be a strong secret in production');
+      expect(() =>
+        validateEnv(
+          production({ INTEGRATIONS_SECRET_KEY: STRONG_ACCESS.split('').reverse().join('') }),
+        ),
+      ).not.toThrow();
     });
 
     it('rejects reusing the access secret for refresh tokens', () => {

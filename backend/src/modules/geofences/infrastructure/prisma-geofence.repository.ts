@@ -5,6 +5,7 @@ import { GeofenceType } from '../../../generated/prisma/enums';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 import {
   Geofence,
+  GeofenceFilter,
   GeofenceInput,
   GeofenceRepository,
   GeofenceShape,
@@ -129,6 +130,26 @@ export class PrismaGeofenceRepository implements GeofenceRepository {
       WHERE user_id = ${userId}::uuid ${active}
       ORDER BY created_at DESC`;
     return rows.map(toEntity);
+  }
+
+  async search(filter: GeofenceFilter): Promise<{ items: Geofence[]; total: number }> {
+    const conditions: Prisma.Sql[] = [Prisma.sql`true`];
+    if (filter.userId) conditions.push(Prisma.sql`user_id = ${filter.userId}::uuid`);
+    if (filter.active !== undefined) conditions.push(Prisma.sql`active = ${filter.active}`);
+    if (filter.text) {
+      const pattern = `%${filter.text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+      conditions.push(Prisma.sql`(name ILIKE ${pattern} OR description ILIKE ${pattern})`);
+    }
+    const where = Prisma.join(conditions, ' AND ');
+    const [rows, count] = await Promise.all([
+      this.prisma.$queryRaw<GeofenceRow[]>`${SELECT}
+        WHERE ${where}
+        ORDER BY created_at DESC, id
+        LIMIT ${filter.limit} OFFSET ${filter.offset}`,
+      this.prisma.$queryRaw<{ total: bigint }[]>`
+        SELECT count(*) AS total FROM geofences WHERE ${where}`,
+    ]);
+    return { items: rows.map(toEntity), total: Number(count[0]?.total ?? 0) };
   }
 
   async findContaining(userId: string, point: Coordinate): Promise<Geofence[]> {

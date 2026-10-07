@@ -8,6 +8,7 @@ const REQUEST_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 /** Paths redacted from every log line (credentials and tokens). */
 export const REDACTED_PATHS = [
   'req.headers.authorization',
+  'req.headers["x-api-key"]',
   'req.headers.cookie',
   'res.headers["set-cookie"]',
   '*.password',
@@ -15,6 +16,8 @@ export const REDACTED_PATHS = [
   '*.refreshToken',
   '*.accessToken',
   '*.token',
+  '*.secret',
+  '*.temporaryPassword',
 ];
 
 export const buildLoggerParams = (config: AppConfigService): Params => ({

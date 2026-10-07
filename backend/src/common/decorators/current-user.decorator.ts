@@ -2,7 +2,7 @@ import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 import type { Request } from 'express';
 import { AuthenticatedUser } from '../types/authenticated-user';
 
-/** Injects the authenticated user (set by JwtAuthGuard). */
+/** Injects the authenticated user (set by AuthGuard). */
 export const CurrentUser = createParamDecorator(
   (_data: unknown, ctx: ExecutionContext): AuthenticatedUser | undefined => {
     const request = ctx.switchToHttp().getRequest<Request & { user?: AuthenticatedUser }>();
