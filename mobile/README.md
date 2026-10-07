@@ -115,5 +115,7 @@ flutter build ipa --release --dart-define=API_BASE_URL=https://maps.example.com
 ## Procedencia
 
 La cartografía proviene del catálogo auditable de fuentes oficiales de la
-plataforma. La app no muestra marcas de motores internos. Tipografías Noto Sans
+plataforma. La app cita esas fuentes en «Fuentes», junto al indicador del mapa
+(la misma lista que `/fuentes.html`, también sin conexión). La app no muestra
+marcas de motores internos. Tipografías Noto Sans
 bajo SIL Open Font License (`assets/fonts/OFL.txt`).

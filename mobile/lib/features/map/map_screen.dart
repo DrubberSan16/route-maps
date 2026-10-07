@@ -23,6 +23,7 @@ import '../trips/trips_screen.dart';
 import 'map_controller.dart';
 import 'map_layers_controller.dart';
 import 'map_view.dart';
+import 'widgets/data_sources_sheet.dart';
 import 'widgets/destination_card.dart';
 import 'widgets/map_layers_sheet.dart';
 import 'widgets/recording_banner.dart';
@@ -112,9 +113,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   if (source != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: _MapSourceChip(source: source),
+                      child: Row(
+                        children: [
+                          Flexible(child: _MapSourceChip(source: source)),
+                          const SizedBox(width: 8),
+                          _DataSourcesButton(onTap: () => DataSourcesSheet.show(context)),
+                        ],
                       ),
                     ),
                   if (traffic.visible)
@@ -666,8 +670,56 @@ class _MapSourceChip extends StatelessWidget {
           children: [
             Icon(icon, size: 16, color: theme.colorScheme.primary),
             const SizedBox(width: 6),
-            Text(text, style: theme.textTheme.labelMedium),
+            Flexible(
+              child: Text(
+                text,
+                style: theme.textTheme.labelMedium,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The credit the licences of the map's sources ask for, always in view:
+/// opens their citations.
+class _DataSourcesButton extends StatelessWidget {
+  const _DataSourcesButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        borderRadius: BorderRadius.all(Radius.circular(999)),
+        boxShadow: MapChrome.shadow,
+      ),
+      child: Material(
+        key: const Key('data-sources-button'),
+        color: theme.colorScheme.surface.withValues(alpha: 0.94),
+        borderRadius: BorderRadius.circular(999),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Tooltip(
+            message: 'Fuentes de datos',
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(10, 6, 12, 6),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.info_outline, size: 16, color: theme.colorScheme.primary),
+                  const SizedBox(width: 6),
+                  Text('Fuentes', style: theme.textTheme.labelMedium),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
