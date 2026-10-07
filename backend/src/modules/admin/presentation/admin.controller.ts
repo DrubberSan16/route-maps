@@ -6,11 +6,13 @@ import { AuditService } from '../../audit/application/audit.service';
 import { PlatformEventsService } from '../../events/application/platform-events.service';
 import { AdminOperationsService } from '../application/admin-operations.service';
 import { AdminOverviewService } from '../application/admin-overview.service';
+import { AdminUsersService } from '../application/admin-users.service';
 import {
   ListAdminEventsQueryDto,
   ListAuditQueryDto,
   ListDevicesQueryDto,
   ListSyncEventsQueryDto,
+  LookupAccountsQueryDto,
 } from '../application/dto/admin.dto';
 import { AdminOnly, Staff } from './admin-roles';
 
@@ -24,6 +26,7 @@ export class AdminController {
   constructor(
     private readonly overviewService: AdminOverviewService,
     private readonly operations: AdminOperationsService,
+    private readonly users: AdminUsersService,
     private readonly events: PlatformEventsService,
     private readonly audit: AuditService,
   ) {}
@@ -38,6 +41,14 @@ export class AdminController {
   @ApiOperation({ summary: '[staff] Signed-in member and the catalogues of the panel' })
   meta(@CurrentUser() user: AuthenticatedUser) {
     return this.overviewService.meta(user);
+  }
+
+  @Get('accounts')
+  @ApiOperation({
+    summary: '[staff] Find accounts by email or name (pickers of the panel), at most 20',
+  })
+  accounts(@Query() query: LookupAccountsQueryDto) {
+    return this.users.lookup(query);
   }
 
   @Get('devices')

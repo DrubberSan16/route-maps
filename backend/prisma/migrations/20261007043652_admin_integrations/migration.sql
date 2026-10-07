@@ -4,6 +4,9 @@
 -- CreateEnum
 CREATE TYPE "WebhookDeliveryStatus" AS ENUM ('PENDING', 'SENDING', 'SUCCEEDED', 'FAILED');
 
+-- CreateEnum
+CREATE TYPE "IntegrationEventScope" AS ENUM ('ACCOUNT', 'ALL_ACCOUNTS');
+
 -- AlterEnum
 ALTER TYPE "UserRole" ADD VALUE 'OPERATOR';
 
@@ -35,6 +38,7 @@ CREATE TABLE "integrations" (
     "user_id" UUID NOT NULL,
     "active" BOOLEAN NOT NULL DEFAULT true,
     "rate_limit_per_minute" INTEGER NOT NULL DEFAULT 600,
+    "event_scope" "IntegrationEventScope" NOT NULL DEFAULT 'ACCOUNT',
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
 

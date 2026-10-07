@@ -34,6 +34,8 @@ export interface ApiKeyPrincipal {
   scopes: string[];
   /** Requests per minute shared by every key of the integration. */
   rateLimitPerMinute: number;
+  /** The integration receives the events of every account (`GET /events`), not only its own. */
+  allAccountEvents: boolean;
 }
 
 export interface ApiKeyAuthenticator {

@@ -22,7 +22,7 @@ import {
 import { API_SCOPES, type ApiScope } from '../../../../common/auth/api-scopes';
 import { PaginationQueryDto } from '../../../../common/dto/pagination.dto';
 import { toBoolean, trimLowerCase } from '../../../../common/dto/transforms';
-import { WebhookDeliveryStatus } from '../../../../generated/prisma/enums';
+import { IntegrationEventScope, WebhookDeliveryStatus } from '../../../../generated/prisma/enums';
 import { ALL_EVENTS, PLATFORM_EVENT_TYPES } from '../../../events/domain/platform-event';
 
 /** Highest per-integration quota the panel accepts (requests per minute). */
@@ -30,6 +30,10 @@ export const MAX_RATE_LIMIT_PER_MINUTE = 6000;
 /** Quota of an integration created without one (the column default). */
 export const DEFAULT_RATE_LIMIT_PER_MINUTE = 600;
 const WEBHOOK_EVENTS = [ALL_EVENTS, ...PLATFORM_EVENT_TYPES];
+const EVENT_SCOPE_DESCRIPTION =
+  'Whose events its webhooks and GET /events receive: those of the account it acts as (ACCOUNT) ' +
+  'or those of every account (ALL_ACCOUNTS, for an ERP or a reporting tool of the whole fleet). ' +
+  'Its API keys act as its own account either way.';
 
 export class ListIntegrationsQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({ description: 'Name, description or account email' })
@@ -83,6 +87,15 @@ export class CreateIntegrationDto {
   @IsOptional()
   @IsUUID()
   accountId?: string;
+
+  @ApiPropertyOptional({
+    enum: IntegrationEventScope,
+    default: IntegrationEventScope.ACCOUNT,
+    description: EVENT_SCOPE_DESCRIPTION,
+  })
+  @IsOptional()
+  @IsEnum(IntegrationEventScope)
+  eventScope?: IntegrationEventScope;
 }
 
 export class UpdateIntegrationDto {
@@ -109,6 +122,11 @@ export class UpdateIntegrationDto {
   @Min(1)
   @Max(MAX_RATE_LIMIT_PER_MINUTE)
   rateLimitPerMinute?: number;
+
+  @ApiPropertyOptional({ enum: IntegrationEventScope, description: EVENT_SCOPE_DESCRIPTION })
+  @IsOptional()
+  @IsEnum(IntegrationEventScope)
+  eventScope?: IntegrationEventScope;
 }
 
 export class CreateApiKeyDto {

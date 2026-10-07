@@ -71,6 +71,15 @@ enum SyncEventStatus {
   FAILED
 }
 
+/// Events an integration receives besides the platform's own (regions published or disabled).
+enum IntegrationEventScope {
+  /// Those of the account it acts as.
+  ACCOUNT
+  /// Those of every account (an ERP or a reporting tool of the whole fleet). Its API keys still
+  /// act as its own account only.
+  ALL_ACCOUNTS
+}
+
 enum WebhookDeliveryStatus {
   PENDING
   SENDING
@@ -418,18 +427,21 @@ model SynchronizationEvent {
 
 /// External application connected to the platform. It acts as one account (`userId`): through its
 /// API keys it reads and writes that account's trips, positions, geofences, places and routes, and
-/// its webhooks receive that account's events plus the platform's (regions).
+/// its webhooks receive that account's events (or every account's, see `eventScope`) plus the
+/// platform's (regions).
 model Integration {
-  id                 String   @id @default(uuid()) @db.Uuid
+  id                 String                @id @default(uuid()) @db.Uuid
   name               String
   description        String?
-  contactEmail       String?  @map("contact_email")
-  userId             String   @map("user_id") @db.Uuid
-  active             Boolean  @default(true)
+  contactEmail       String?               @map("contact_email")
+  userId             String                @map("user_id") @db.Uuid
+  active             Boolean               @default(true)
   /// Requests per minute shared by all its keys.
-  rateLimitPerMinute Int      @default(600) @map("rate_limit_per_minute")
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  rateLimitPerMinute Int                   @default(600) @map("rate_limit_per_minute")
+  /// Whose events its webhooks and `GET /events` receive.
+  eventScope         IntegrationEventScope @default(ACCOUNT) @map("event_scope")
+  createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   apiKeys  ApiKey[]

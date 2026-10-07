@@ -5,6 +5,7 @@ import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { AppException } from '../../../common/errors/app.exception';
 import { ErrorCode } from '../../../common/errors/error-codes';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user';
+import { IntegrationEventScope } from '../../../generated/prisma/enums';
 
 @ApiTags('integrations')
 @Controller('integrations')
@@ -24,7 +25,13 @@ export class IntegrationSelfController {
       );
     }
     return {
-      integration: { id: key.integrationId, name: key.integrationName },
+      integration: {
+        id: key.integrationId,
+        name: key.integrationName,
+        eventScope: key.allAccountEvents
+          ? IntegrationEventScope.ALL_ACCOUNTS
+          : IntegrationEventScope.ACCOUNT,
+      },
       account: { id: key.userId, email: key.userEmail },
       key: { id: key.keyId, scopes: key.scopes },
       rateLimitPerMinute: key.rateLimitPerMinute,

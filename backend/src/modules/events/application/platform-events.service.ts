@@ -8,6 +8,7 @@ import { WebhookDeliveryStatus } from '../../../generated/prisma/enums';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 import {
   ALL_EVENTS,
+  EVENT_ACCOUNT_SELECT,
   PLATFORM_EVENT_TYPES,
   PlatformEventInput,
   PlatformEventView,
@@ -27,7 +28,6 @@ export interface EventFeed {
 export type DeliveryCounts = Record<WebhookDeliveryStatus, number>;
 
 export interface AdminEventView extends PlatformEventView {
-  accountEmail: string | null;
   deliveries: DeliveryCounts;
 }
 
@@ -59,8 +59,9 @@ export class PlatformEventsService {
 
   /**
    * Stores the event and, in the same statement, queues one delivery for every active webhook
-   * subscribed to it: those of the account's integrations, or of every integration for platform
-   * events. Pass the transaction of the change it describes so that both are kept or neither.
+   * subscribed to it: those of the account's integrations and of the integrations that receive
+   * every account's events, or of every integration for platform events. Pass the transaction of
+   * the change it describes so that both are kept or neither.
    */
   async emit(event: PlatformEventInput, client: EventsSqlClient = this.prisma): Promise<string> {
     const id = randomUUID();
@@ -78,22 +79,27 @@ export class PlatformEventsService {
         ON w.active AND (event.type = ANY (w.events) OR ${ALL_EVENTS} = ANY (w.events))
       JOIN integrations i ON i.id = w.integration_id AND i.active
       JOIN users u ON u.id = i.user_id AND u.active
-      WHERE event.account_id IS NULL OR event.account_id = i.user_id`;
+      WHERE event.account_id IS NULL OR event.account_id = i.user_id
+         OR i.event_scope = 'ALL_ACCOUNTS'`;
     return id;
   }
 
-  /** Events of an account and of the platform after a position, oldest first (`GET /events`). */
+  /**
+   * Events of an account and of the platform after a position, oldest first (`GET /events`).
+   * `accountId` null: the events of every account (integrations with that event scope).
+   */
   async feed(
-    accountId: string,
+    accountId: string | null,
     options: { after: bigint; limit: number; types?: string[] },
   ): Promise<EventFeed> {
     const rows = await this.prisma.platformEvent.findMany({
       where: {
         seq: { gt: options.after },
-        OR: [{ accountId }, { accountId: null }],
+        ...(accountId === null ? {} : { OR: [{ accountId }, { accountId: null }] }),
         // Webhook tests are not part of the feed.
         type: { in: options.types?.length ? options.types : [...PLATFORM_EVENT_TYPES] },
       },
+      include: { account: { select: EVENT_ACCOUNT_SELECT } },
       orderBy: { seq: 'asc' },
       take: options.limit + 1,
     });
@@ -122,15 +128,14 @@ export class PlatformEventsService {
         orderBy: { seq: 'desc' },
         take: query.limit,
         skip: query.offset,
-        include: { account: { select: { email: true } } },
+        include: { account: { select: EVENT_ACCOUNT_SELECT } },
       }),
       this.prisma.platformEvent.count({ where }),
     ]);
     const counts = await this.deliveryCounts(rows.map((row) => row.id));
     return {
-      items: rows.map(({ account, ...row }) => ({
+      items: rows.map((row) => ({
         ...toEventView(row),
-        accountEmail: account?.email ?? null,
         deliveries: counts.get(row.id) ?? emptyCounts(),
       })),
       total,
@@ -144,7 +149,7 @@ export class PlatformEventsService {
     const row = await this.prisma.platformEvent.findUnique({
       where: { id },
       include: {
-        account: { select: { email: true } },
+        account: { select: EVENT_ACCOUNT_SELECT },
         deliveries: {
           orderBy: { createdAt: 'asc' },
           include: {
@@ -156,10 +161,9 @@ export class PlatformEventsService {
       },
     });
     if (!row) throw AppException.notFound(ErrorCode.NOT_FOUND, 'Event not found');
-    const { account, deliveries, ...event } = row;
+    const { deliveries, ...event } = row;
     return {
       ...toEventView(event),
-      accountEmail: account?.email ?? null,
       deliveries: deliveries.map((delivery) => ({
         id: delivery.id,
         status: delivery.status,

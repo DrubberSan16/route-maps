@@ -1,17 +1,20 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsEmail,
   IsEnum,
   IsIn,
+  IsInt,
   IsISO8601,
   IsOptional,
   IsString,
   IsUUID,
   Length,
   Matches,
+  Max,
   MaxLength,
+  Min,
   MinLength,
 } from 'class-validator';
 import { PaginationQueryDto } from '../../../../common/dto/pagination.dto';
@@ -63,6 +66,23 @@ export class ListUsersQueryDto extends SearchQueryDto {
   @IsOptional()
   @IsIn(ACCOUNT_KINDS)
   kind: AccountKind = 'people';
+}
+
+/** Account picker of the panel (operators choose whose geofence they create, or filter by it). */
+export class LookupAccountsQueryDto {
+  @ApiProperty({ description: 'Start of the email, or part of the email or the name' })
+  @Transform(trim)
+  @IsString()
+  @Length(1, 120)
+  q: string;
+
+  @ApiPropertyOptional({ default: 10, minimum: 1, maximum: 20 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  limit = 10;
 }
 
 export class CreateUserDto {

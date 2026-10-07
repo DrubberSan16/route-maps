@@ -19,10 +19,11 @@ export class EventsController {
       'Events of the account and of the platform after a position (pull alternative to webhooks)',
     description:
       'Oldest first. Keep `next` and ask again with `after=next`; while `hasMore` is true there ' +
-      'are more events waiting. Events are kept for EVENTS_RETENTION_DAYS (30 by default).',
+      'are more events waiting. Events are kept for EVENTS_RETENTION_DAYS (30 by default). The ' +
+      'key of an integration with event scope ALL_ACCOUNTS gets the events of every account.',
   })
   feed(@CurrentUser() user: AuthenticatedUser, @Query() query: EventsFeedQueryDto) {
-    return this.events.feed(user.id, {
+    return this.events.feed(user.apiKey?.allAccountEvents ? null : user.id, {
       after: BigInt(query.after),
       limit: query.limit,
       types: query.types,

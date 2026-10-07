@@ -14,6 +14,7 @@ import { AppException } from '../../../common/errors/app.exception';
 import { ErrorCode } from '../../../common/errors/error-codes';
 import { AppConfigService } from '../../../config/app-config.service';
 import { Prisma } from '../../../generated/prisma/client';
+import { IntegrationEventScope } from '../../../generated/prisma/enums';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 import { apiKeyMatches, apiKeyPrefix } from '../domain/api-key';
 
@@ -188,6 +189,7 @@ export class ApiKeyAuthenticatorService
             name: true,
             active: true,
             rateLimitPerMinute: true,
+            eventScope: true,
             user: { select: { id: true, email: true } },
           },
         },
@@ -206,6 +208,7 @@ export class ApiKeyAuthenticatorService
         userEmail: key.integration.user.email,
         scopes: key.scopes,
         rateLimitPerMinute: key.integration.rateLimitPerMinute,
+        allAccountEvents: key.integration.eventScope === IntegrationEventScope.ALL_ACCOUNTS,
       },
     };
     this.cache.delete(prefix);

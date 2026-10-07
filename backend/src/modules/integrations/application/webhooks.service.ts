@@ -8,7 +8,11 @@ import { Prisma } from '../../../generated/prisma/client';
 import { WebhookDeliveryStatus } from '../../../generated/prisma/enums';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 import { AuditActor, AuditService } from '../../audit/application/audit.service';
-import { toEventView, WEBHOOK_TEST_EVENT } from '../../events/domain/platform-event';
+import {
+  EVENT_ACCOUNT_SELECT,
+  toEventView,
+  WEBHOOK_TEST_EVENT,
+} from '../../events/domain/platform-event';
 import { generateWebhookSecret } from '../domain/webhook-signature';
 import { checkWebhookUrl, WebhookUrlPolicy } from '../domain/webhook-url';
 import { SecretBox } from '../infrastructure/secret-box';
@@ -38,7 +42,7 @@ export interface DeliveryDetail extends DeliveryView {
 
 const DELIVERY_INCLUDE = {
   endpoint: { select: { url: true } },
-  event: true,
+  event: { include: { account: { select: EVENT_ACCOUNT_SELECT } } },
 } satisfies Prisma.WebhookDeliveryInclude;
 
 type DeliveryRow = Prisma.WebhookDeliveryGetPayload<{ include: typeof DELIVERY_INCLUDE }>;

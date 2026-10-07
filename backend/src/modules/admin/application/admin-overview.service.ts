@@ -178,8 +178,13 @@ export class AdminOverviewService {
           (SELECT count(*) FROM webhook_deliveries
             WHERE status = 'FAILED' AND updated_at >= now() - interval '24 hours')
             AS deliveries_failed,
-          (SELECT min(next_attempt_at) FROM webhook_deliveries
-            WHERE status = 'PENDING') AS oldest_pending_at,
+          -- Due deliveries the worker would send: those of paused webhooks, integrations or
+          -- accounts wait on purpose and do not mean the worker stopped.
+          (SELECT min(d.next_attempt_at) FROM webhook_deliveries d
+            JOIN webhook_endpoints w ON w.id = d.endpoint_id AND w.active
+            JOIN integrations i ON i.id = w.integration_id AND i.active
+            JOIN users u ON u.id = i.user_id AND u.active
+            WHERE d.status = 'PENDING') AS oldest_pending_at,
           (SELECT count(*) FROM synchronization_events
             WHERE processed_at >= now() - interval '24 hours') AS sync_operations,
           (SELECT count(*) FROM synchronization_events

@@ -6,7 +6,7 @@ import { AppException } from '../../../common/errors/app.exception';
 import { ErrorCode } from '../../../common/errors/error-codes';
 import { AppConfigService } from '../../../config/app-config.service';
 import { Prisma } from '../../../generated/prisma/client';
-import { UserRole } from '../../../generated/prisma/enums';
+import { IntegrationEventScope, UserRole } from '../../../generated/prisma/enums';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 import { AuditActor, AuditService } from '../../audit/application/audit.service';
 import { PASSWORD_HASHER, type PasswordHasher } from '../../auth/domain/password-hasher';
@@ -63,6 +63,7 @@ export interface IntegrationSummary {
   contactEmail: string | null;
   active: boolean;
   rateLimitPerMinute: number;
+  eventScope: IntegrationEventScope;
   account: IntegrationAccount;
   activeKeys: number;
   webhookCount: number;
@@ -269,6 +270,7 @@ export class IntegrationsService {
           description: dto.description,
           contactEmail: dto.contactEmail,
           rateLimitPerMinute: dto.rateLimitPerMinute,
+          eventScope: dto.eventScope,
           userId,
         },
       });
@@ -278,7 +280,11 @@ export class IntegrationsService {
       targetType: 'integration',
       targetId: integration.id,
       summary: integration.name,
-      details: { accountId: integration.userId, newServiceAccount: !dto.accountId },
+      details: {
+        accountId: integration.userId,
+        newServiceAccount: !dto.accountId,
+        eventScope: integration.eventScope,
+      },
     });
     return this.get(integration.id);
   }
@@ -297,6 +303,7 @@ export class IntegrationsService {
         contactEmail: dto.contactEmail,
         active: dto.active,
         rateLimitPerMinute: dto.rateLimitPerMinute,
+        eventScope: dto.eventScope,
       },
     });
     this.authenticator.invalidateIntegration(id);

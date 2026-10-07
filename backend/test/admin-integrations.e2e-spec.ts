@@ -39,9 +39,18 @@ interface EventData {
 }
 
 interface Received {
+  /** Path the webhook was sent to. */
+  url: string;
   headers: IncomingHttpHeaders;
   body: string;
-  event: { id: string; seq: string; type: string; accountId: string | null; data: EventData };
+  event: {
+    id: string;
+    seq: string;
+    type: string;
+    accountId: string | null;
+    account: { id: string; email: string; name: string } | null;
+    data: EventData;
+  };
 }
 
 interface Delivery {
@@ -144,7 +153,7 @@ describe('Administration and integrations (e2e)', () => {
       req.on('data', (chunk: Buffer) => chunks.push(chunk));
       req.on('end', () => {
         const body = Buffer.concat(chunks).toString('utf8');
-        received.push({ headers: req.headers, body, event: JSON.parse(body) });
+        received.push({ url: req.url ?? '', headers: req.headers, body, event: JSON.parse(body) });
         res
           .writeHead(receiverStatus, { 'content-type': 'text/plain' })
           .end(`status ${receiverStatus}`);
@@ -267,6 +276,28 @@ describe('Administration and integrations (e2e)', () => {
         integrations: [],
       });
       await as('admin').get('/admin/users/00000000-0000-4000-8000-000000000000').expect(404);
+    });
+
+    it('lets operators pick accounts by email, without the rest of the account list', async () => {
+      const found = (await as('operator').get(`/admin/accounts?q=e2e-driver-${RUN}`).expect(200))
+        .body.data as { id: string; email: string }[];
+      expect(found).toEqual([
+        {
+          id: ids.driver,
+          email: email('driver'),
+          name: expect.any(String),
+          role: 'USER',
+          active: true,
+          serviceAccount: false,
+        },
+      ]);
+      // Accounts whose email starts with the text come before those that only contain it.
+      const byRun = (await as('operator').get(`/admin/accounts?q=e2e-&limit=20`).expect(200)).body
+        .data as { email: string }[];
+      expect(byRun.every((account) => account.email.startsWith('e2e-'))).toBe(true);
+      await as('operator').get('/admin/accounts').expect(400);
+      await as('operator').get('/admin/accounts?q=a&limit=21').expect(400);
+      await as('driver').get(`/admin/accounts?q=${RUN}`).expect(403);
     });
 
     it('disables an account at once and re-enables it with new sessions only', async () => {
@@ -657,7 +688,7 @@ describe('Administration and integrations (e2e)', () => {
     it('lets the key act as its account within its scopes', async () => {
       const me = await withKey(fleetKey).get('/integrations/me').expect(200);
       expect(me.body.data).toMatchObject({
-        integration: { id: fleet.id },
+        integration: { id: fleet.id, eventScope: 'ACCOUNT' },
         account: { id: fleet.account.id },
         key: { scopes: ['trips:read', 'trips:write', 'events:read'] },
         rateLimitPerMinute: 600,
@@ -1012,13 +1043,31 @@ describe('Administration and integrations (e2e)', () => {
         .send({ active: false })
         .expect(200);
       const count = received.length;
-      await request(http)
-        .post('/api/v1/trips')
-        .set('Authorization', `Bearer ${tokens.driver}`)
-        .send({ name: 'Pausa' })
-        .expect(201);
+      const paused = (
+        await request(http)
+          .post('/api/v1/trips')
+          .set('Authorization', `Bearer ${tokens.driver}`)
+          .send({ name: 'Pausa' })
+          .expect(201)
+      ).body.data;
       await deliver();
       expect(received).toHaveLength(count);
+
+      // A delivery queued before the pause waits for it to end: the summary does not report it
+      // as late (that warning means the worker stopped).
+      const event = await prisma.platformEvent.findFirstOrThrow({
+        where: { type: 'trip.started', data: { path: ['trip', 'id'], equals: paused.id } },
+      });
+      const waiting = await prisma.webhookDelivery.create({
+        data: {
+          eventId: event.id,
+          endpointId: webhook.id,
+          nextAttemptAt: new Date(Date.now() - 60 * 60_000),
+        },
+      });
+      const late = (await as('admin').get('/admin/overview').expect(200)).body.data.webhooks
+        .oldestPendingAt as string | null;
+      expect(late === null || new Date(late) > waiting.nextAttemptAt).toBe(true);
 
       await as('admin')
         .patch(`/admin/integrations/${integration.id}/webhooks/${webhook.id}`)
@@ -1099,7 +1148,7 @@ describe('Administration and integrations (e2e)', () => {
       ).body.data;
       expect(list.items[0]).toMatchObject({
         type: 'geofence.exited',
-        accountEmail: email('driver'),
+        account: { id: ids.driver, email: email('driver'), name: 'E2E driver' },
         deliveries: { SUCCEEDED: 1, FAILED: 0 },
       });
       const detail = (await as('operator').get(`/admin/events/${list.items[0].id}`).expect(200))
@@ -1111,6 +1160,100 @@ describe('Administration and integrations (e2e)', () => {
           integration: { id: integration.id, name: `${PREFIX} erp ${RUN}` },
         }),
       ]);
+    });
+
+    it('gives the events of every account to an integration that asks for them', async () => {
+      const fleetWide = (
+        await as('admin')
+          .post('/admin/integrations')
+          .send({ name: `${PREFIX} reports ${RUN}`, eventScope: 'ALL_ACCOUNTS' })
+          .expect(201)
+      ).body.data;
+      expect(fleetWide.eventScope).toBe('ALL_ACCOUNTS');
+      await as('admin')
+        .post(`/admin/integrations/${fleetWide.id}/webhooks`)
+        .send({ url: `${receiverUrl}/reports`, events: ['trip.started', 'trip.cancelled'] })
+        .expect(201);
+      const reportsKey = (
+        await as('admin')
+          .post(`/admin/integrations/${fleetWide.id}/keys`)
+          .send({ name: 'Reportes', scopes: ['events:read', 'trips:read'] })
+          .expect(201)
+      ).body.data.key as string;
+      const own = (
+        await as('admin')
+          .post('/admin/integrations')
+          .send({ name: `${PREFIX} own ${RUN}` })
+          .expect(201)
+      ).body.data;
+      expect(own.eventScope).toBe('ACCOUNT');
+      const ownKey = (
+        await as('admin')
+          .post(`/admin/integrations/${own.id}/keys`)
+          .send({ name: 'Propia', scopes: ['events:read'] })
+          .expect(201)
+      ).body.data.key as string;
+      const me = (await withKey(reportsKey).get('/integrations/me').expect(200)).body.data;
+      expect(me.integration).toEqual({
+        id: fleetWide.id,
+        name: `${PREFIX} reports ${RUN}`,
+        eventScope: 'ALL_ACCOUNTS',
+      });
+
+      const trip = (await as('driver').post('/trips').send({ name: 'Toda la flota' }).expect(201))
+        .body.data;
+      await as('driver').post(`/trips/${trip.id}/cancel`).send({}).expect(200);
+      await deliver();
+
+      const ofTrip = (item: { data: EventData }) => item.data?.trip?.id === trip.id;
+      const reported = received
+        .filter((item) => item.url === '/route-maps/reports' && ofTrip(item.event))
+        .map((item) => item.event)
+        .sort((a, b) => Number(BigInt(a.seq) - BigInt(b.seq)));
+      expect(reported.map((event) => event.type)).toEqual(['trip.started', 'trip.cancelled']);
+      expect(reported[0].account).toEqual({
+        id: ids.driver,
+        email: email('driver'),
+        name: 'E2E driver',
+      });
+
+      const after = (BigInt(reported[0].seq) - 1n).toString();
+      const feed = (await withKey(reportsKey).get(`/events?after=${after}`).expect(200)).body.data
+        .items as { type: string; account: { id: string } | null; data: EventData }[];
+      expect(feed.filter(ofTrip).map((event) => event.type)).toEqual([
+        'trip.started',
+        'trip.cancelled',
+      ]);
+      expect(feed.find(ofTrip)?.account).toMatchObject({ id: ids.driver });
+      // An integration limited to its account does not see them.
+      const ownFeed = (await withKey(ownKey).get(`/events?after=${after}`).expect(200)).body.data
+        .items as { data: EventData }[];
+      expect(ownFeed.some(ofTrip)).toBe(false);
+      // Its key still acts only as its own account.
+      const trips = (await withKey(reportsKey).get('/trips').expect(200)).body.data.items as {
+        id: string;
+      }[];
+      expect(trips.map((item) => item.id)).not.toContain(trip.id);
+
+      // Back to its own account: the next trips of the driver are not sent to it.
+      await as('admin')
+        .patch(`/admin/integrations/${fleetWide.id}`)
+        .send({ eventScope: 'ACCOUNT' })
+        .expect(200);
+      const meNow = (await withKey(reportsKey).get('/integrations/me').expect(200)).body.data;
+      expect(meNow.integration.eventScope).toBe('ACCOUNT');
+      const later = (await as('driver').post('/trips').send({ name: 'Solo la cuenta' }).expect(201))
+        .body.data;
+      await deliver();
+      expect(
+        received.some(
+          (item) => item.url === '/route-maps/reports' && item.event.data?.trip?.id === later.id,
+        ),
+      ).toBe(false);
+      const laterFeed = (
+        await withKey(reportsKey).get(`/events?after=${after}&types=trip.started`).expect(200)
+      ).body.data.items as { data: EventData }[];
+      expect(laterFeed.some((event) => event.data?.trip?.id === later.id)).toBe(false);
     });
 
     it('keeps the data of an account when its integration is deleted', async () => {

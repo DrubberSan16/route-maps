@@ -50,6 +50,7 @@ const principal = (overrides: Partial<ApiKeyPrincipal> = {}): ApiKeyPrincipal =>
   userEmail: 'svc@integrations.invalid',
   scopes: ['trips:read'],
   rateLimitPerMinute: 600,
+  allAccountEvents: false,
   ...overrides,
 });
 

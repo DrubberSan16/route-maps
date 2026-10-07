@@ -8,7 +8,11 @@ import { writeFile } from 'node:fs/promises';
 import { Prisma } from '../../../generated/prisma/client';
 import { WebhookDeliveryStatus } from '../../../generated/prisma/enums';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
-import { toEventView, WEBHOOK_TEST_EVENT } from '../../events/domain/platform-event';
+import {
+  EVENT_ACCOUNT_SELECT,
+  toEventView,
+  WEBHOOK_TEST_EVENT,
+} from '../../events/domain/platform-event';
 import { MAX_ATTEMPTS, RETRY_DELAYS_MS } from '../domain/webhook-retries';
 import { SIGNATURE_HEADER, signatureHeader } from '../domain/webhook-signature';
 import { SecretBox } from './secret-box';
@@ -22,7 +26,7 @@ export const HEARTBEAT_FILE =
 const USER_AGENT = 'RouteMaps-Webhooks/1.0';
 
 const DELIVERY_INCLUDE = {
-  event: true,
+  event: { include: { account: { select: EVENT_ACCOUNT_SELECT } } },
   endpoint: true,
 } satisfies Prisma.WebhookDeliveryInclude;
 
