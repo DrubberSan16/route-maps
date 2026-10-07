@@ -222,7 +222,23 @@ class FakeAuthRepository implements AuthRepository {
 
   @override
   Future<void> logout() async => session = null;
+
+  /// Passwords given to [changePassword], in order.
+  final passwordChanges = <({String current, String next})>[];
+
+  @override
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    if (currentPassword != testPassword) throw AppException.of(ErrorCodes.invalidCurrentPassword);
+    passwordChanges.add((current: currentPassword, next: newPassword));
+    session = _session!.withTokens(accessToken: 'access-2', refreshToken: 'refresh-2');
+  }
 }
+
+/// Current password of [FakeAuthRepository]'s account.
+const testPassword = 'S3cure-password';
 
 const testUser = UserProfile(id: 'user-1', email: 'demo@maps.local', name: 'Demo', role: 'USER');
 

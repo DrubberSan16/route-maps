@@ -22,4 +22,8 @@ abstract class AuthRepository {
 
   /// Ends the session; its data stays on the device for its next login.
   Future<void> logout();
+
+  /// Changes the password of the account logged in. The server closes its
+  /// other sessions (other phones, the web panel) and renews this one.
+  Future<void> changePassword({required String currentPassword, required String newPassword});
 }

@@ -12,6 +12,9 @@ abstract final class ErrorCodes {
   static const emailAlreadyRegistered = 'EMAIL_ALREADY_REGISTERED';
   static const invalidCredentials = 'INVALID_CREDENTIALS';
   static const invalidRefreshToken = 'INVALID_REFRESH_TOKEN';
+  static const invalidCurrentPassword = 'INVALID_CURRENT_PASSWORD';
+  static const accountDisabled = 'ACCOUNT_DISABLED';
+  static const sessionRevoked = 'SESSION_REVOKED';
   static const mapRegionNotFound = 'MAP_REGION_NOT_FOUND';
   static const mapRegionFileNotAvailable = 'MAP_REGION_FILE_NOT_AVAILABLE';
   static const mapDownloadFailed = 'MAP_DOWNLOAD_FAILED';
@@ -45,6 +48,9 @@ const _userMessages = <String, String>{
   ErrorCodes.emailAlreadyRegistered: 'Ese correo ya está registrado.',
   ErrorCodes.invalidCredentials: 'Correo o contraseña incorrectos.',
   ErrorCodes.invalidRefreshToken: 'Tu sesión expiró. Inicia sesión de nuevo.',
+  ErrorCodes.invalidCurrentPassword: 'La contraseña actual no es correcta.',
+  ErrorCodes.accountDisabled: 'Tu cuenta fue deshabilitada. Comunícate con un administrador.',
+  ErrorCodes.sessionRevoked: 'Un administrador cerró tu sesión. Inicia sesión de nuevo.',
   ErrorCodes.mapRegionNotFound: 'La región no existe o fue deshabilitada.',
   ErrorCodes.mapRegionFileNotAvailable:
       'El archivo de esta región no está disponible en el servidor.',
