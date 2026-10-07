@@ -31,7 +31,8 @@ export interface SearchOptions {
   kinds?: string[];
 }
 
-interface RawEntry {
+/** One line of search.ndjson (catalog.py SearchWriter). */
+export interface SearchEntry {
   n: string;
   k: string;
   t: string;
@@ -128,7 +129,7 @@ export class NativeSearchIndex {
   private readonly contextWords: Postings;
   private readonly grid = new Map<number, number[]>();
 
-  private constructor(entries: RawEntry[]) {
+  private constructor(entries: SearchEntry[]) {
     const size = entries.length;
     this.size = size;
     this.names = new Array<string>(size);
@@ -182,15 +183,15 @@ export class NativeSearchIndex {
   }
 
   static async load(file: string): Promise<NativeSearchIndex> {
-    const entries: RawEntry[] = [];
+    const entries: SearchEntry[] = [];
     const lines = createInterface({ input: createReadStream(file, 'utf8'), crlfDelay: Infinity });
     for await (const line of lines) {
-      if (line.trim()) entries.push(JSON.parse(line) as RawEntry);
+      if (line.trim()) entries.push(JSON.parse(line) as SearchEntry);
     }
     return new NativeSearchIndex(entries);
   }
 
-  static fromEntries(entries: RawEntry[]): NativeSearchIndex {
+  static fromEntries(entries: SearchEntry[]): NativeSearchIndex {
     return new NativeSearchIndex(entries);
   }
 
