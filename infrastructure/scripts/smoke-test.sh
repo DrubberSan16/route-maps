@@ -7,10 +7,16 @@
 # Checks health, auth (register, login, me, refresh rotation, logout), map
 # regions (list, detail, version, resumable downloads with checksum), PMTiles
 # Range requests, style and glyphs, routing with every profile, trips +
-# tracking, offline sync (push, idempotent retry, pull), geocoding and the web
-# viewer. Needs curl, jq and sha256sum; at least one region must be prepared
-# (make prepare-region REGION=...). ALLOW_NO_REGION=1 checks a stack without map
-# data (CI): regions, downloads and routes are then expected to be unavailable.
+# tracking, offline sync (push, idempotent retry, pull), geocoding, the web
+# viewer and the administration panel. Needs curl, jq and sha256sum; at least one
+# region must be prepared (make prepare-region REGION=...). ALLOW_NO_REGION=1
+# checks a stack without map data (CI): regions, downloads and routes are then
+# expected to be unavailable.
+#
+# ADMIN_EMAIL and ADMIN_PASSWORD (an administrator) add the integration checks: a
+# test application connected to the test account, its API key, events, revocation
+# and removal. WEBHOOK_URL (a receiver the worker can reach) adds a test webhook
+# that the worker must deliver.
 set -uo pipefail
 
 BASE="${1:-${BASE_URL:-http://localhost:8080}}"
@@ -23,6 +29,7 @@ PASSED=0
 FAILED=0
 pass() { PASSED=$((PASSED + 1)); printf '  \033[32mOK\033[0m   %s\n' "$*"; }
 fail() { FAILED=$((FAILED + 1)); printf '  \033[31mFAIL\033[0m %s\n' "$*"; }
+skip() { printf '  \033[33mSKIP\033[0m %s\n' "$*"; }
 section() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 # expect <description> <command...>: passes when the command succeeds.
 expect() {
@@ -305,6 +312,84 @@ status=$(http GET "$BASE/vendor/maplibre-gl.mjs")
 expect "viewer bundles MapLibre GL JS locally" test "$status" = 200
 status=$(http GET "$BASE/vendor/fonts/inter-latin-wght-normal.woff2")
 expect "viewer bundles its font locally" test "$status" = 200
+
+# ------------------------------------------------------------------ administration and integrations
+section "Administration panel and integrations"
+status=$(http GET "$BASE/admin")
+expect "/admin -> 301 to /admin/" test "$status:$(header Location)" = "301:/admin/"
+status=$(http GET "$BASE/admin/")
+expect "administration panel -> 200" test "$status:$(grep -c 'id="login-form"' "$WORK/body")" = "200:1"
+expect "the panel cannot be framed (CSP frame-ancestors 'none')" grep -q "frame-ancestors 'none'" <<<"$(header Content-Security-Policy)"
+status=$(http GET /admin/overview)
+expect "an app account cannot use the administration API -> 403 FORBIDDEN" test "$status:$(json .error.code)" = "403:FORBIDDEN"
+http GET /auth/me >/dev/null
+APP_ACCOUNT_ID=$(json .data.id)
+APP_TOKEN=$TOKEN
+TOKEN=
+status=$(http GET /events)
+expect "GET /events without credentials -> 401" test "$status" = 401
+status=$(http GET /events "" -H "X-API-Key: rmk_000000000000_$(printf '%043d' 0)")
+expect "unknown API key -> 401 INVALID_API_KEY" test "$status:$(json .error.code)" = "401:INVALID_API_KEY"
+
+if [[ -z "${ADMIN_EMAIL:-}" || -z "${ADMIN_PASSWORD:-}" ]]; then
+  skip "integrations: set ADMIN_EMAIL and ADMIN_PASSWORD of an administrator to check them"
+else
+  status=$(http POST /auth/login "$(jq -nc --arg email "$ADMIN_EMAIL" --arg password "$ADMIN_PASSWORD" '{$email, $password}')")
+  expect "administrator login ($ADMIN_EMAIL) -> 200" test "$status" = 200
+  ADMIN_TOKEN=$(json .data.accessToken)
+  TOKEN=$ADMIN_TOKEN
+  status=$(http GET /admin/overview)
+  expect "GET /admin/overview -> 200 ($(json .data.integrations.total) integrations)" test "$status" = 200
+  # Connected to the test account: no service account is left behind.
+  status=$(http POST /admin/integrations "{\"name\":\"Smoke test $(date +%s)\",\"accountId\":\"$APP_ACCOUNT_ID\"}")
+  expect "connect an application to the test account -> 201" test "$status:$(json .data.account.id)" = "201:$APP_ACCOUNT_ID"
+  INTEGRATION_ID=$(json .data.id)
+  status=$(http POST "/admin/integrations/$INTEGRATION_ID/keys" '{"name":"Smoke test","scopes":["trips:read","trips:write","events:read"]}')
+  expect "create an API key -> 201" test "$status" = 201
+  API_KEY=$(json .data.key)
+  KEY_ID=$(json .data.apiKey.id)
+
+  TOKEN=
+  status=$(http POST /trips '{"profile":"CAR","name":"Smoke integration trip"}' -H "X-API-Key: $API_KEY")
+  expect "the key starts a trip of its account -> 201" test "$status" = 201
+  KEY_TRIP=$(json .data.id)
+  status=$(http POST "/trips/$KEY_TRIP/finish" "" -H "X-API-Key: $API_KEY")
+  expect "the key finishes it -> 200" test "$status" = 200
+  status=$(http GET "/events?types=trip.started,trip.finished" "" -H "X-API-Key: $API_KEY")
+  expect "GET /events with the key returns trip.started and trip.finished" \
+    test "$status:$(jq -r --arg id "$KEY_TRIP" '[.data.items[] | select(.data.trip.id == $id) | .type] | join(",")' "$WORK/body")" = "200:trip.started,trip.finished"
+  status=$(http GET /admin/overview "" -H "X-API-Key: $API_KEY")
+  expect "API keys never reach the administration API -> 403 API_KEY_NOT_ALLOWED" test "$status:$(json .error.code)" = "403:API_KEY_NOT_ALLOWED"
+
+  TOKEN=$ADMIN_TOKEN
+  if [[ -n "${WEBHOOK_URL:-}" ]]; then
+    status=$(http POST "/admin/integrations/$INTEGRATION_ID/webhooks" "$(jq -nc --arg url "$WEBHOOK_URL" '{url: $url, events: ["trip.finished"]}')")
+    expect "add a webhook ($WEBHOOK_URL) -> 201" test "$status:$(json '.data.secret | startswith("whsec_")')" = "201:true"
+    WEBHOOK_ID=$(json .data.webhook.id)
+    status=$(http POST "/admin/integrations/$INTEGRATION_ID/webhooks/$WEBHOOK_ID/test")
+    expect "send a test event -> 202" test "$status" = 202
+    DELIVERY_ID=$(json .data.deliveryId)
+    # The worker looks for deliveries every 2 seconds.
+    for _ in $(seq 1 30); do
+      http GET "/admin/integrations/$INTEGRATION_ID/deliveries/$DELIVERY_ID" >/dev/null
+      [[ "$(json .data.status)" =~ ^(PENDING|SENDING)$ ]] || break
+      sleep 2
+    done
+    expect "the worker delivered it: $(json '"\(.data.status) (\(if .data.responseStatus then "HTTP \(.data.responseStatus)" else .data.error // "no answer" end))"')" \
+      test "$(json .data.status)" = SUCCEEDED
+  else
+    skip "webhook delivery: set WEBHOOK_URL to a receiver the worker can reach"
+  fi
+  status=$(http DELETE "/admin/integrations/$INTEGRATION_ID/keys/$KEY_ID")
+  expect "revoke the key -> 200" test "$status" = 200
+  TOKEN=
+  status=$(http GET /integrations/me "" -H "X-API-Key: $API_KEY")
+  expect "a revoked key stops working -> 401 INVALID_API_KEY" test "$status:$(json .error.code)" = "401:INVALID_API_KEY"
+  TOKEN=$ADMIN_TOKEN
+  status=$(http DELETE "/admin/integrations/$INTEGRATION_ID")
+  expect "remove the integration -> 200" test "$status" = 200
+fi
+TOKEN=$APP_TOKEN
 
 status=$(http POST /auth/logout "{\"refreshToken\":\"$REFRESH\"}")
 expect "logout -> 200" test "$status" = 200

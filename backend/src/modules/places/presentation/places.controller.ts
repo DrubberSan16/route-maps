@@ -11,6 +11,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiScopes } from '../../../common/decorators/api-scopes.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user';
 import {
@@ -28,12 +29,14 @@ export class PlacesController {
   constructor(private readonly places: PlacesService) {}
 
   @Post()
+  @ApiScopes('places:write')
   @ApiOperation({ summary: 'Create a place (point of interest) for the user' })
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreatePlaceDto) {
     return this.places.create(user.id, dto);
   }
 
   @Get()
+  @ApiScopes('places:read')
   @ApiOperation({ summary: 'Search own and shared places by text and/or proximity' })
   search(@CurrentUser() user: AuthenticatedUser, @Query() query: SearchPlacesQueryDto) {
     return this.places.search(user.id, {
@@ -49,12 +52,14 @@ export class PlacesController {
   }
 
   @Get(':id')
+  @ApiScopes('places:read')
   @ApiOperation({ summary: 'Place detail' })
   get(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.places.get(user.id, id);
   }
 
   @Patch(':id')
+  @ApiScopes('places:write')
   @ApiOperation({ summary: 'Update an own place' })
   update(
     @CurrentUser() user: AuthenticatedUser,
@@ -65,12 +70,14 @@ export class PlacesController {
   }
 
   @Delete(':id')
+  @ApiScopes('places:write')
   @ApiOperation({ summary: 'Delete an own place' })
   delete(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.places.delete(user.id, id);
   }
 
   @Put(':id/favorite')
+  @ApiScopes('places:write')
   @ApiOperation({ summary: 'Mark a place as favorite (with optional alias)' })
   favorite(
     @CurrentUser() user: AuthenticatedUser,
@@ -81,6 +88,7 @@ export class PlacesController {
   }
 
   @Delete(':id/favorite')
+  @ApiScopes('places:write')
   @ApiOperation({ summary: 'Remove a place from favorites' })
   unfavorite(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.places.unfavorite(user.id, id);

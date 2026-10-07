@@ -68,6 +68,8 @@ class InMemoryRefreshTokens {
 class InMemoryUsers {
   readonly users = new Map<string, UserEntity>();
 
+  constructor(private readonly tokens: InMemoryRefreshTokens) {}
+
   findByEmail(email: string) {
     const user = [...this.users.values()].find((item) => item.email === email.toLowerCase());
     return Promise.resolve(user ?? null);
@@ -86,11 +88,28 @@ class InMemoryUsers {
       name: input.name,
       role: 'USER',
       passwordHash: input.passwordHash,
+      active: true,
+      serviceAccount: false,
+      sessionsRevokedAt: null,
+      lastLoginAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
     this.users.set(user.id, user);
     return Promise.resolve(user);
+  }
+
+  recordLogin(id: string) {
+    this.users.get(id)!.lastLoginAt = new Date();
+    return Promise.resolve();
+  }
+
+  replacePassword(id: string, passwordHash: string) {
+    const user = this.users.get(id)!;
+    user.passwordHash = passwordHash;
+    user.sessionsRevokedAt = new Date();
+    void this.tokens.revokeAllForUser(id);
+    return Promise.resolve({ ...user });
   }
 }
 
@@ -125,6 +144,7 @@ describe('AuthService', () => {
   let tokens: InMemoryRefreshTokens;
   let hasher: FakeHasher;
   let jwt: JwtService;
+  let accounts: { get: jest.Mock; invalidate: jest.Mock };
   let service: AuthService;
   let warn: jest.SpyInstance;
 
@@ -136,10 +156,11 @@ describe('AuthService', () => {
 
   beforeEach(() => {
     warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-    users = new InMemoryUsers();
     tokens = new InMemoryRefreshTokens();
+    users = new InMemoryUsers(tokens);
     hasher = new FakeHasher();
     jwt = new JwtService();
+    accounts = { get: jest.fn(), invalidate: jest.fn() };
     const config = { get: (key: string) => (key === 'jwt' ? JWT_CONFIG : undefined) };
     service = new AuthService(
       users as unknown as UsersService,
@@ -147,6 +168,7 @@ describe('AuthService', () => {
       config as unknown as AppConfigService,
       tokens as unknown as RefreshTokenRepository,
       hasher,
+      accounts,
     );
   });
 
@@ -203,10 +225,63 @@ describe('AuthService', () => {
         email: 'ana@example.com',
         role: 'USER',
         type: 'access',
+        // No session of the account was ever closed.
+        sv: 0,
       });
       await expect(
         jwt.verifyAsync(result.accessToken, { secret: JWT_CONFIG.refreshSecret }),
       ).rejects.toThrow();
+    });
+
+    it('records when the account signed in', async () => {
+      const { user } = await register();
+
+      await service.login({ email: 'ana@example.com', password: 'S3cure-password' });
+
+      expect(users.users.get(user.id)!.lastLoginAt).toBeInstanceOf(Date);
+    });
+
+    it('stamps access tokens with the last time the sessions were closed', async () => {
+      const { user } = await register();
+      const closedAt = new Date('2026-10-01T12:00:00.123Z');
+      users.users.get(user.id)!.sessionsRevokedAt = closedAt;
+
+      const result = await service.login({ email: 'ana@example.com', password: 'S3cure-password' });
+
+      const payload = await jwt.verifyAsync<AccessTokenPayload>(result.accessToken, {
+        secret: JWT_CONFIG.accessSecret,
+      });
+      expect(payload.sv).toBe(closedAt.getTime());
+    });
+
+    it('tells a disabled account so only when the password is right', async () => {
+      const { user } = await register();
+      users.users.get(user.id)!.active = false;
+
+      await expectAppError(
+        service.login({ email: 'ana@example.com', password: 'wrong-password' }),
+        ErrorCode.INVALID_CREDENTIALS,
+        HttpStatus.UNAUTHORIZED,
+      );
+      await expectAppError(
+        service.login({ email: 'ana@example.com', password: 'S3cure-password' }),
+        ErrorCode.ACCOUNT_DISABLED,
+        HttpStatus.FORBIDDEN,
+      );
+      expect(tokens.tokens.size).toBe(1);
+    });
+
+    it('treats the account of an integration as unknown, even with its password', async () => {
+      const { user } = await register();
+      users.users.get(user.id)!.serviceAccount = true;
+      hasher.verifications = 0;
+
+      await expectAppError(
+        service.login({ email: 'ana@example.com', password: 'S3cure-password' }),
+        ErrorCode.INVALID_CREDENTIALS,
+        HttpStatus.UNAUTHORIZED,
+      );
+      expect(hasher.verifications).toBe(1);
     });
 
     it('rejects a wrong password', async () => {
@@ -345,6 +420,98 @@ describe('AuthService', () => {
         service.refresh('not-a-jwt'),
         ErrorCode.INVALID_REFRESH_TOKEN,
         HttpStatus.UNAUTHORIZED,
+      );
+    });
+
+    it('ends the session of a disabled account with a 401, so the app signs out', async () => {
+      const { user, refreshToken } = await register();
+      users.users.get(user.id)!.active = false;
+
+      await expectAppError(
+        service.refresh(refreshToken),
+        ErrorCode.ACCOUNT_DISABLED,
+        HttpStatus.UNAUTHORIZED,
+      );
+    });
+
+    it('never refreshes a session of the account of an integration', async () => {
+      const { user, refreshToken } = await register();
+      users.users.get(user.id)!.serviceAccount = true;
+
+      await expectAppError(
+        service.refresh(refreshToken),
+        ErrorCode.INVALID_REFRESH_TOKEN,
+        HttpStatus.UNAUTHORIZED,
+      );
+    });
+  });
+
+  describe('changePassword', () => {
+    it('replaces the password, closes the other sessions and keeps the caller signed in', async () => {
+      const { user, refreshToken } = await register();
+
+      const result = await service.changePassword(user.id, {
+        currentPassword: 'S3cure-password',
+        newPassword: 'An0ther-password',
+      });
+
+      const stored = users.users.get(user.id)!;
+      expect(stored.passwordHash).toBe('hashed:An0ther-password');
+      expect(accounts.invalidate).toHaveBeenCalledWith(user.id);
+      // The previous session is gone; the new pair works and passes the session check.
+      await expectAppError(
+        service.refresh(refreshToken),
+        ErrorCode.INVALID_REFRESH_TOKEN,
+        HttpStatus.UNAUTHORIZED,
+      );
+      const payload = await jwt.verifyAsync<AccessTokenPayload>(result.accessToken, {
+        secret: JWT_CONFIG.accessSecret,
+      });
+      expect(payload.sv).toBe(stored.sessionsRevokedAt!.getTime());
+    });
+
+    it('keeps the new session when another device still tries the closed one', async () => {
+      const { user, refreshToken: otherDevice } = await register();
+      const result = await service.changePassword(user.id, {
+        currentPassword: 'S3cure-password',
+        newPassword: 'An0ther-password',
+      });
+
+      // A token closed by the new password is just invalid, not a stolen copy that has been
+      // used: the session that changed the password goes on.
+      await expectAppError(
+        service.refresh(otherDevice),
+        ErrorCode.INVALID_REFRESH_TOKEN,
+        HttpStatus.UNAUTHORIZED,
+      );
+      await expect(service.refresh(result.refreshToken)).resolves.toMatchObject({
+        refreshToken: expect.any(String),
+      });
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('refuses a wrong current password', async () => {
+      const { user } = await register();
+      await expectAppError(
+        service.changePassword(user.id, {
+          currentPassword: 'not-my-password',
+          newPassword: 'An0ther-password',
+        }),
+        ErrorCode.INVALID_CURRENT_PASSWORD,
+        HttpStatus.BAD_REQUEST,
+      );
+      expect(users.users.get(user.id)!.passwordHash).toBe('hashed:S3cure-password');
+    });
+
+    it('refuses the same password', async () => {
+      const { user } = await register();
+      await expectAppError(
+        service.changePassword(user.id, {
+          currentPassword: 'S3cure-password',
+          newPassword: 'S3cure-password',
+        }),
+        ErrorCode.VALIDATION_ERROR,
+        HttpStatus.BAD_REQUEST,
       );
     });
   });

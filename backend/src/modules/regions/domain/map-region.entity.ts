@@ -1,4 +1,5 @@
 import { BoundingBox } from '../../../common/geo/geojson';
+import type { EventsSqlClient } from '../../events/application/platform-events.service';
 
 /** Archives a region may have next to its vector map. */
 export const REGION_ASSET_KINDS = ['terrain', 'satellite', 'overlays'] as const;
@@ -65,12 +66,18 @@ export interface UpsertMapRegion {
   enabled: boolean;
 }
 
+/**
+ * Saved with every change of a region, in its transaction and given the region as saved: the
+ * event that announces it, so that the change and its event are kept together or not at all.
+ */
+export type RegionAnnouncement = (region: MapRegion, tx: EventsSqlClient) => Promise<unknown>;
+
 export interface MapRegionRepository {
   findAll(options: { includeDisabled: boolean }): Promise<MapRegion[]>;
   findByCodeOrId(idOrCode: string): Promise<MapRegion | null>;
   findContaining(latitude: number, longitude: number): Promise<MapRegion[]>;
-  upsert(region: UpsertMapRegion): Promise<MapRegion>;
-  setEnabled(code: string, enabled: boolean): Promise<void>;
+  upsert(region: UpsertMapRegion, announce: RegionAnnouncement): Promise<MapRegion>;
+  setEnabled(code: string, enabled: boolean, announce: RegionAnnouncement): Promise<MapRegion>;
 }
 
 export const MAP_REGION_REPOSITORY = Symbol('MAP_REGION_REPOSITORY');

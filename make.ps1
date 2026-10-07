@@ -4,6 +4,7 @@
 .EXAMPLE
   .\make.ps1 init
   .\make.ps1 up
+  .\make.ps1 admin-create -Email tu@correo -Name "Tu nombre"
   .\make.ps1 prepare-region -Region guayaquil
   .\make.ps1 logs -Service backend
   .\make.ps1 publish-app -Server ovh-serverSoft
@@ -18,6 +19,9 @@ param(
   [string]$Apk = '',
   [string]$Server = '',
   [string]$RemoteDir = '',
+  [string]$Email = '',
+  [string]$Name = '',
+  [switch]$ResetPassword,
   [switch]$SkipRouting,
   [switch]$WaterPolygons,
   [switch]$ForceDownload
@@ -57,8 +61,8 @@ $backendRun = @('compose', 'run', '--rm', '-e', 'RUN_MIGRATIONS=false', '-e', 'S
 
 $commands = [ordered]@{
   'help'            = 'Muestra esta ayuda'
-  'init'            = 'Crea .env desde .env.example con secretos aleatorios'
-  'up'              = 'Construye y levanta nginx, backend, postgres y redis'
+  'init'            = 'Crea .env con secretos aleatorios (si existe, le agrega las variables nuevas)'
+  'up'              = 'Construye y levanta nginx, backend, worker, postgres y redis'
   'down'            = 'Detiene el stack (conserva volúmenes y .\storage)'
   'restart'         = 'Reinicia un servicio (-Service backend) o todo el stack'
   'ps'              = 'Estado y salud de los servicios'
@@ -67,6 +71,7 @@ $commands = [ordered]@{
   'config'          = 'Valida docker-compose.yml con las variables de .env'
   'migrate'         = 'Aplica las migraciones pendientes de Prisma'
   'seed'            = 'Carga usuarios y datos de demostración (idempotente)'
+  'admin-create'    = 'Crea un administrador del panel o reactiva uno: -Email correo [-Name "Nombre"] [-ResetPassword]'
   'regions'         = 'Lista las regiones del catálogo y lo ya generado'
   'regions-sync'    = 'Registra en el backend las regiones preparadas'
   'download-region' = 'Descarga las fuentes oficiales auditadas: -Region ecuador'
@@ -88,7 +93,8 @@ switch ($Command) {
   'help' {
     foreach ($entry in $commands.GetEnumerator()) { '  {0,-16} {1}' -f $entry.Key, $entry.Value }
     ''
-    '  Parámetros: -Region <código> -Service <servicio> -SkipRouting -WaterPolygons -ForceDownload'
+    '  Parámetros: -Region <código> -Service <servicio> -Email <correo> -Name <nombre> -ResetPassword'
+    '              -SkipRouting -WaterPolygons -ForceDownload'
   }
   'init' { & (Join-Path $PSScriptRoot 'infrastructure\scripts\init-env.ps1') }
   'up' { Invoke-Docker compose up -d --build }
@@ -100,6 +106,13 @@ switch ($Command) {
   'config' { Invoke-Docker compose config --quiet; 'Configuración de Docker Compose válida' }
   'migrate' { Invoke-Docker @backendRun ./node_modules/.bin/prisma migrate deploy }
   'seed' { Invoke-Docker @backendRun node dist/prisma/seed.js }
+  'admin-create' {
+    if ($Email -notmatch '@') { throw 'Uso: .\make.ps1 admin-create -Email correo [-Name "Nombre"] [-ResetPassword: contraseña nueva]' }
+    $adminArgs = @('--email', $Email)
+    if ($Name) { $adminArgs += @('--name', $Name) }
+    if ($ResetPassword) { $adminArgs += '--reset-password' }
+    Invoke-Docker compose exec -T backend node dist/src/cli/create-admin.js @adminArgs
+  }
   'regions' { Invoke-Docker @tools list }
   'regions-sync' { Invoke-Docker compose exec -T backend node dist/src/cli/sync-regions.js }
   'download-region' {

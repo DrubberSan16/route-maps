@@ -5,6 +5,7 @@ import { ErrorCode } from '../../../common/errors/error-codes';
 import { isValidCoordinate, PointGeometry } from '../../../common/geo/geojson';
 import { TripStatus } from '../../../generated/prisma/enums';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
+import { GeofenceTransitionsService } from '../../geofences/application/geofence-transitions.service';
 import { TripsService } from '../../trips/application/trips.service';
 import { LocationPoint, TrackingBatchResult } from '../domain/location-point';
 
@@ -18,6 +19,7 @@ export class TrackingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly trips: TripsService,
+    private readonly transitions: GeofenceTransitionsService,
   ) {}
 
   async record(userId: string, point: LocationPoint): Promise<{ status: 'CREATED' | 'DUPLICATE' }> {
@@ -48,12 +50,48 @@ export class TrackingService {
         ${point.heading ?? null}::double precision, ${point.altitude ?? null}::double precision,
         ${point.recordedAt}::timestamptz, now())`,
     );
-    const inserted = await this.prisma.$queryRaw<{ id: string }[]>`
-      INSERT INTO trip_points (id, trip_id, location, accuracy, speed, heading, altitude,
-                               recorded_at, received_at)
-      VALUES ${Prisma.join(rows, ', ')}
-      ON CONFLICT (trip_id, recorded_at) DO NOTHING
-      RETURNING id`;
+    // The trips are locked first (in a fixed order): uploads for the same trip are stored and
+    // checked against the geofences one after the other, so enter/exit events are not doubled.
+    const inserted = await this.prisma.$transaction(
+      async (tx) => {
+        const locked = await tx.$queryRaw<
+          {
+            id: string;
+            user_id: string;
+            name: string | null;
+            device_id: string | null;
+            metadata: unknown;
+            geofences_checked_at: Date | null;
+          }[]
+        >`
+          SELECT id, user_id, name, device_id, metadata, geofences_checked_at FROM trips
+          WHERE id IN (${Prisma.join(tripIds.sort().map((id) => Prisma.sql`${id}::uuid`))})
+          ORDER BY id
+          FOR NO KEY UPDATE`;
+        const stored = await tx.$queryRaw<{ id: string; trip_id: string }[]>`
+          INSERT INTO trip_points (id, trip_id, location, accuracy, speed, heading, altitude,
+                                   recorded_at, received_at)
+          VALUES ${Prisma.join(rows, ', ')}
+          ON CONFLICT (trip_id, recorded_at) DO NOTHING
+          RETURNING id, trip_id`;
+        await this.transitions.process(
+          tx,
+          locked.map((row) => ({
+            trip: {
+              id: row.id,
+              userId: row.user_id,
+              name: row.name,
+              deviceId: row.device_id,
+              metadata: row.metadata,
+              geofencesCheckedAt: row.geofences_checked_at,
+            },
+            fixIds: stored.filter((point) => point.trip_id === row.id).map((point) => point.id),
+          })),
+        );
+        return stored;
+      },
+      { timeout: 30_000 },
+    );
 
     // Late fixes for an already finished trip (offline upload) update its distance.
     if (inserted.length > 0) {
@@ -64,6 +102,11 @@ export class TrackingService {
       inserted: inserted.length,
       duplicates: points.length - inserted.length,
     };
+  }
+
+  /** Active trips of the account with their last known position (fleet monitoring). */
+  live(userId: string) {
+    return this.trips.live(userId);
   }
 
   async lastPosition(userId: string, tripId: string) {

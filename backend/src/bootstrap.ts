@@ -32,7 +32,14 @@ export function configureApp(app: NestExpressApplication): void {
   app.enableCors({
     origin: origins === '*' ? true : origins,
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Authorization', 'Content-Type', 'X-Request-Id', 'Range', 'If-Range'],
+    allowedHeaders: [
+      'Authorization',
+      'X-API-Key',
+      'Content-Type',
+      'X-Request-Id',
+      'Range',
+      'If-Range',
+    ],
     exposedHeaders: [
       'X-Request-Id',
       'Content-Range',
@@ -72,6 +79,8 @@ export function configureApp(app: NestExpressApplication): void {
         )
         .setVersion('1.0')
         .addBearerAuth()
+        // Integrations: `X-API-Key: rmk_...` on the routes that list scopes.
+        .addApiKey({ type: 'apiKey', in: 'header', name: 'X-API-Key' }, 'api-key')
         .build(),
     );
     SwaggerModule.setup('api/docs', app, document, {

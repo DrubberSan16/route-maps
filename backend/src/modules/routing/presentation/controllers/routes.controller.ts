@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import { ApiScopes } from '../../../../common/decorators/api-scopes.decorator';
 import { CurrentUser } from '../../../../common/decorators/current-user.decorator';
 import { Public } from '../../../../common/decorators/public.decorator';
 import type { AuthenticatedUser } from '../../../../common/types/authenticated-user';
@@ -46,6 +47,7 @@ export class RoutesController {
 
   @ApiBearerAuth()
   @Post()
+  @ApiScopes('routes:write')
   @ApiOperation({ summary: 'Save a route (idempotent when the client supplies the id)' })
   save(@CurrentUser() user: AuthenticatedUser, @Body() dto: SaveRouteDto) {
     return this.savedRoutes.save(user.id, {
@@ -58,6 +60,7 @@ export class RoutesController {
   @ApiBearerAuth()
   @Get()
   @ApiQuery({ name: 'includeGeometry', required: false, type: Boolean })
+  @ApiScopes('routes:read')
   @ApiOperation({ summary: 'List saved routes of the authenticated user' })
   list(
     @CurrentUser() user: AuthenticatedUser,
@@ -73,6 +76,7 @@ export class RoutesController {
 
   @ApiBearerAuth()
   @Get(':id')
+  @ApiScopes('routes:read')
   @ApiOperation({ summary: 'Saved route with geometry and steps' })
   get(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.savedRoutes.get(user.id, id);
@@ -80,6 +84,7 @@ export class RoutesController {
 
   @ApiBearerAuth()
   @Delete(':id')
+  @ApiScopes('routes:write')
   @ApiOperation({ summary: 'Delete a saved route' })
   delete(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.savedRoutes.delete(user.id, id);

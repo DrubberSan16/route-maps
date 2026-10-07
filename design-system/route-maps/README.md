@@ -2,7 +2,11 @@
 
 - **Identidad**: `MASTER.md` (generado con la skill `ui-ux-pro-max`: "navigation
   map utility tool", variance 3, motion 3, density 7). Overrides por página en
-  `pages/`: `pages/viewer.md` (visor web) y `pages/mobile-app.md` (app).
+  `pages/`: `pages/viewer.md` (visor web), `pages/admin.md` (panel de
+  administración) y `pages/mobile-app.md` (app).
+- **Panel de administración**: HTML + CSS + módulos JS sin paso de build en
+  `infrastructure/nginx/html/admin/`, con los mismos tokens del MASTER en
+  `admin.css` y MapLibre vendorizado del visor.
 - **Visor web**: HTML + CSS + JS sin paso de build en
   `infrastructure/nginx/html/` (MapLibre GL JS y PMTiles vendorizados por la
   imagen de Nginx). Tokens como variables CSS en `:root` de `viewer.css`.

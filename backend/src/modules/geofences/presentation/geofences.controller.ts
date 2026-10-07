@@ -10,6 +10,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiScopes } from '../../../common/decorators/api-scopes.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user';
 import {
@@ -28,6 +29,7 @@ export class GeofencesController {
   constructor(private readonly geofences: GeofencesService) {}
 
   @Post()
+  @ApiScopes('geofences:write')
   @ApiOperation({ summary: 'Create a CIRCLE or POLYGON geofence' })
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateGeofenceDto) {
     return this.geofences.create(user.id, {
@@ -40,24 +42,28 @@ export class GeofencesController {
   }
 
   @Get()
+  @ApiScopes('geofences:read')
   @ApiOperation({ summary: 'List geofences' })
   list(@CurrentUser() user: AuthenticatedUser, @Query() query: ListGeofencesQueryDto) {
     return this.geofences.list(user.id, query.active ?? false);
   }
 
   @Get('check')
+  @ApiScopes('geofences:read')
   @ApiOperation({ summary: 'Active geofences that contain a point (PostGIS ST_Intersects)' })
   check(@CurrentUser() user: AuthenticatedUser, @Query() query: GeofenceCheckQueryDto) {
     return this.geofences.check(user.id, { latitude: query.lat, longitude: query.lng });
   }
 
   @Get(':id')
+  @ApiScopes('geofences:read')
   @ApiOperation({ summary: 'Geofence detail' })
   get(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.geofences.get(user.id, id);
   }
 
   @Patch(':id')
+  @ApiScopes('geofences:write')
   @ApiOperation({
     summary: 'Update a geofence; shape fields are merged with the stored shape',
   })
@@ -70,6 +76,7 @@ export class GeofencesController {
   }
 
   @Delete(':id')
+  @ApiScopes('geofences:write')
   @ApiOperation({ summary: 'Delete a geofence' })
   delete(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.geofences.delete(user.id, id);

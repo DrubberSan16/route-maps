@@ -8,7 +8,8 @@
 #   - restart: unless-stopped and memory limits on every service;
 #   - Nginx publishes 80/443; TLS with NGINX_SERVER_CONF=./infrastructure/nginx/tls/https.conf
 #     and the certificates in TLS_CERTS_PATH (fullchain.pem + privkey.pem);
-#   - PostgreSQL, Redis and backend stay in the internal network maps-network.
+#   - PostgreSQL, Redis and backend stay in the internal network maps-network; the worker
+#     also uses edge to send webhooks (https only, public addresses only).
 # Requires Docker Compose 2.24.4 or newer (!override).
 
 x-restart: &restart
@@ -34,12 +35,24 @@ services:
       NODE_ENV: production
       LOG_PRETTY: "false"
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
-      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
+      # Never in production, whatever .env says (the template enables it for development): the
+      # first administrator is created with make admin-create.
+      SEED_DEMO_DATA: "false"
       CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS in .env (comma separated origins)}
     deploy:
       resources:
         limits:
           memory: ${BACKEND_MEMORY_LIMIT:-1g}
+
+  worker:
+    <<: *restart
+    environment:
+      NODE_ENV: production
+      LOG_PRETTY: "false"
+    deploy:
+      resources:
+        limits:
+          memory: ${WORKER_MEMORY_LIMIT:-512m}
 
   postgres:
     <<: *restart

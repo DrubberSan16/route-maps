@@ -29,6 +29,16 @@ export interface GeofenceInput {
   active?: boolean;
 }
 
+/** Filter of the geofences of every account (administration). */
+export interface GeofenceFilter {
+  userId?: string;
+  active?: boolean;
+  /** Text in the name or the description. */
+  text?: string;
+  limit: number;
+  offset: number;
+}
+
 export interface GeofenceRepository {
   create(userId: string, input: GeofenceInput): Promise<Geofence>;
   update(
@@ -39,6 +49,8 @@ export interface GeofenceRepository {
   delete(userId: string, id: string): Promise<boolean>;
   findById(userId: string, id: string): Promise<Geofence | null>;
   list(userId: string, options: { activeOnly: boolean }): Promise<Geofence[]>;
+  /** Geofences of every account matching the filter, newest first. */
+  search(filter: GeofenceFilter): Promise<{ items: Geofence[]; total: number }>;
   /** Active geofences of the user containing the point. */
   findContaining(userId: string, point: Coordinate): Promise<Geofence[]>;
   isValidPolygon(polygon: PolygonGeometry): Promise<boolean>;

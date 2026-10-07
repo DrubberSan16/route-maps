@@ -1,6 +1,7 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { createHash, randomUUID } from 'node:crypto';
+import { ACCOUNT_ACCESS, type AccountAccessReader } from '../../../common/auth/auth-ports';
 import { AppException } from '../../../common/errors/app.exception';
 import { ErrorCode } from '../../../common/errors/error-codes';
 import { AccessTokenPayload } from '../../../common/types/authenticated-user';
@@ -13,7 +14,7 @@ import {
   NewRefreshToken,
   RefreshTokenRepository,
 } from '../infrastructure/refresh-token.repository';
-import { LoginDto, RegisterDto } from './dto/auth.dto';
+import { ChangePasswordDto, LoginDto, RegisterDto } from './dto/auth.dto';
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 
@@ -27,6 +28,7 @@ export class AuthService {
     private readonly config: AppConfigService,
     private readonly refreshTokens: RefreshTokenRepository,
     @Inject(PASSWORD_HASHER) private readonly hasher: PasswordHasher,
+    @Inject(ACCOUNT_ACCESS) private readonly accounts: AccountAccessReader,
   ) {}
 
   async register(
@@ -51,7 +53,9 @@ export class AuthService {
   }
 
   async login(dto: LoginDto, userAgent?: string): Promise<{ user: UserProfile } & AuthTokens> {
-    const user = await this.users.findByEmail(dto.email);
+    const found = await this.users.findByEmail(dto.email);
+    // Integrations (service accounts) use API keys and never log in with a password.
+    const user = found && !found.serviceAccount ? found : null;
     // Always run a verification to keep response time similar for unknown emails.
     const valid = user
       ? await this.hasher.verify(user.passwordHash, dto.password)
@@ -63,21 +67,44 @@ export class AuthService {
         HttpStatus.UNAUTHORIZED,
       );
     }
+    // Only told to whoever knows the password.
+    if (!user.active) {
+      throw new AppException(
+        ErrorCode.ACCOUNT_DISABLED,
+        'This account is disabled',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    await this.users.recordLogin(user.id);
     const tokens = await this.issueTokens(user, userAgent);
     return { user: toUserProfile(user), ...tokens };
   }
 
-  /** Rotates the refresh token. Re-use of a revoked token revokes the whole family. */
+  /** Rotates the refresh token. Re-use of a rotated token revokes the whole family. */
   async refresh(refreshToken: string, userAgent?: string): Promise<AuthTokens> {
     const payload = await this.verifyRefreshToken(refreshToken);
     const stored = await this.refreshTokens.findById(payload.jti);
     if (!stored || stored.userId !== payload.sub || stored.tokenHash !== sha256(refreshToken)) {
       throw this.invalidRefresh();
     }
-    if (stored.revokedAt) throw await this.reuseDetected(stored.userId);
+    if (stored.revokedAt) {
+      // Only a token already exchanged for a successor reveals a copy. One closed by a logout, a
+      // new password or an administrator is just no longer valid: refusing it must not close the
+      // sessions opened since (a device still holding it would otherwise sign the others out).
+      throw stored.replacedById ? await this.reuseDetected(stored.userId) : this.invalidRefresh();
+    }
     if (stored.expiresAt.getTime() <= Date.now()) throw this.invalidRefresh();
 
     const user = await this.users.getById(stored.userId);
+    if (user.serviceAccount) throw this.invalidRefresh();
+    // 401: the app ends the session, as with any refused refresh.
+    if (!user.active) {
+      throw new AppException(
+        ErrorCode.ACCOUNT_DISABLED,
+        'This account is disabled',
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
     const { tokens, record } = await this.signTokens(user, userAgent);
     // The token may have been rotated since it was read (the same token sent twice at
     // once): only the request that claims it gets a successor, the other is a re-use.
@@ -95,6 +122,37 @@ export class AuthService {
 
   async me(userId: string): Promise<UserProfile> {
     return toUserProfile(await this.users.getById(userId));
+  }
+
+  /**
+   * Changes the password of the signed-in account. Every session of the account is closed (other
+   * devices have to log in again) and the caller gets a new token pair to stay signed in.
+   */
+  async changePassword(
+    userId: string,
+    dto: ChangePasswordDto,
+    userAgent?: string,
+  ): Promise<AuthTokens> {
+    const user = await this.users.getById(userId);
+    if (!(await this.hasher.verify(user.passwordHash, dto.currentPassword))) {
+      throw new AppException(
+        ErrorCode.INVALID_CURRENT_PASSWORD,
+        'The current password is not correct',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (dto.newPassword === dto.currentPassword) {
+      throw new AppException(
+        ErrorCode.VALIDATION_ERROR,
+        'The new password must be different from the current one',
+      );
+    }
+    const updated = await this.users.replacePassword(
+      userId,
+      await this.hasher.hash(dto.newPassword),
+    );
+    this.accounts.invalidate(userId);
+    return this.issueTokens(updated, userAgent);
   }
 
   private async issueTokens(user: UserEntity, userAgent?: string): Promise<AuthTokens> {
@@ -115,6 +173,7 @@ export class AuthService {
       email: user.email,
       role: user.role,
       type: 'access',
+      sv: user.sessionsRevokedAt?.getTime() ?? 0,
     };
     const jti = randomUUID();
     const refreshPayload: RefreshTokenPayload = { sub: user.id, jti, type: 'refresh' };

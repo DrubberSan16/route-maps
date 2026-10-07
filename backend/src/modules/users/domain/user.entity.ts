@@ -6,6 +6,10 @@ export interface UserEntity {
   name: string;
   role: UserRole;
   passwordHash: string;
+  active: boolean;
+  serviceAccount: boolean;
+  sessionsRevokedAt: Date | null;
+  lastLoginAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

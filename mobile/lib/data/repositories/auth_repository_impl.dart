@@ -59,6 +59,26 @@ class AuthRepositoryImpl implements AuthRepository {
     }
   }
 
+  @override
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final session = _sessions.current;
+    if (session == null) throw AppException.of(ErrorCodes.notAuthenticated);
+    final tokens = await _api.post('auth/password', (data) {
+      final json = data! as Map<String, Object?>;
+      return (access: json['accessToken']! as String, refresh: json['refreshToken']! as String);
+    }, body: {'currentPassword': currentPassword, 'newPassword': newPassword});
+    // The previous tokens no longer work. Unless another account logged in
+    // meanwhile, the session continues with the new ones.
+    final current = _sessions.current;
+    if (current == null || current.user.id != session.user.id) return;
+    await _sessions.save(
+      current.withTokens(accessToken: tokens.access, refreshToken: tokens.refresh),
+    );
+  }
+
   Future<AuthSession> _authenticate(String path, Map<String, Object?> body) async {
     final session = await _api.post(path, (data) {
       final json = data! as Map<String, Object?>;

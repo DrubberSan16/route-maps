@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { AppException } from '../../../common/errors/app.exception';
 import { ErrorCode } from '../../../common/errors/error-codes';
+import { Prisma } from '../../../generated/prisma/client';
 import { DevicePlatform, UserRole } from '../../../generated/prisma/enums';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 import { UserEntity } from '../domain/user.entity';
@@ -22,28 +23,69 @@ export class UsersService {
 
   async getById(id: string): Promise<UserEntity> {
     const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user) throw AppException.notFound(ErrorCode.NOT_FOUND, 'User not found');
+    if (!user) throw AppException.notFound(ErrorCode.USER_NOT_FOUND, 'User not found');
     return user;
   }
 
-  create(input: {
-    email: string;
-    name: string;
-    passwordHash: string;
-    role?: UserRole;
-  }): Promise<UserEntity> {
-    return this.prisma.user.create({
+  create(
+    input: {
+      email: string;
+      name: string;
+      passwordHash: string;
+      role?: UserRole;
+      serviceAccount?: boolean;
+    },
+    tx?: Prisma.TransactionClient,
+  ): Promise<UserEntity> {
+    return (tx ?? this.prisma).user.create({
       data: {
         email: input.email.toLowerCase(),
         name: input.name,
         passwordHash: input.passwordHash,
         role: input.role ?? UserRole.USER,
+        serviceAccount: input.serviceAccount ?? false,
       },
     });
   }
 
   updateProfile(id: string, data: { name?: string }): Promise<UserEntity> {
     return this.prisma.user.update({ where: { id }, data });
+  }
+
+  async recordLogin(id: string): Promise<void> {
+    await this.prisma.user.update({ where: { id }, data: { lastLoginAt: new Date() } });
+  }
+
+  /**
+   * Replaces the password and closes every session of the account: its refresh tokens are
+   * revoked and the access tokens issued until now stop being accepted. Runs in `tx` when given.
+   */
+  async replacePassword(
+    id: string,
+    passwordHash: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<UserEntity> {
+    if (!tx) return this.prisma.$transaction((own) => this.replacePassword(id, passwordHash, own));
+    const user = await tx.user.update({
+      where: { id },
+      data: { passwordHash, sessionsRevokedAt: new Date() },
+    });
+    await tx.refreshToken.updateMany({
+      where: { userId: id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    return user;
+  }
+
+  /** Closes every session of the account without touching its password. */
+  async revokeSessions(id: string): Promise<void> {
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id }, data: { sessionsRevokedAt: new Date() } }),
+      this.prisma.refreshToken.updateMany({
+        where: { userId: id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
   }
 
   /** Creates or refreshes the device record identified by its installation id. */

@@ -29,5 +29,10 @@ services:
     # through a regular bridge network.
     networks: [maps-network, database]
 
+  worker:
+    environment:
+      DATABASE_URL: postgresql://${DATABASE_USER:?Set DATABASE_USER in .env}:${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}@${DATABASE_HOST:?Set DATABASE_HOST in .env}:${DATABASE_PORT:-5432}/${DATABASE_NAME:?Set DATABASE_NAME in .env}?schema=public&sslmode=${DATABASE_SSLMODE:-require}&uselibpqcompat=true
+    networks: [maps-network, edge, database]
+
 networks:
   database: {}

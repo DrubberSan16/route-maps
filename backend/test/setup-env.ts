@@ -18,6 +18,11 @@ Object.assign(process.env, {
   LOG_PRETTY: 'false',
   RATE_LIMIT_MAX: '100000',
   MAP_DOWNLOAD_ACCEL_REDIRECT: 'false',
+  INTEGRATIONS_SECRET_KEY: 'e2e-integrations-secret-key-0123456789abcdef',
+  // The webhook receiver of the tests listens on http://127.0.0.1.
+  WEBHOOKS_ALLOW_INSECURE: 'true',
+  WEBHOOKS_ALLOW_PRIVATE_NETWORKS: 'true',
+  WEBHOOK_TIMEOUT_MS: '2000',
   MAP_STORAGE_PATH: join(storage, 'maps'),
   ROUTING_STORAGE_PATH: join(storage, 'routing'),
   NATIVE_ROUTING_GRAPH_FILE: join(storage, 'native', 'graph.bin'),

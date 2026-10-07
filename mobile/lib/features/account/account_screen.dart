@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/errors/app_exception.dart';
 import '../../core/utils/formatters.dart';
 import '../../domain/entities/sync.dart';
 import '../../domain/entities/user.dart';
@@ -60,16 +61,157 @@ class _SessionView extends ConsumerWidget {
           alignment: Alignment.centerRight,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: OutlinedButton(
-              onPressed: form.isBusy
-                  ? null
-                  : () => ref.read(accountControllerProvider.notifier).logout(),
-              child: const Text('Cerrar sesión'),
+            child: Wrap(
+              spacing: 8,
+              children: [
+                TextButton(
+                  onPressed: form.isBusy ? null : () => _changePassword(context),
+                  child: const Text('Cambiar contraseña'),
+                ),
+                OutlinedButton(
+                  onPressed: form.isBusy
+                      ? null
+                      : () => ref.read(accountControllerProvider.notifier).logout(),
+                  child: const Text('Cerrar sesión'),
+                ),
+              ],
             ),
           ),
         ),
       ],
     );
+  }
+
+  Future<void> _changePassword(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final changed = await showDialog<bool>(
+      context: context,
+      builder: (_) => const ChangePasswordDialog(),
+    );
+    if (changed ?? false) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Contraseña cambiada. Tus otras sesiones se cerraron.')),
+      );
+    }
+  }
+}
+
+/// Asks for the current password and the new one (twice). Closes with `true`
+/// once the server changed it.
+class ChangePasswordDialog extends ConsumerStatefulWidget {
+  const ChangePasswordDialog({super.key});
+
+  @override
+  ConsumerState<ChangePasswordDialog> createState() => _ChangePasswordDialogState();
+}
+
+class _ChangePasswordDialogState extends ConsumerState<ChangePasswordDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _current = TextEditingController();
+  final _next = TextEditingController();
+  final _repeat = TextEditingController();
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _current.dispose();
+    _next.dispose();
+    _repeat.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      title: const Text('Cambiar contraseña'),
+      content: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextFormField(
+                key: const Key('current-password-field'),
+                controller: _current,
+                decoration: const InputDecoration(labelText: 'Contraseña actual'),
+                obscureText: true,
+                autofillHints: const [AutofillHints.password],
+                textInputAction: TextInputAction.next,
+                validator: (value) =>
+                    (value == null || value.isEmpty) ? 'Escribe tu contraseña actual' : null,
+              ),
+              TextFormField(
+                key: const Key('new-password-field'),
+                controller: _next,
+                decoration: const InputDecoration(labelText: 'Contraseña nueva'),
+                obscureText: true,
+                autofillHints: const [AutofillHints.newPassword],
+                textInputAction: TextInputAction.next,
+                validator: (value) => (value == null || value.length < 8)
+                    ? 'Usa al menos 8 caracteres'
+                    : value == _current.text
+                    ? 'Debe ser distinta de la actual'
+                    : null,
+              ),
+              TextFormField(
+                key: const Key('repeat-password-field'),
+                controller: _repeat,
+                decoration: const InputDecoration(labelText: 'Repite la contraseña nueva'),
+                obscureText: true,
+                autofillHints: const [AutofillHints.newPassword],
+                onFieldSubmitted: (_) => _submit(),
+                validator: (value) =>
+                    value != _next.text ? 'No coincide con la contraseña nueva' : null,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Tu sesión seguirá abierta en este teléfono y se cerrará en los demás.',
+                style: theme.textTheme.bodySmall,
+              ),
+              if (_error case final error?)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(error, style: TextStyle(color: theme.colorScheme.error)),
+                ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.of(context).pop(false),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: _busy ? null : _submit,
+          child: Text(_busy ? 'Cambiando…' : 'Cambiar'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _submit() async {
+    if (_busy || !_formKey.currentState!.validate()) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await ref
+          .read(authRepositoryProvider)
+          .changePassword(currentPassword: _current.text, newPassword: _next.text);
+      if (mounted) Navigator.of(context).pop(true);
+    } on AppException catch (error) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = error.message;
+        });
+      }
+    }
   }
 }
 
