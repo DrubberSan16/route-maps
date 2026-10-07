@@ -168,6 +168,23 @@ void main() {
       expect(packs.pack(file.path).region, 'fixture');
     });
 
+    test('requests free the packs no longer on the device', () {
+      final duran = packs.pack(duranPack);
+      final city = packs.pack(fixturePack);
+      packs.handle('search', {
+        'packs': [fixturePack],
+        'text': 'duran',
+      });
+      expect(identical(packs.pack(fixturePack), city), isTrue);
+      expect(identical(packs.pack(duranPack), duran), isFalse, reason: 'opened again');
+      packs.handle('reverse', {
+        'packs': [duranPack],
+        'latitude': inDuran.latitude,
+        'longitude': inDuran.longitude,
+      });
+      expect(identical(packs.pack(fixturePack), city), isFalse);
+    });
+
     test('rejects missing and damaged packs', () {
       final directory = Directory.systemTemp.createTempSync('offline-pack');
       addTearDown(() => directory.deleteSync(recursive: true));

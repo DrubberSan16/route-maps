@@ -137,11 +137,26 @@ class RegionRepositoryImpl implements RegionRepository {
             checkedAt: Value(now),
           ),
         );
-    return _toDownloaded(
-      await (_db.select(
-        _db.downloadedRegions,
-      )..where((t) => t.code.equals(region.code))).getSingle(),
-    );
+    return _downloaded(region.code);
+  }
+
+  @override
+  Future<DownloadedRegion> saveOfflinePack({
+    required String code,
+    required String relativePath,
+    required String checksum,
+    required int sizeBytes,
+  }) async {
+    final updated = await (_db.update(_db.downloadedRegions)..where((t) => t.code.equals(code)))
+        .write(
+          DownloadedRegionsCompanion(
+            routingRelativePath: Value(relativePath),
+            routingChecksum: Value(checksum),
+            routingSize: Value(sizeBytes),
+          ),
+        );
+    if (updated == 0) throw StateError('Region $code is not stored on the device');
+    return _downloaded(code);
   }
 
   @override
@@ -151,20 +166,37 @@ class RegionRepositoryImpl implements RegionRepository {
       await (_db.delete(_db.regionDownloads)..where((t) => t.code.equals(code))).go();
     });
     await _storage.deleteRegionFiles(code);
+    await _storage.deleteRegionPacks(code);
   }
 
   @override
   Future<List<String>> removeMissingFiles() async {
     final removed = <String>[];
     for (final region in await downloadedRegions()) {
-      final file = await _storage.resolve(region.relativePath);
-      if (!await file.exists()) {
+      if (!await (await _storage.resolve(region.relativePath)).exists()) {
         await (_db.delete(_db.downloadedRegions)..where((t) => t.code.equals(region.code))).go();
+        await _storage.deleteRegionPacks(region.code);
         removed.add(region.code);
+        continue;
+      }
+      final pack = region.routingRelativePath;
+      if (pack != null && !await (await _storage.resolve(pack)).exists()) {
+        // The map stays; the pack can be downloaded again.
+        await (_db.update(_db.downloadedRegions)..where((t) => t.code.equals(region.code))).write(
+          const DownloadedRegionsCompanion(
+            routingRelativePath: Value(null),
+            routingChecksum: Value(null),
+            routingSize: Value(null),
+          ),
+        );
       }
     }
     return removed;
   }
+
+  Future<DownloadedRegion> _downloaded(String code) async => _toDownloaded(
+    await (_db.select(_db.downloadedRegions)..where((t) => t.code.equals(code))).getSingle(),
+  );
 
   SimpleSelectStatement<$CatalogRegionsTable, CatalogRegionRow> _catalogQuery() =>
       _db.select(_db.catalogRegions)..orderBy([(t) => OrderingTerm.asc(t.name)]);
@@ -192,6 +224,7 @@ class RegionRepositoryImpl implements RegionRepository {
         maxZoom: region.maxZoom,
         mapDownloadUrl: region.mapDownloadUrl,
         routingDownloadUrl: Value(region.routingDownloadUrl),
+        routingFormat: Value(region.routingFormat),
         tilesUrl: region.tilesUrl,
         updatedAt: utcMillis(region.updatedAt),
         fetchedAt: fetchedAt,
@@ -219,6 +252,7 @@ class RegionRepositoryImpl implements RegionRepository {
     maxZoom: row.maxZoom,
     mapDownloadUrl: row.mapDownloadUrl,
     routingDownloadUrl: row.routingDownloadUrl,
+    routingFormat: row.routingFormat,
     tilesUrl: row.tilesUrl,
     updatedAt: row.updatedAt,
     assets: _assets(row.assets),
@@ -250,5 +284,8 @@ class RegionRepositoryImpl implements RegionRepository {
     downloadedAt: row.downloadedAt,
     latestVersion: row.latestVersion,
     checkedAt: row.checkedAt,
+    routingRelativePath: row.routingRelativePath,
+    routingChecksum: row.routingChecksum,
+    routingSizeBytes: row.routingSize,
   );
 }

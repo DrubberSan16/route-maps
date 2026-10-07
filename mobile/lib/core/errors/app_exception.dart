@@ -31,6 +31,7 @@ abstract final class ErrorCodes {
   static const requestCancelled = 'REQUEST_CANCELLED';
   static const unexpectedResponse = 'UNEXPECTED_RESPONSE';
   static const offlineRouteUnavailable = 'OFFLINE_ROUTE_UNAVAILABLE';
+  static const offlineSearchUnavailable = 'OFFLINE_SEARCH_UNAVAILABLE';
   static const downloadCancelled = 'DOWNLOAD_CANCELLED';
   static const locationServiceDisabled = 'LOCATION_SERVICE_DISABLED';
   static const locationPermissionDenied = 'LOCATION_PERMISSION_DENIED';
@@ -69,8 +70,12 @@ const _userMessages = <String, String>{
   ErrorCodes.requestCancelled: 'La operación se canceló.',
   ErrorCodes.unexpectedResponse: 'El servidor devolvió una respuesta inesperada.',
   ErrorCodes.offlineRouteUnavailable:
-      'Sin conexión: calcular una ruta nueva requiere Internet. '
-      'Puedes abrir una de tus rutas guardadas.',
+      'Sin conexión: para calcular rutas nuevas descarga la región en «Mapas offline». '
+      'También puedes abrir una de tus rutas guardadas.',
+  ErrorCodes.offlineSearchUnavailable:
+      'Sin conexión: para buscar direcciones descarga la región en «Mapas offline». '
+      'También puedes escribir coordenadas (latitud, longitud), mantener presionado el mapa '
+      'o elegir una ruta guardada.',
   ErrorCodes.downloadCancelled: 'Descarga pausada.',
   ErrorCodes.locationServiceDisabled: 'La ubicación del dispositivo está desactivada.',
   ErrorCodes.locationPermissionDenied: 'Sin permiso de ubicación no podemos mostrar tu posición.',

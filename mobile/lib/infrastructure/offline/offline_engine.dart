@@ -131,12 +131,19 @@ class OfflinePackSet {
     List<String> paths() => [
       for (final path in arguments['packs']! as List<Object?>) path! as String,
     ];
+    // Requests name every pack of the device: the others were deleted or replaced.
+    List<String> current() {
+      final packs = paths();
+      retain(packs);
+      return packs;
+    }
+
     double number(String key) => (arguments[key]! as num).toDouble();
     double? optional(String key) => (arguments[key] as num?)?.toDouble();
     switch (operation) {
       case 'route':
         return route(
-          packs: paths(),
+          packs: current(),
           profile: arguments['profile']! as String,
           stops: [
             for (final stop in arguments['stops']! as List<Object?>)
@@ -150,7 +157,7 @@ class OfflinePackSet {
         );
       case 'search':
         return search(
-          packs: paths(),
+          packs: current(),
           text: arguments['text']! as String,
           limit: (arguments['limit'] as num?)?.toInt() ?? 10,
           nearLatitude: optional('nearLatitude'),
@@ -158,7 +165,7 @@ class OfflinePackSet {
         );
       case 'reverse':
         return reverse(
-          packs: paths(),
+          packs: current(),
           latitude: number('latitude'),
           longitude: number('longitude'),
         );

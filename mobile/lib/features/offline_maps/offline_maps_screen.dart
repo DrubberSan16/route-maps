@@ -9,7 +9,9 @@ import '../../services/regions/region_download_service.dart';
 import 'offline_maps_controller.dart';
 
 /// Regions stored on the device and regions available on the server, with
-/// download progress, pause/resume, updates and deletion.
+/// download progress, pause/resume, updates and deletion. A region brings its
+/// map and, when the server publishes it, its offline pack: routes, place
+/// search and addresses without connection.
 class OfflineMapsScreen extends ConsumerWidget {
   const OfflineMapsScreen({super.key});
 
@@ -124,6 +126,11 @@ class _DownloadedRegionTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final latest = this.latest;
     final canUpdate = region.updateAvailable && latest != null && latest.version != region.version;
+    // Downloaded before the server published its pack, or the pack changed.
+    final packNeeded = latest != null && region.needsOfflinePack(latest);
+    final updateBytes = latest == null
+        ? 0
+        : latest.mapSizeBytes + (packNeeded ? latest.routingSizeBytes! : 0);
     return Card(
       key: Key('downloaded-${region.code}'),
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -135,10 +142,11 @@ class _DownloadedRegionTile extends ConsumerWidget {
             Text(region.name, style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 4),
             const Text('Descargado'),
-            Text('Versión ${region.version} · ${formatBytes(region.sizeBytes)}'),
+            Text('Versión ${region.version} · ${formatBytes(region.storedBytes)}'),
+            _OfflinePackStatus(region: region, latest: latest),
             if (canUpdate && task == null)
               Text(
-                'Nueva versión disponible: ${latest.version} (${formatBytes(latest.mapSizeBytes)})',
+                'Nueva versión disponible: ${latest.version} (${formatBytes(updateBytes)})',
                 style: TextStyle(color: Theme.of(context).colorScheme.primary),
               ),
             if (task case final task?) _TaskProgress(task: task),
@@ -151,6 +159,11 @@ class _DownloadedRegionTile extends ConsumerWidget {
                   TextButton(
                     onPressed: online ? () => _download(context, ref, latest) : null,
                     child: const Text('Actualizar'),
+                  )
+                else if (packNeeded)
+                  TextButton(
+                    onPressed: online ? () => _download(context, ref, latest) : null,
+                    child: Text(region.hasOfflinePack ? 'Actualizar rutas' : 'Descargar rutas'),
                   ),
                 TextButton(
                   onPressed: () => _confirmDelete(context, ref),
@@ -170,8 +183,12 @@ class _DownloadedRegionTile extends ConsumerWidget {
       builder: (context) => AlertDialog(
         title: Text('¿Eliminar el mapa de ${region.name}?'),
         content: Text(
-          'Liberarás ${formatBytes(region.sizeBytes)}. Sin este mapa la zona no se verá sin '
-          'conexión; podrás descargarlo otra vez cuando quieras.',
+          region.hasOfflinePack
+              ? 'Liberarás ${formatBytes(region.storedBytes)}. Sin este mapa la zona no se '
+                    'verá ni tendrá rutas ni búsqueda sin conexión; podrás descargarlo otra '
+                    'vez cuando quieras.'
+              : 'Liberarás ${formatBytes(region.storedBytes)}. Sin este mapa la zona no se '
+                    'verá sin conexión; podrás descargarlo otra vez cuando quieras.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
@@ -208,13 +225,18 @@ class _AvailableRegionTile extends ConsumerWidget {
             Row(
               children: [
                 Expanded(child: Text(region.name, style: Theme.of(context).textTheme.titleMedium)),
-                Text(formatBytes(region.mapSizeBytes)),
+                Text(formatBytes(region.downloadSizeBytes)),
               ],
             ),
             Text(
               [region.city, region.province, region.country].whereType<String>().join(', '),
               style: Theme.of(context).textTheme.bodySmall,
             ),
+            if (region.hasOfflinePack)
+              Text(
+                'Incluye rutas y búsqueda sin conexión',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
             if (task != null) _TaskProgress(task: task),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
@@ -235,6 +257,31 @@ class _AvailableRegionTile extends ConsumerWidget {
   }
 }
 
+/// Whether the routes, place search and addresses of a stored region work
+/// without connection.
+class _OfflinePackStatus extends StatelessWidget {
+  const _OfflinePackStatus({required this.region, required this.latest});
+
+  final DownloadedRegion region;
+  final MapRegion? latest;
+
+  @override
+  Widget build(BuildContext context) {
+    final latest = this.latest;
+    final String text;
+    if (region.hasOfflinePack) {
+      text = 'Rutas y búsqueda sin conexión · ${formatBytes(region.routingSizeBytes ?? 0)}';
+    } else if (latest != null && latest.hasOfflinePack) {
+      text =
+          'Rutas y búsqueda sin conexión: sin descargar (${formatBytes(latest.routingSizeBytes!)})';
+    } else {
+      // The server does not publish them for this region.
+      return const SizedBox.shrink();
+    }
+    return Text(text, key: Key('offline-pack-${region.code}'));
+  }
+}
+
 class _TaskProgress extends StatelessWidget {
   const _TaskProgress({required this.task});
 
@@ -243,10 +290,15 @@ class _TaskProgress extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final percent = formatPercent(task.progress);
+    // The pack comes after the map, on the same bar: say which one is downloading.
+    final pack = task.part == RegionDownloadPart.offlinePack;
     final status = switch (task.status) {
-      RegionDownloadStatus.downloading => formatPercent(task.progress),
-      RegionDownloadStatus.paused => 'En pausa · ${formatPercent(task.progress)}',
-      RegionDownloadStatus.failed => 'Error · ${formatPercent(task.progress)}',
+      RegionDownloadStatus.downloading => pack ? 'Rutas y búsqueda · $percent' : percent,
+      RegionDownloadStatus.paused =>
+        pack ? 'En pausa · rutas y búsqueda · $percent' : 'En pausa · $percent',
+      RegionDownloadStatus.failed =>
+        pack ? 'Error · rutas y búsqueda · $percent' : 'Error · $percent',
     };
     return Padding(
       padding: const EdgeInsets.only(top: 8, right: 8),
@@ -300,7 +352,13 @@ Future<void> _download(BuildContext context, WidgetRef ref, MapRegion region) as
   final result = await ref.read(regionDownloadServiceProvider).download(region);
   if (result == RegionDownloadResult.completed) {
     messenger.showSnackBar(
-      SnackBar(content: Text('Mapa de ${region.name} descargado. Ya funciona sin conexión.')),
+      SnackBar(
+        content: Text(
+          region.hasOfflinePack
+              ? 'Listo: ${region.name} funciona sin conexión, con mapa, rutas y búsqueda.'
+              : 'Mapa de ${region.name} descargado. Ya funciona sin conexión.',
+        ),
+      ),
     );
   }
 }

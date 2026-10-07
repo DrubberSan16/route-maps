@@ -14,8 +14,12 @@ import '../../domain/services/offline_storage_service.dart';
 /// ```
 /// offline/
 /// ├── regions/<code>/<version>/<code>.pmtiles(.part)
+/// ├── packs/<code>/<version>/<code>.rmpack(.part)
 /// └── glyphs/<font stack>/<range>.pbf
 /// ```
+///
+/// Maps and offline packs live in separate trees: each one is replaced when a
+/// newer version of it is complete, independently of the other.
 class FileOfflineStorageService implements OfflineStorageService {
   FileOfflineStorageService({
     Future<Directory> Function()? baseDirectory,
@@ -45,11 +49,18 @@ class FileOfflineStorageService implements OfflineStorageService {
   }
 
   @override
-  Future<File> regionMapFile(String code, String version) async {
+  Future<File> regionMapFile(String code, String version) =>
+      _versionedFile('regions', code, version, '$code.pmtiles');
+
+  @override
+  Future<File> regionPackFile(String code, String version) =>
+      _versionedFile('packs', code, version, '$code.rmpack');
+
+  Future<File> _versionedFile(String tree, String code, String version, String name) async {
     _checkSegment(code);
     _checkSegment(version);
     final root = await rootDirectory();
-    return File(p.join(root.path, 'regions', code, version, '$code.pmtiles'));
+    return File(p.join(root.path, tree, code, version, name));
   }
 
   @override
@@ -75,9 +86,16 @@ class FileOfflineStorageService implements OfflineStorageService {
   Future<int?> freeBytes() async => _freeBytesOf((await rootDirectory()).path);
 
   @override
-  Future<void> deleteRegionFiles(String code, {String? keepVersion}) async {
+  Future<void> deleteRegionFiles(String code, {String? keepVersion}) =>
+      _deleteVersions('regions', code, keepVersion);
+
+  @override
+  Future<void> deleteRegionPacks(String code, {String? keepVersion}) =>
+      _deleteVersions('packs', code, keepVersion);
+
+  Future<void> _deleteVersions(String tree, String code, String? keepVersion) async {
     _checkSegment(code);
-    final directory = Directory(p.join((await rootDirectory()).path, 'regions', code));
+    final directory = Directory(p.join((await rootDirectory()).path, tree, code));
     if (!await directory.exists()) return;
     if (keepVersion == null) {
       await directory.delete(recursive: true);
@@ -103,7 +121,7 @@ class FileOfflineStorageService implements OfflineStorageService {
     }
   }
 
-  /// Maps and glyphs can be downloaded again, so they stay out of the
+  /// Maps, packs and glyphs can be downloaded again, so they stay out of the
   /// device backups (Apple's data storage guidelines; hundreds of MB would
   /// otherwise go to iCloud). Android keeps all app data out of backups in
   /// the manifest (`allowBackup="false"`).

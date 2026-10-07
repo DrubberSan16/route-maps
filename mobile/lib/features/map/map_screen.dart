@@ -107,7 +107,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   const ClipRRect(
                     borderRadius: BorderRadius.all(Radius.circular(MapChrome.radius)),
                     child: ConnectionBanner(
-                      message: 'Sin conexión: usas los mapas descargados y tus rutas guardadas.',
+                      message: 'Sin conexión: usas los mapas y las rutas guardadas en el teléfono.',
                     ),
                   ),
                   if (source != null)

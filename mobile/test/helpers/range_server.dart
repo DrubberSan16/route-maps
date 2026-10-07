@@ -12,7 +12,15 @@ class RangeServer {
       RangeServer._(await HttpServer.bind(InternetAddress.loopbackIPv4, 0)).._listen();
 
   final HttpServer _server;
+
+  /// What every path serves, unless [files] has its own content.
   late Uint8List content;
+
+  /// Content by request path (e.g. the offline pack next to the map).
+  final files = <String, Uint8List>{};
+
+  /// Status answered instead of the file, by request path.
+  final failures = <String, int>{};
   String etag = '"v1"';
   String? checksumHeader;
 
@@ -22,7 +30,7 @@ class RangeServer {
 
   /// Sends the body slowly, in 64 KiB chunks.
   Duration? chunkDelay;
-  final requests = <({String? range, String? ifRange})>[];
+  final requests = <({String path, String? range, String? ifRange})>[];
 
   /// The platform host, to resolve the download paths of the catalog.
   Uri get origin => Uri.parse('http://127.0.0.1:${_server.port}');
@@ -35,8 +43,8 @@ class RangeServer {
       final response = request.response;
       final range = request.headers.value(HttpHeaders.rangeHeader);
       final ifRange = request.headers.value('if-range');
-      requests.add((range: range, ifRange: ifRange));
-      if (statusOverride case final status?) {
+      requests.add((path: request.uri.path, range: range, ifRange: ifRange));
+      if (statusOverride ?? failures[request.uri.path] case final status?) {
         response.statusCode = status;
         await response.close();
         return;
@@ -46,6 +54,7 @@ class RangeServer {
         ..set(HttpHeaders.acceptRangesHeader, 'bytes');
       if (checksumHeader case final checksum?) response.headers.set('X-Checksum-Sha256', checksum);
 
+      final content = files[request.uri.path] ?? this.content;
       var start = 0;
       final match = RegExp(r'^bytes=(\d+)-$').firstMatch(range ?? '');
       final useRange = match != null && (ifRange == null || ifRange == etag);

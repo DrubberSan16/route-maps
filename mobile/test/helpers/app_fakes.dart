@@ -71,6 +71,8 @@ class InMemoryRegionRepository implements RegionRepository {
     required String relativePath,
     required int sizeBytes,
   }) async {
+    // Like the database: the offline pack of the region stays.
+    final previous = _downloaded.where((r) => r.code == region.code).firstOrNull;
     final stored = DownloadedRegion(
       code: region.code,
       name: region.name,
@@ -83,8 +85,40 @@ class InMemoryRegionRepository implements RegionRepository {
       maxZoom: region.maxZoom,
       downloadedAt: DateTime.utc(2026, 9, 25),
       latestVersion: region.version,
+      routingRelativePath: previous?.routingRelativePath,
+      routingChecksum: previous?.routingChecksum,
+      routingSizeBytes: previous?.routingSizeBytes,
     );
     downloaded = [..._downloaded.where((r) => r.code != region.code), stored];
+    return stored;
+  }
+
+  @override
+  Future<DownloadedRegion> saveOfflinePack({
+    required String code,
+    required String relativePath,
+    required String checksum,
+    required int sizeBytes,
+  }) async {
+    final region = _downloaded.firstWhere((region) => region.code == code);
+    final stored = DownloadedRegion(
+      code: region.code,
+      name: region.name,
+      version: region.version,
+      checksum: region.checksum,
+      sizeBytes: region.sizeBytes,
+      relativePath: region.relativePath,
+      bbox: region.bbox,
+      minZoom: region.minZoom,
+      maxZoom: region.maxZoom,
+      downloadedAt: region.downloadedAt,
+      latestVersion: region.latestVersion,
+      checkedAt: region.checkedAt,
+      routingRelativePath: relativePath,
+      routingChecksum: checksum,
+      routingSizeBytes: sizeBytes,
+    );
+    downloaded = [for (final r in _downloaded) r.code == code ? stored : r];
     return stored;
   }
 

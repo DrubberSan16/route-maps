@@ -21,9 +21,9 @@ import 'unavailable_offline_routing_provider.dart';
 /// time. Routes are only followed in their own direction: going backwards
 /// could break one-way streets and turn restrictions.
 ///
-/// Mode 2: a new route calculated on the device by [OfflineRoutingProvider].
-/// Without an installed engine the request fails with
-/// [ErrorCodes.offlineRouteUnavailable]; no straight line is made up.
+/// Mode 2: a new route calculated on the device by [OfflineRoutingProvider],
+/// with the offline packs of the downloaded regions. Without them the request
+/// fails with [ErrorCodes.offlineRouteUnavailable]; no straight line is made up.
 class OfflineRoutingService implements RoutingService {
   OfflineRoutingService({
     required this._savedRoutes,
@@ -48,9 +48,11 @@ class OfflineRoutingService implements RoutingService {
   /// Closer than this to the end of the stored route counts as arriving.
   static const _arrivalRadiusMeters = 30.0;
 
-  /// Offline answer for stops that no stored route passes through.
+  /// Offline answer for stops that no stored route passes through, without
+  /// downloaded regions to route on.
   static const stopsNeedConnectionMessage =
-      'Sin conexión: una ruta con paradas necesita Internet, salvo que la hayas guardado antes.';
+      'Sin conexión: para una ruta con paradas descarga la región en «Mapas offline», '
+      'o abre una ruta guardada que pase por ellas.';
 
   @override
   Future<RouteResult> calculateRoute({
@@ -82,12 +84,22 @@ class OfflineRoutingService implements RoutingService {
         destination: destination,
       );
     }
-    if (waypoints.isNotEmpty) {
-      // On-device engines route between two points only.
-      throw const AppException(ErrorCodes.offlineRouteUnavailable, stopsNeedConnectionMessage);
+    if (await _provider.canRoute(
+      origin: origin,
+      destination: destination,
+      profile: profile,
+      waypoints: waypoints,
+    )) {
+      return _provider.calculateRoute(
+        origin: origin,
+        destination: destination,
+        profile: profile,
+        waypoints: waypoints,
+        alternatives: alternatives,
+      );
     }
-    if (await _provider.canRoute(origin: origin, destination: destination, profile: profile)) {
-      return _provider.calculateRoute(origin: origin, destination: destination, profile: profile);
+    if (waypoints.isNotEmpty) {
+      throw const AppException(ErrorCodes.offlineRouteUnavailable, stopsNeedConnectionMessage);
     }
     throw AppException.of(ErrorCodes.offlineRouteUnavailable);
   }

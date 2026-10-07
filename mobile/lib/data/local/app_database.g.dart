@@ -235,6 +235,17 @@ class $CatalogRegionsTable extends CatalogRegions
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _routingFormatMeta = const VerificationMeta(
+    'routingFormat',
+  );
+  @override
+  late final GeneratedColumn<String> routingFormat = GeneratedColumn<String>(
+    'routing_format',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     code,
@@ -259,6 +270,7 @@ class $CatalogRegionsTable extends CatalogRegions
     updatedAt,
     fetchedAt,
     assets,
+    routingFormat,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -440,6 +452,15 @@ class $CatalogRegionsTable extends CatalogRegions
         assets.isAcceptableOrUnknown(data['assets']!, _assetsMeta),
       );
     }
+    if (data.containsKey('routing_format')) {
+      context.handle(
+        _routingFormatMeta,
+        routingFormat.isAcceptableOrUnknown(
+          data['routing_format']!,
+          _routingFormatMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -537,6 +558,10 @@ class $CatalogRegionsTable extends CatalogRegions
         DriftSqlType.string,
         data['${effectivePrefix}assets'],
       ),
+      routingFormat: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}routing_format'],
+      ),
     );
   }
 
@@ -573,6 +598,10 @@ class CatalogRegionRow extends DataClass
   /// Relief, satellite and overlay archives of the region (JSON array of the
   /// API's `assets`); null in catalogs cached before they existed.
   final String? assets;
+
+  /// Format of the routing download: `route-maps-pack` is the offline pack of
+  /// the app; null in catalogs cached before it existed.
+  final String? routingFormat;
   const CatalogRegionRow({
     required this.code,
     required this.name,
@@ -596,6 +625,7 @@ class CatalogRegionRow extends DataClass
     required this.updatedAt,
     required this.fetchedAt,
     this.assets,
+    this.routingFormat,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -642,6 +672,9 @@ class CatalogRegionRow extends DataClass
     if (!nullToAbsent || assets != null) {
       map['assets'] = Variable<String>(assets);
     }
+    if (!nullToAbsent || routingFormat != null) {
+      map['routing_format'] = Variable<String>(routingFormat);
+    }
     return map;
   }
 
@@ -683,6 +716,9 @@ class CatalogRegionRow extends DataClass
       assets: assets == null && nullToAbsent
           ? const Value.absent()
           : Value(assets),
+      routingFormat: routingFormat == null && nullToAbsent
+          ? const Value.absent()
+          : Value(routingFormat),
     );
   }
 
@@ -716,6 +752,7 @@ class CatalogRegionRow extends DataClass
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
       fetchedAt: serializer.fromJson<DateTime>(json['fetchedAt']),
       assets: serializer.fromJson<String?>(json['assets']),
+      routingFormat: serializer.fromJson<String?>(json['routingFormat']),
     );
   }
   @override
@@ -744,6 +781,7 @@ class CatalogRegionRow extends DataClass
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
       'fetchedAt': serializer.toJson<DateTime>(fetchedAt),
       'assets': serializer.toJson<String?>(assets),
+      'routingFormat': serializer.toJson<String?>(routingFormat),
     };
   }
 
@@ -770,6 +808,7 @@ class CatalogRegionRow extends DataClass
     DateTime? updatedAt,
     DateTime? fetchedAt,
     Value<String?> assets = const Value.absent(),
+    Value<String?> routingFormat = const Value.absent(),
   }) => CatalogRegionRow(
     code: code ?? this.code,
     name: name ?? this.name,
@@ -797,6 +836,9 @@ class CatalogRegionRow extends DataClass
     updatedAt: updatedAt ?? this.updatedAt,
     fetchedAt: fetchedAt ?? this.fetchedAt,
     assets: assets.present ? assets.value : this.assets,
+    routingFormat: routingFormat.present
+        ? routingFormat.value
+        : this.routingFormat,
   );
   CatalogRegionRow copyWithCompanion(CatalogRegionsCompanion data) {
     return CatalogRegionRow(
@@ -830,6 +872,9 @@ class CatalogRegionRow extends DataClass
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
       fetchedAt: data.fetchedAt.present ? data.fetchedAt.value : this.fetchedAt,
       assets: data.assets.present ? data.assets.value : this.assets,
+      routingFormat: data.routingFormat.present
+          ? data.routingFormat.value
+          : this.routingFormat,
     );
   }
 
@@ -857,7 +902,8 @@ class CatalogRegionRow extends DataClass
           ..write('tilesUrl: $tilesUrl, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('fetchedAt: $fetchedAt, ')
-          ..write('assets: $assets')
+          ..write('assets: $assets, ')
+          ..write('routingFormat: $routingFormat')
           ..write(')'))
         .toString();
   }
@@ -886,6 +932,7 @@ class CatalogRegionRow extends DataClass
     updatedAt,
     fetchedAt,
     assets,
+    routingFormat,
   ]);
   @override
   bool operator ==(Object other) =>
@@ -912,7 +959,8 @@ class CatalogRegionRow extends DataClass
           other.tilesUrl == this.tilesUrl &&
           other.updatedAt == this.updatedAt &&
           other.fetchedAt == this.fetchedAt &&
-          other.assets == this.assets);
+          other.assets == this.assets &&
+          other.routingFormat == this.routingFormat);
 }
 
 class CatalogRegionsCompanion extends UpdateCompanion<CatalogRegionRow> {
@@ -938,6 +986,7 @@ class CatalogRegionsCompanion extends UpdateCompanion<CatalogRegionRow> {
   final Value<DateTime> updatedAt;
   final Value<DateTime> fetchedAt;
   final Value<String?> assets;
+  final Value<String?> routingFormat;
   final Value<int> rowid;
   const CatalogRegionsCompanion({
     this.code = const Value.absent(),
@@ -962,6 +1011,7 @@ class CatalogRegionsCompanion extends UpdateCompanion<CatalogRegionRow> {
     this.updatedAt = const Value.absent(),
     this.fetchedAt = const Value.absent(),
     this.assets = const Value.absent(),
+    this.routingFormat = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   CatalogRegionsCompanion.insert({
@@ -987,6 +1037,7 @@ class CatalogRegionsCompanion extends UpdateCompanion<CatalogRegionRow> {
     required DateTime updatedAt,
     required DateTime fetchedAt,
     this.assets = const Value.absent(),
+    this.routingFormat = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : code = Value(code),
        name = Value(name),
@@ -1023,6 +1074,7 @@ class CatalogRegionsCompanion extends UpdateCompanion<CatalogRegionRow> {
     Expression<DateTime>? updatedAt,
     Expression<DateTime>? fetchedAt,
     Expression<String>? assets,
+    Expression<String>? routingFormat,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1049,6 +1101,7 @@ class CatalogRegionsCompanion extends UpdateCompanion<CatalogRegionRow> {
       if (updatedAt != null) 'updated_at': updatedAt,
       if (fetchedAt != null) 'fetched_at': fetchedAt,
       if (assets != null) 'assets': assets,
+      if (routingFormat != null) 'routing_format': routingFormat,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1076,6 +1129,7 @@ class CatalogRegionsCompanion extends UpdateCompanion<CatalogRegionRow> {
     Value<DateTime>? updatedAt,
     Value<DateTime>? fetchedAt,
     Value<String?>? assets,
+    Value<String?>? routingFormat,
     Value<int>? rowid,
   }) {
     return CatalogRegionsCompanion(
@@ -1101,6 +1155,7 @@ class CatalogRegionsCompanion extends UpdateCompanion<CatalogRegionRow> {
       updatedAt: updatedAt ?? this.updatedAt,
       fetchedAt: fetchedAt ?? this.fetchedAt,
       assets: assets ?? this.assets,
+      routingFormat: routingFormat ?? this.routingFormat,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1174,6 +1229,9 @@ class CatalogRegionsCompanion extends UpdateCompanion<CatalogRegionRow> {
     if (assets.present) {
       map['assets'] = Variable<String>(assets.value);
     }
+    if (routingFormat.present) {
+      map['routing_format'] = Variable<String>(routingFormat.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1205,6 +1263,7 @@ class CatalogRegionsCompanion extends UpdateCompanion<CatalogRegionRow> {
           ..write('updatedAt: $updatedAt, ')
           ..write('fetchedAt: $fetchedAt, ')
           ..write('assets: $assets, ')
+          ..write('routingFormat: $routingFormat, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1370,6 +1429,39 @@ class $DownloadedRegionsTable extends DownloadedRegions
     type: DriftSqlType.dateTime,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _routingRelativePathMeta =
+      const VerificationMeta('routingRelativePath');
+  @override
+  late final GeneratedColumn<String> routingRelativePath =
+      GeneratedColumn<String>(
+        'routing_relative_path',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _routingChecksumMeta = const VerificationMeta(
+    'routingChecksum',
+  );
+  @override
+  late final GeneratedColumn<String> routingChecksum = GeneratedColumn<String>(
+    'routing_checksum',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _routingSizeMeta = const VerificationMeta(
+    'routingSize',
+  );
+  @override
+  late final GeneratedColumn<int> routingSize = GeneratedColumn<int>(
+    'routing_size',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     code,
@@ -1387,6 +1479,9 @@ class $DownloadedRegionsTable extends DownloadedRegions
     downloadedAt,
     latestVersion,
     checkedAt,
+    routingRelativePath,
+    routingChecksum,
+    routingSize,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1517,6 +1612,33 @@ class $DownloadedRegionsTable extends DownloadedRegions
         checkedAt.isAcceptableOrUnknown(data['checked_at']!, _checkedAtMeta),
       );
     }
+    if (data.containsKey('routing_relative_path')) {
+      context.handle(
+        _routingRelativePathMeta,
+        routingRelativePath.isAcceptableOrUnknown(
+          data['routing_relative_path']!,
+          _routingRelativePathMeta,
+        ),
+      );
+    }
+    if (data.containsKey('routing_checksum')) {
+      context.handle(
+        _routingChecksumMeta,
+        routingChecksum.isAcceptableOrUnknown(
+          data['routing_checksum']!,
+          _routingChecksumMeta,
+        ),
+      );
+    }
+    if (data.containsKey('routing_size')) {
+      context.handle(
+        _routingSizeMeta,
+        routingSize.isAcceptableOrUnknown(
+          data['routing_size']!,
+          _routingSizeMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -1586,6 +1708,18 @@ class $DownloadedRegionsTable extends DownloadedRegions
         DriftSqlType.dateTime,
         data['${effectivePrefix}checked_at'],
       ),
+      routingRelativePath: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}routing_relative_path'],
+      ),
+      routingChecksum: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}routing_checksum'],
+      ),
+      routingSize: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}routing_size'],
+      ),
     );
   }
 
@@ -1616,6 +1750,13 @@ class DownloadedRegionRow extends DataClass
   /// Latest version on the server at the last update check.
   final String? latestVersion;
   final DateTime? checkedAt;
+
+  /// Offline pack of the region (road network and search index: routes, place
+  /// search and addresses without connection), relative to the offline storage
+  /// root; null until it is downloaded.
+  final String? routingRelativePath;
+  final String? routingChecksum;
+  final int? routingSize;
   const DownloadedRegionRow({
     required this.code,
     required this.name,
@@ -1632,6 +1773,9 @@ class DownloadedRegionRow extends DataClass
     required this.downloadedAt,
     this.latestVersion,
     this.checkedAt,
+    this.routingRelativePath,
+    this.routingChecksum,
+    this.routingSize,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1663,6 +1807,15 @@ class DownloadedRegionRow extends DataClass
     if (!nullToAbsent || checkedAt != null) {
       map['checked_at'] = Variable<DateTime>(checkedAt);
     }
+    if (!nullToAbsent || routingRelativePath != null) {
+      map['routing_relative_path'] = Variable<String>(routingRelativePath);
+    }
+    if (!nullToAbsent || routingChecksum != null) {
+      map['routing_checksum'] = Variable<String>(routingChecksum);
+    }
+    if (!nullToAbsent || routingSize != null) {
+      map['routing_size'] = Variable<int>(routingSize);
+    }
     return map;
   }
 
@@ -1691,6 +1844,15 @@ class DownloadedRegionRow extends DataClass
       checkedAt: checkedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(checkedAt),
+      routingRelativePath: routingRelativePath == null && nullToAbsent
+          ? const Value.absent()
+          : Value(routingRelativePath),
+      routingChecksum: routingChecksum == null && nullToAbsent
+          ? const Value.absent()
+          : Value(routingChecksum),
+      routingSize: routingSize == null && nullToAbsent
+          ? const Value.absent()
+          : Value(routingSize),
     );
   }
 
@@ -1715,6 +1877,11 @@ class DownloadedRegionRow extends DataClass
       downloadedAt: serializer.fromJson<DateTime>(json['downloadedAt']),
       latestVersion: serializer.fromJson<String?>(json['latestVersion']),
       checkedAt: serializer.fromJson<DateTime?>(json['checkedAt']),
+      routingRelativePath: serializer.fromJson<String?>(
+        json['routingRelativePath'],
+      ),
+      routingChecksum: serializer.fromJson<String?>(json['routingChecksum']),
+      routingSize: serializer.fromJson<int?>(json['routingSize']),
     );
   }
   @override
@@ -1736,6 +1903,9 @@ class DownloadedRegionRow extends DataClass
       'downloadedAt': serializer.toJson<DateTime>(downloadedAt),
       'latestVersion': serializer.toJson<String?>(latestVersion),
       'checkedAt': serializer.toJson<DateTime?>(checkedAt),
+      'routingRelativePath': serializer.toJson<String?>(routingRelativePath),
+      'routingChecksum': serializer.toJson<String?>(routingChecksum),
+      'routingSize': serializer.toJson<int?>(routingSize),
     };
   }
 
@@ -1755,6 +1925,9 @@ class DownloadedRegionRow extends DataClass
     DateTime? downloadedAt,
     Value<String?> latestVersion = const Value.absent(),
     Value<DateTime?> checkedAt = const Value.absent(),
+    Value<String?> routingRelativePath = const Value.absent(),
+    Value<String?> routingChecksum = const Value.absent(),
+    Value<int?> routingSize = const Value.absent(),
   }) => DownloadedRegionRow(
     code: code ?? this.code,
     name: name ?? this.name,
@@ -1773,6 +1946,13 @@ class DownloadedRegionRow extends DataClass
         ? latestVersion.value
         : this.latestVersion,
     checkedAt: checkedAt.present ? checkedAt.value : this.checkedAt,
+    routingRelativePath: routingRelativePath.present
+        ? routingRelativePath.value
+        : this.routingRelativePath,
+    routingChecksum: routingChecksum.present
+        ? routingChecksum.value
+        : this.routingChecksum,
+    routingSize: routingSize.present ? routingSize.value : this.routingSize,
   );
   DownloadedRegionRow copyWithCompanion(DownloadedRegionsCompanion data) {
     return DownloadedRegionRow(
@@ -1797,6 +1977,15 @@ class DownloadedRegionRow extends DataClass
           ? data.latestVersion.value
           : this.latestVersion,
       checkedAt: data.checkedAt.present ? data.checkedAt.value : this.checkedAt,
+      routingRelativePath: data.routingRelativePath.present
+          ? data.routingRelativePath.value
+          : this.routingRelativePath,
+      routingChecksum: data.routingChecksum.present
+          ? data.routingChecksum.value
+          : this.routingChecksum,
+      routingSize: data.routingSize.present
+          ? data.routingSize.value
+          : this.routingSize,
     );
   }
 
@@ -1817,7 +2006,10 @@ class DownloadedRegionRow extends DataClass
           ..write('maxZoom: $maxZoom, ')
           ..write('downloadedAt: $downloadedAt, ')
           ..write('latestVersion: $latestVersion, ')
-          ..write('checkedAt: $checkedAt')
+          ..write('checkedAt: $checkedAt, ')
+          ..write('routingRelativePath: $routingRelativePath, ')
+          ..write('routingChecksum: $routingChecksum, ')
+          ..write('routingSize: $routingSize')
           ..write(')'))
         .toString();
   }
@@ -1839,6 +2031,9 @@ class DownloadedRegionRow extends DataClass
     downloadedAt,
     latestVersion,
     checkedAt,
+    routingRelativePath,
+    routingChecksum,
+    routingSize,
   );
   @override
   bool operator ==(Object other) =>
@@ -1858,7 +2053,10 @@ class DownloadedRegionRow extends DataClass
           other.maxZoom == this.maxZoom &&
           other.downloadedAt == this.downloadedAt &&
           other.latestVersion == this.latestVersion &&
-          other.checkedAt == this.checkedAt);
+          other.checkedAt == this.checkedAt &&
+          other.routingRelativePath == this.routingRelativePath &&
+          other.routingChecksum == this.routingChecksum &&
+          other.routingSize == this.routingSize);
 }
 
 class DownloadedRegionsCompanion extends UpdateCompanion<DownloadedRegionRow> {
@@ -1877,6 +2075,9 @@ class DownloadedRegionsCompanion extends UpdateCompanion<DownloadedRegionRow> {
   final Value<DateTime> downloadedAt;
   final Value<String?> latestVersion;
   final Value<DateTime?> checkedAt;
+  final Value<String?> routingRelativePath;
+  final Value<String?> routingChecksum;
+  final Value<int?> routingSize;
   final Value<int> rowid;
   const DownloadedRegionsCompanion({
     this.code = const Value.absent(),
@@ -1894,6 +2095,9 @@ class DownloadedRegionsCompanion extends UpdateCompanion<DownloadedRegionRow> {
     this.downloadedAt = const Value.absent(),
     this.latestVersion = const Value.absent(),
     this.checkedAt = const Value.absent(),
+    this.routingRelativePath = const Value.absent(),
+    this.routingChecksum = const Value.absent(),
+    this.routingSize = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   DownloadedRegionsCompanion.insert({
@@ -1912,6 +2116,9 @@ class DownloadedRegionsCompanion extends UpdateCompanion<DownloadedRegionRow> {
     required DateTime downloadedAt,
     this.latestVersion = const Value.absent(),
     this.checkedAt = const Value.absent(),
+    this.routingRelativePath = const Value.absent(),
+    this.routingChecksum = const Value.absent(),
+    this.routingSize = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : code = Value(code),
        name = Value(name),
@@ -1938,6 +2145,9 @@ class DownloadedRegionsCompanion extends UpdateCompanion<DownloadedRegionRow> {
     Expression<DateTime>? downloadedAt,
     Expression<String>? latestVersion,
     Expression<DateTime>? checkedAt,
+    Expression<String>? routingRelativePath,
+    Expression<String>? routingChecksum,
+    Expression<int>? routingSize,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1956,6 +2166,10 @@ class DownloadedRegionsCompanion extends UpdateCompanion<DownloadedRegionRow> {
       if (downloadedAt != null) 'downloaded_at': downloadedAt,
       if (latestVersion != null) 'latest_version': latestVersion,
       if (checkedAt != null) 'checked_at': checkedAt,
+      if (routingRelativePath != null)
+        'routing_relative_path': routingRelativePath,
+      if (routingChecksum != null) 'routing_checksum': routingChecksum,
+      if (routingSize != null) 'routing_size': routingSize,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1976,6 +2190,9 @@ class DownloadedRegionsCompanion extends UpdateCompanion<DownloadedRegionRow> {
     Value<DateTime>? downloadedAt,
     Value<String?>? latestVersion,
     Value<DateTime?>? checkedAt,
+    Value<String?>? routingRelativePath,
+    Value<String?>? routingChecksum,
+    Value<int?>? routingSize,
     Value<int>? rowid,
   }) {
     return DownloadedRegionsCompanion(
@@ -1994,6 +2211,9 @@ class DownloadedRegionsCompanion extends UpdateCompanion<DownloadedRegionRow> {
       downloadedAt: downloadedAt ?? this.downloadedAt,
       latestVersion: latestVersion ?? this.latestVersion,
       checkedAt: checkedAt ?? this.checkedAt,
+      routingRelativePath: routingRelativePath ?? this.routingRelativePath,
+      routingChecksum: routingChecksum ?? this.routingChecksum,
+      routingSize: routingSize ?? this.routingSize,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2046,6 +2266,17 @@ class DownloadedRegionsCompanion extends UpdateCompanion<DownloadedRegionRow> {
     if (checkedAt.present) {
       map['checked_at'] = Variable<DateTime>(checkedAt.value);
     }
+    if (routingRelativePath.present) {
+      map['routing_relative_path'] = Variable<String>(
+        routingRelativePath.value,
+      );
+    }
+    if (routingChecksum.present) {
+      map['routing_checksum'] = Variable<String>(routingChecksum.value);
+    }
+    if (routingSize.present) {
+      map['routing_size'] = Variable<int>(routingSize.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2070,6 +2301,9 @@ class DownloadedRegionsCompanion extends UpdateCompanion<DownloadedRegionRow> {
           ..write('downloadedAt: $downloadedAt, ')
           ..write('latestVersion: $latestVersion, ')
           ..write('checkedAt: $checkedAt, ')
+          ..write('routingRelativePath: $routingRelativePath, ')
+          ..write('routingChecksum: $routingChecksum, ')
+          ..write('routingSize: $routingSize, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2132,6 +2366,28 @@ class $RegionDownloadsTable extends RegionDownloads
     false,
     type: DriftSqlType.int,
     requiredDuringInsert: true,
+  );
+  static const VerificationMeta _doneBytesMeta = const VerificationMeta(
+    'doneBytes',
+  );
+  @override
+  late final GeneratedColumn<int> doneBytes = GeneratedColumn<int>(
+    'done_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('map'),
   );
   static const VerificationMeta _urlMeta = const VerificationMeta('url');
   @override
@@ -2222,6 +2478,8 @@ class $RegionDownloadsTable extends RegionDownloads
     version,
     checksum,
     totalBytes,
+    doneBytes,
+    kind,
     url,
     relativePath,
     etag,
@@ -2282,6 +2540,18 @@ class $RegionDownloadsTable extends RegionDownloads
       );
     } else if (isInserting) {
       context.missing(_totalBytesMeta);
+    }
+    if (data.containsKey('done_bytes')) {
+      context.handle(
+        _doneBytesMeta,
+        doneBytes.isAcceptableOrUnknown(data['done_bytes']!, _doneBytesMeta),
+      );
+    }
+    if (data.containsKey('kind')) {
+      context.handle(
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
     }
     if (data.containsKey('url')) {
       context.handle(
@@ -2376,6 +2646,14 @@ class $RegionDownloadsTable extends RegionDownloads
         DriftSqlType.int,
         data['${effectivePrefix}total_bytes'],
       )!,
+      doneBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}done_bytes'],
+      )!,
+      kind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kind'],
+      )!,
       url: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}url'],
@@ -2423,7 +2701,15 @@ class RegionDownloadRow extends DataClass
   final String name;
   final String version;
   final String checksum;
+
+  /// Bytes of every file of the download (the map and the offline pack).
   final int totalBytes;
+
+  /// Bytes of the files already completed (the map, while the pack downloads).
+  final int doneBytes;
+
+  /// File being downloaded: `map` (the PMTiles) or `routing` (the offline pack).
+  final String kind;
   final String url;
 
   /// Final file, relative to the offline storage root.
@@ -2444,6 +2730,8 @@ class RegionDownloadRow extends DataClass
     required this.version,
     required this.checksum,
     required this.totalBytes,
+    required this.doneBytes,
+    required this.kind,
     required this.url,
     required this.relativePath,
     this.etag,
@@ -2461,6 +2749,8 @@ class RegionDownloadRow extends DataClass
     map['version'] = Variable<String>(version);
     map['checksum'] = Variable<String>(checksum);
     map['total_bytes'] = Variable<int>(totalBytes);
+    map['done_bytes'] = Variable<int>(doneBytes);
+    map['kind'] = Variable<String>(kind);
     map['url'] = Variable<String>(url);
     map['relative_path'] = Variable<String>(relativePath);
     if (!nullToAbsent || etag != null) {
@@ -2485,6 +2775,8 @@ class RegionDownloadRow extends DataClass
       version: Value(version),
       checksum: Value(checksum),
       totalBytes: Value(totalBytes),
+      doneBytes: Value(doneBytes),
+      kind: Value(kind),
       url: Value(url),
       relativePath: Value(relativePath),
       etag: etag == null && nullToAbsent ? const Value.absent() : Value(etag),
@@ -2511,6 +2803,8 @@ class RegionDownloadRow extends DataClass
       version: serializer.fromJson<String>(json['version']),
       checksum: serializer.fromJson<String>(json['checksum']),
       totalBytes: serializer.fromJson<int>(json['totalBytes']),
+      doneBytes: serializer.fromJson<int>(json['doneBytes']),
+      kind: serializer.fromJson<String>(json['kind']),
       url: serializer.fromJson<String>(json['url']),
       relativePath: serializer.fromJson<String>(json['relativePath']),
       etag: serializer.fromJson<String?>(json['etag']),
@@ -2530,6 +2824,8 @@ class RegionDownloadRow extends DataClass
       'version': serializer.toJson<String>(version),
       'checksum': serializer.toJson<String>(checksum),
       'totalBytes': serializer.toJson<int>(totalBytes),
+      'doneBytes': serializer.toJson<int>(doneBytes),
+      'kind': serializer.toJson<String>(kind),
       'url': serializer.toJson<String>(url),
       'relativePath': serializer.toJson<String>(relativePath),
       'etag': serializer.toJson<String?>(etag),
@@ -2547,6 +2843,8 @@ class RegionDownloadRow extends DataClass
     String? version,
     String? checksum,
     int? totalBytes,
+    int? doneBytes,
+    String? kind,
     String? url,
     String? relativePath,
     Value<String?> etag = const Value.absent(),
@@ -2561,6 +2859,8 @@ class RegionDownloadRow extends DataClass
     version: version ?? this.version,
     checksum: checksum ?? this.checksum,
     totalBytes: totalBytes ?? this.totalBytes,
+    doneBytes: doneBytes ?? this.doneBytes,
+    kind: kind ?? this.kind,
     url: url ?? this.url,
     relativePath: relativePath ?? this.relativePath,
     etag: etag.present ? etag.value : this.etag,
@@ -2579,6 +2879,8 @@ class RegionDownloadRow extends DataClass
       totalBytes: data.totalBytes.present
           ? data.totalBytes.value
           : this.totalBytes,
+      doneBytes: data.doneBytes.present ? data.doneBytes.value : this.doneBytes,
+      kind: data.kind.present ? data.kind.value : this.kind,
       url: data.url.present ? data.url.value : this.url,
       relativePath: data.relativePath.present
           ? data.relativePath.value
@@ -2602,6 +2904,8 @@ class RegionDownloadRow extends DataClass
           ..write('version: $version, ')
           ..write('checksum: $checksum, ')
           ..write('totalBytes: $totalBytes, ')
+          ..write('doneBytes: $doneBytes, ')
+          ..write('kind: $kind, ')
           ..write('url: $url, ')
           ..write('relativePath: $relativePath, ')
           ..write('etag: $etag, ')
@@ -2621,6 +2925,8 @@ class RegionDownloadRow extends DataClass
     version,
     checksum,
     totalBytes,
+    doneBytes,
+    kind,
     url,
     relativePath,
     etag,
@@ -2639,6 +2945,8 @@ class RegionDownloadRow extends DataClass
           other.version == this.version &&
           other.checksum == this.checksum &&
           other.totalBytes == this.totalBytes &&
+          other.doneBytes == this.doneBytes &&
+          other.kind == this.kind &&
           other.url == this.url &&
           other.relativePath == this.relativePath &&
           other.etag == this.etag &&
@@ -2655,6 +2963,8 @@ class RegionDownloadsCompanion extends UpdateCompanion<RegionDownloadRow> {
   final Value<String> version;
   final Value<String> checksum;
   final Value<int> totalBytes;
+  final Value<int> doneBytes;
+  final Value<String> kind;
   final Value<String> url;
   final Value<String> relativePath;
   final Value<String?> etag;
@@ -2670,6 +2980,8 @@ class RegionDownloadsCompanion extends UpdateCompanion<RegionDownloadRow> {
     this.version = const Value.absent(),
     this.checksum = const Value.absent(),
     this.totalBytes = const Value.absent(),
+    this.doneBytes = const Value.absent(),
+    this.kind = const Value.absent(),
     this.url = const Value.absent(),
     this.relativePath = const Value.absent(),
     this.etag = const Value.absent(),
@@ -2686,6 +2998,8 @@ class RegionDownloadsCompanion extends UpdateCompanion<RegionDownloadRow> {
     required String version,
     required String checksum,
     required int totalBytes,
+    this.doneBytes = const Value.absent(),
+    this.kind = const Value.absent(),
     required String url,
     required String relativePath,
     this.etag = const Value.absent(),
@@ -2711,6 +3025,8 @@ class RegionDownloadsCompanion extends UpdateCompanion<RegionDownloadRow> {
     Expression<String>? version,
     Expression<String>? checksum,
     Expression<int>? totalBytes,
+    Expression<int>? doneBytes,
+    Expression<String>? kind,
     Expression<String>? url,
     Expression<String>? relativePath,
     Expression<String>? etag,
@@ -2727,6 +3043,8 @@ class RegionDownloadsCompanion extends UpdateCompanion<RegionDownloadRow> {
       if (version != null) 'version': version,
       if (checksum != null) 'checksum': checksum,
       if (totalBytes != null) 'total_bytes': totalBytes,
+      if (doneBytes != null) 'done_bytes': doneBytes,
+      if (kind != null) 'kind': kind,
       if (url != null) 'url': url,
       if (relativePath != null) 'relative_path': relativePath,
       if (etag != null) 'etag': etag,
@@ -2745,6 +3063,8 @@ class RegionDownloadsCompanion extends UpdateCompanion<RegionDownloadRow> {
     Value<String>? version,
     Value<String>? checksum,
     Value<int>? totalBytes,
+    Value<int>? doneBytes,
+    Value<String>? kind,
     Value<String>? url,
     Value<String>? relativePath,
     Value<String?>? etag,
@@ -2761,6 +3081,8 @@ class RegionDownloadsCompanion extends UpdateCompanion<RegionDownloadRow> {
       version: version ?? this.version,
       checksum: checksum ?? this.checksum,
       totalBytes: totalBytes ?? this.totalBytes,
+      doneBytes: doneBytes ?? this.doneBytes,
+      kind: kind ?? this.kind,
       url: url ?? this.url,
       relativePath: relativePath ?? this.relativePath,
       etag: etag ?? this.etag,
@@ -2790,6 +3112,12 @@ class RegionDownloadsCompanion extends UpdateCompanion<RegionDownloadRow> {
     }
     if (totalBytes.present) {
       map['total_bytes'] = Variable<int>(totalBytes.value);
+    }
+    if (doneBytes.present) {
+      map['done_bytes'] = Variable<int>(doneBytes.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
     }
     if (url.present) {
       map['url'] = Variable<String>(url.value);
@@ -2829,6 +3157,8 @@ class RegionDownloadsCompanion extends UpdateCompanion<RegionDownloadRow> {
           ..write('version: $version, ')
           ..write('checksum: $checksum, ')
           ..write('totalBytes: $totalBytes, ')
+          ..write('doneBytes: $doneBytes, ')
+          ..write('kind: $kind, ')
           ..write('url: $url, ')
           ..write('relativePath: $relativePath, ')
           ..write('etag: $etag, ')

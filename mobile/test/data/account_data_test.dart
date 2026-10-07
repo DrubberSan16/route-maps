@@ -219,6 +219,16 @@ void main() {
               "'/api/v1/maps/regions/guayaquil/download', NULL, '/maps/ec/guayaquil.pmtiles', "
               "'2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')",
             )
+            ..execute(
+              "INSERT INTO downloaded_regions VALUES ('guayaquil', 'Guayaquil', '2026.09.01', "
+              "'aa', 1000, 'regions/guayaquil/2026.09.01/guayaquil.pmtiles', -80.1, -2.35, "
+              "-79.75, -1.95, 0, 14, '2026-09-01T00:00:00.000Z', '2026.09.01', NULL)",
+            )
+            ..execute(
+              "INSERT INTO region_downloads VALUES ('quito', 'Quito', '2026.09.01', 'bb', 2000, "
+              "'/api/v1/maps/regions/quito/download', 'regions/quito/2026.09.01/quito.pmtiles', "
+              "NULL, 'PAUSED', NULL, NULL, '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')",
+            )
             ..userVersion = 1;
         },
       ),
@@ -242,5 +252,15 @@ void main() {
     final catalog = await db.select(db.catalogRegions).get();
     expect(catalog.single.code, 'guayaquil');
     expect(catalog.single.assets, isNull);
+    expect(catalog.single.routingFormat, isNull);
+    // Stored maps stay usable; their offline packs can be downloaded later.
+    final stored = await db.select(db.downloadedRegions).getSingle();
+    expect(stored.relativePath, 'regions/guayaquil/2026.09.01/guayaquil.pmtiles');
+    expect(stored.routingRelativePath, isNull);
+    // An unfinished map download continues where it was.
+    final download = await db.select(db.regionDownloads).getSingle();
+    expect(download.kind, 'map');
+    expect(download.doneBytes, 0);
+    expect(download.totalBytes, 2000);
   });
 }

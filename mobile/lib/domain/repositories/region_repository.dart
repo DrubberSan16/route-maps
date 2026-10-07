@@ -25,16 +25,27 @@ abstract class RegionRepository {
   /// Downloaded regions containing [position], widest coverage first.
   Future<List<DownloadedRegion>> downloadedRegionsAt(Coordinate position);
 
-  /// Registers a completed download (replaces the previous version).
+  /// Registers a completed map download (replaces the previous version; the
+  /// offline pack of the region, if any, stays).
   Future<DownloadedRegion> saveDownloaded({
     required MapRegion region,
     required String relativePath,
     required int sizeBytes,
   });
 
+  /// Registers the completed offline pack of the stored region [code]
+  /// (replaces the previous one).
+  Future<DownloadedRegion> saveOfflinePack({
+    required String code,
+    required String relativePath,
+    required String checksum,
+    required int sizeBytes,
+  });
+
   /// Removes the region from the device (database row and files).
   Future<void> deleteDownloaded(String code);
 
-  /// Drops rows whose file no longer exists (e.g. storage cleared by the user).
+  /// Drops rows whose map no longer exists and forgets offline packs whose file
+  /// no longer exists (e.g. storage cleared by the user).
   Future<List<String>> removeMissingFiles();
 }

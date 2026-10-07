@@ -1,12 +1,16 @@
 import 'dart:io';
 
-/// Files kept on the device for offline use (maps, glyphs).
+/// Files kept on the device for offline use (maps, offline packs, glyphs).
 abstract class OfflineStorageService {
   /// Base directory; relative paths stored in the database start here.
   Future<Directory> rootDirectory();
 
   /// Final location of a region's PMTiles: `regions/<code>/<version>/<code>.pmtiles`.
   Future<File> regionMapFile(String code, String version);
+
+  /// Final location of a region's offline pack (routes, place search and
+  /// addresses without connection): `packs/<code>/<version>/<code>.rmpack`.
+  Future<File> regionPackFile(String code, String version);
 
   Future<File> resolve(String relativePath);
 
@@ -16,8 +20,11 @@ abstract class OfflineStorageService {
   /// platform cannot report it.
   Future<int?> freeBytes();
 
-  /// Deletes the files of a region, except [keepVersion] when given.
+  /// Deletes the map files of a region, except [keepVersion] when given.
   Future<void> deleteRegionFiles(String code, {String? keepVersion});
+
+  /// Deletes the offline packs of a region, except [keepVersion] when given.
+  Future<void> deleteRegionPacks(String code, {String? keepVersion});
 
   /// Directory with the SDF glyphs used by the map labels.
   Future<Directory> glyphsDirectory();

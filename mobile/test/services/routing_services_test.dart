@@ -39,6 +39,7 @@ class _ScriptedRouting implements RoutingService {
   Future<RouteResult> Function() answer;
   int calls = 0;
   List<Coordinate>? waypoints;
+  bool? alternatives;
 
   @override
   Future<RouteResult> calculateRoute({
@@ -50,6 +51,7 @@ class _ScriptedRouting implements RoutingService {
   }) {
     calls++;
     this.waypoints = waypoints;
+    this.alternatives = alternatives;
     return answer();
   }
 }
@@ -155,6 +157,7 @@ void main() {
       connectivity.status = ConnectivityStatus.offline;
       expect((await route()).source, RouteSource.savedRoute);
       expect(online.calls, 0);
+      expect(offline.alternatives, isTrue, reason: 'the phone offers alternatives too');
     });
 
     test('stops reach the server and, without connection, the device', () async {
@@ -172,13 +175,16 @@ void main() {
         destination: _destination,
         profile: RoutingProfile.car,
         waypoints: const [stop],
+        alternatives: false,
       );
       expect(offline.waypoints, [stop]);
+      expect(offline.alternatives, isFalse);
     });
 
     test('connection lost during the request: falls back to the device', () async {
       online.answer = () async => throw AppException.of(ErrorCodes.networkUnavailable);
       expect((await route()).source, RouteSource.savedRoute);
+      expect(offline.alternatives, isTrue);
     });
 
     test('routing engine down: falls back to the device', () async {
@@ -209,7 +215,7 @@ void main() {
       );
     });
 
-    test('no connection and nothing stored: says a new route needs Internet', () async {
+    test('no connection and nothing stored: says how to route without Internet', () async {
       online.answer = () async => throw AppException.of(ErrorCodes.networkUnavailable);
       offline.answer = () async => throw AppException.of(ErrorCodes.offlineRouteUnavailable);
       await expectLater(
@@ -217,7 +223,7 @@ void main() {
         throwsA(
           isA<AppException>()
               .having((e) => e.code, 'code', ErrorCodes.offlineRouteUnavailable)
-              .having((e) => e.message, 'message', contains('requiere Internet')),
+              .having((e) => e.message, 'message', contains('descarga la región')),
         ),
       );
     });

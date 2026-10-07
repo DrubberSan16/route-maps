@@ -10,7 +10,7 @@ import '../../domain/services/routing_service.dart';
 /// * online: the server calculates the route (with alternatives);
 /// * offline, or the request fails for network reasons or because the
 ///   engine is down: the offline service answers (stored routes first, then
-///   an on-device engine when one is installed).
+///   the engine of the phone with the downloaded regions).
 class HybridRoutingService implements RoutingService {
   HybridRoutingService({
     required this._online,
@@ -36,6 +36,7 @@ class HybridRoutingService implements RoutingService {
         destination: destination,
         profile: profile,
         waypoints: waypoints,
+        alternatives: alternatives,
       );
     }
     try {
@@ -54,6 +55,7 @@ class HybridRoutingService implements RoutingService {
           destination: destination,
           profile: profile,
           waypoints: waypoints,
+          alternatives: alternatives,
         );
       } on AppException catch (offlineError) {
         // Nothing stored either: explain the server problem when there is
