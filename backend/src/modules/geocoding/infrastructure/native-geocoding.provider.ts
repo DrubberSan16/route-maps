@@ -19,6 +19,8 @@ const INTERSECTION = /^(.+?)\s+(?:y|e|&|esq\.?|esquina|con|interseccion|intersec
 /** A tap farther than this from any street keeps its coordinates as the name. */
 const REVERSE_STREET_METERS = 60;
 const REVERSE_POI_METERS = 25;
+/** Country of the native data. */
+const COUNTRY_CODE = 'EC';
 
 /**
  * Geocoding built only from the platform's own data: the national search index (places, streets,
@@ -42,6 +44,9 @@ export class NativeGeocodingProvider implements GeocodingProvider {
   }
 
   async search(query: GeocodingSearchQuery): Promise<GeocodingResult[]> {
+    // The country filter is strict, as in the other providers.
+    const countries = query.countryCodes?.map((code) => code.trim().toUpperCase());
+    if (countries?.length && !countries.includes(COUNTRY_CODE)) return [];
     const index = await this.load();
     const text = query.text.trim();
     const results: GeocodingResult[] = [];
@@ -109,7 +114,7 @@ export class NativeGeocodingProvider implements GeocodingProvider {
         city,
         state: parish?.province,
         country: 'Ecuador',
-        countryCode: 'EC',
+        countryCode: COUNTRY_CODE,
       },
       bbox: null,
       sourceId: poi ? `native:poi:${poi.index}` : street ? `native:edge:${street.edge}` : null,
@@ -170,7 +175,7 @@ export class NativeGeocodingProvider implements GeocodingProvider {
                 city: parish?.canton,
                 state: parish?.province,
                 country: 'Ecuador',
-                countryCode: 'EC',
+                countryCode: COUNTRY_CODE,
               },
               bbox: null,
               sourceId: `native:intersection:${key}`,
@@ -206,7 +211,7 @@ function toResult(hit: SearchHit): GeocodingResult {
       city: hit.kind === 'place' ? undefined : city,
       state: state || undefined,
       country: 'Ecuador',
-      countryCode: 'EC',
+      countryCode: COUNTRY_CODE,
     },
     bbox: hit.bbox,
     sourceId: `native:${hit.kind}:${hit.index}`,

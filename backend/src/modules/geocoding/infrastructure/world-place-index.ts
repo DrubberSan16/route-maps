@@ -105,6 +105,12 @@ export class WorldPlaceIndex {
     return (await this.load()).length > 0;
   }
 
+  /** Version of the loaded file (its modification time): part of the cache key of the answers. */
+  async version(): Promise<string> {
+    await this.load();
+    return String(this.loadedMtimeMs);
+  }
+
   async search(query: GeocodingSearchQuery): Promise<WorldPlaceMatch[]> {
     const places = await this.load();
     const [name = '', ...context] = query.text.split(',').map(normalizeText);

@@ -88,7 +88,9 @@ export class CompositeGeocodingProvider implements GeocodingProvider {
   }
 
   async dataVersion(): Promise<string> {
-    return (await this.detailed.dataVersion?.()) ?? '';
+    // Both indexes: a rebuilt world index must not leave old answers in the cache.
+    const detailed = (await this.detailed.dataVersion?.()) ?? '';
+    return `${detailed}|world:${await this.world.version()}`;
   }
 
   async search(query: GeocodingSearchQuery): Promise<GeocodingResult[]> {
