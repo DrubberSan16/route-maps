@@ -75,7 +75,7 @@ export class CalculateRouteUseCase {
     if (this.conditions) {
       await Promise.all(
         routes.map(async (route) => {
-          route.conditions = await this.conditions!.evaluate(route);
+          route.conditions = await this.conditions!.evaluate(route, input.profile);
           route.durationSeconds = route.conditions.adjustedDurationSeconds;
         }),
       );

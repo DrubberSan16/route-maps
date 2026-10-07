@@ -123,8 +123,9 @@ export class NativeSearchIndex {
   private readonly boxes: Float32Array;
   private readonly ranks: Uint8Array;
   private readonly parishes: (string | null)[];
-  private readonly tokens: Map<string, Int32Array>;
-  private readonly vocabulary: string[];
+  /** Entries by word of their names, and by word of their context. */
+  private readonly nameWords: Postings;
+  private readonly contextWords: Postings;
   private readonly grid = new Map<number, number[]>();
 
   private constructor(entries: RawEntry[]) {
@@ -142,7 +143,13 @@ export class NativeSearchIndex {
     this.boxes = new Float32Array(size * 4).fill(Number.NaN);
     this.ranks = new Uint8Array(size);
     this.parishes = new Array<string | null>(size);
-    const postings = new Map<string, number[]>();
+    const nameWords = new Map<string, number[]>();
+    const contextWords = new Map<string, number[]>();
+    const add = (postings: Map<string, number[]>, token: string, index: number) => {
+      const list = postings.get(token);
+      if (list) list.push(index);
+      else postings.set(token, [index]);
+    };
     entries.forEach((entry, index) => {
       this.names[index] = entry.n;
       this.details[index] = entry.d ?? '';
@@ -158,10 +165,10 @@ export class NativeSearchIndex {
       this.ranks[index] = Math.max(0, Math.min(255, entry.r));
       this.parishes[index] = entry.p ?? null;
       for (const token of new Set(allNames.join(' ').split(' '))) {
-        if (!token || token === '|') continue;
-        const list = postings.get(token);
-        if (list) list.push(index);
-        else postings.set(token, [index]);
+        if (token && token !== '|') add(nameWords, token, index);
+      }
+      for (const token of new Set(this.foldedContext[index].split(' '))) {
+        if (token) add(contextWords, token, index);
       }
       if (entry.k === 'poi' || entry.k === 'place') {
         const key = gridKey(entry.x, entry.y);
@@ -170,8 +177,8 @@ export class NativeSearchIndex {
         else this.grid.set(key, [index]);
       }
     });
-    this.tokens = new Map([...postings].map(([token, list]) => [token, Int32Array.from(list)]));
-    this.vocabulary = [...this.tokens.keys()].sort();
+    this.nameWords = postingsOf(nameWords);
+    this.contextWords = postingsOf(contextWords);
   }
 
   static async load(file: string): Promise<NativeSearchIndex> {
@@ -197,18 +204,24 @@ export class NativeSearchIndex {
     const lastWord = words[words.length - 1];
     const matchers = required.map((word) => {
       const prefix = partialLast && word === lastWord && word.length >= 2;
-      return { word, prefix, variants: variants(word), postings: this.postings(word, prefix) };
+      const inNames = lookup(this.nameWords, word, prefix);
+      const inContexts = lookup(this.contextWords, word, prefix);
+      const size = [...inNames, ...inContexts].reduce((sum, list) => sum + list.length, 0);
+      return { word, prefix, variants: variants(word), inNames, inContexts, size };
     });
-    const withPostings = matchers.filter((matcher) => matcher.postings.length > 0);
-    if (withPostings.length === 0) return [];
-    withPostings.sort((a, b) => a.postings.length - b.postings.length);
-    const driver = withPostings[0];
+    // Every word is in the name or the context of a result, and at least one in the name.
+    if (matchers.some((matcher) => matcher.size === 0)) return [];
+    if (matchers.every((matcher) => matcher.inNames.length === 0)) return [];
+    // Candidates: the entries with the rarest word, in their name or in their context.
+    const driver = matchers.reduce((rarest, matcher) =>
+      matcher.size < rarest.size ? matcher : rarest,
+    );
     const kinds = options.kinds ? new Set(options.kinds.map((kind) => KINDS.indexOf(kind))) : null;
     const near = options.near;
     const kx = near ? METERS_PER_DEGREE * Math.cos((near.latitude * Math.PI) / 180) : 0;
     const hits: SearchHit[] = [];
     const seen = new Set<number>();
-    for (const list of driver.postings) {
+    for (const list of [...driver.inNames, ...driver.inContexts]) {
       for (let i = 0; i < list.length; i += 1) {
         const index = list[i];
         if (seen.has(index)) continue;
@@ -342,31 +355,44 @@ export class NativeSearchIndex {
       score,
     };
   }
+}
 
-  /** Posting lists of the entries whose names contain the word (or start with it). */
-  private postings(word: string, prefix: boolean): Int32Array[] {
-    const lists: Int32Array[] = [];
-    for (const variant of variants(word)) {
-      const exact = this.tokens.get(variant);
-      if (exact) lists.push(exact);
-    }
-    if (prefix) {
-      let low = 0;
-      let high = this.vocabulary.length;
-      while (low < high) {
-        const middle = (low + high) >> 1;
-        if (this.vocabulary[middle] < word) low = middle + 1;
-        else high = middle;
-      }
-      let taken = 0;
-      for (let i = low; i < this.vocabulary.length && this.vocabulary[i].startsWith(word); i += 1) {
-        if (this.vocabulary[i] === word) continue;
-        lists.push(this.tokens.get(this.vocabulary[i])!);
-        if (++taken >= 400) break;
-      }
-    }
-    return lists;
+interface Postings {
+  /** Entries of each word. */
+  lists: Map<string, Int32Array>;
+  /** The words, sorted (for the words starting with a prefix). */
+  vocabulary: string[];
+}
+
+const postingsOf = (lists: Map<string, number[]>): Postings => {
+  const typed = new Map([...lists].map(([token, list]) => [token, Int32Array.from(list)]));
+  return { lists: typed, vocabulary: [...typed.keys()].sort() };
+};
+
+/** Lists of the entries with the word (or a word starting with it). */
+function lookup(postings: Postings, word: string, prefix: boolean): Int32Array[] {
+  const lists: Int32Array[] = [];
+  for (const variant of variants(word)) {
+    const exact = postings.lists.get(variant);
+    if (exact) lists.push(exact);
   }
+  if (prefix) {
+    const { vocabulary } = postings;
+    let low = 0;
+    let high = vocabulary.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (vocabulary[middle] < word) low = middle + 1;
+      else high = middle;
+    }
+    let taken = 0;
+    for (let i = low; i < vocabulary.length && vocabulary[i].startsWith(word); i += 1) {
+      if (vocabulary[i] === word) continue;
+      lists.push(postings.lists.get(vocabulary[i])!);
+      if (++taken >= 400) break;
+    }
+  }
+  return lists;
 }
 
 /** Singular forms of a Spanish plural, so "hospitales" also finds "hospital". */

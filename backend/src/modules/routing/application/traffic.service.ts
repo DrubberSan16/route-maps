@@ -80,6 +80,21 @@ const MAX_FIXES = 50_000;
 /** Largest box accepted (degrees): about a province. */
 const MAX_SPAN = 2.5;
 
+/**
+ * The box widened to whole cells of 0.01° (about 1 km): what is queried is what is cached, so
+ * nearby views share one answer that covers each of them.
+ */
+const widened = ([minLng, minLat, maxLng, maxLat]: BoundingBoxQuery): BoundingBoxQuery => {
+  // Rounded to the micro-degree first, so that -79.9 stays on its cell edge.
+  const cells = (value: number) => Math.round(value * 1e6) / 1e4;
+  return [
+    Math.max(-180, Math.floor(cells(minLng)) / 100),
+    Math.max(-90, Math.floor(cells(minLat)) / 100),
+    Math.min(180, Math.ceil(cells(maxLng)) / 100),
+    Math.min(90, Math.ceil(cells(maxLat)) / 100),
+  ];
+};
+
 export const trafficStatus = (ratio: number): TrafficStatus =>
   ratio >= 0.75 ? 'free' : ratio >= 0.5 ? 'moderate' : ratio >= 0.25 ? 'slow' : 'jammed';
 
@@ -96,9 +111,9 @@ export class TrafficService {
   ) {}
 
   async flow(bbox: BoundingBoxQuery): Promise<TrafficFlow> {
-    const box = this.validate(bbox);
+    const box = widened(this.validate(bbox));
     const cell = box.map((value) => value.toFixed(2)).join(',');
-    const key = `traffic:v2:flow:${cell}`;
+    const key = `traffic:v3:flow:${cell}`;
     const cached = await this.cache.get<TrafficFlow>(key);
     if (cached) return cached;
     const graph = await this.graphs.get();
@@ -151,8 +166,8 @@ export class TrafficService {
     hours: number;
     features: ActivityCell[];
   }> {
-    const box = this.validate(bbox);
-    const key = `traffic:v1:activity:${box.map((value) => value.toFixed(2)).join(',')}`;
+    const box = widened(this.validate(bbox));
+    const key = `traffic:v2:activity:${box.map((value) => value.toFixed(2)).join(',')}`;
     const cached = await this.cache.get<{
       type: 'FeatureCollection';
       hours: number;
@@ -208,7 +223,7 @@ export class TrafficService {
     cell: string,
   ): Promise<EdgeSpeed[]> {
     const zone = this.config.get('traffic').timeZone;
-    const key = `traffic:v2:typical:${cell}:${zone}:${this.hourBucket(zone)}`;
+    const key = `traffic:v3:typical:${cell}:${zone}:${this.hourBucket(zone)}`;
     const cached = await this.cache.get<EdgeSpeed[]>(key);
     if (cached) return cached;
     const rows = await this.prisma.$queryRaw<Fix[]>`

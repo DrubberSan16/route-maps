@@ -168,6 +168,7 @@ describe('WorldPlaceIndex', () => {
 
     const changing = new WorldPlaceIndex(file, 60_000, () => now);
     expect(await search(changing, 'Quito')).toEqual([]);
+    const version = await changing.version();
     write([
       {
         type: 'city',
@@ -182,7 +183,9 @@ describe('WorldPlaceIndex', () => {
     ]);
     utimesSync(file, new Date(), new Date(Date.now() + 5000));
     expect(await search(changing, 'Quito')).toEqual([]); // re-checked at most once a minute
+    expect(await changing.version()).toBe(version);
     now = 61_000;
     expect((await search(changing, 'Quito'))[0].result.displayName).toBe('Quito, Ecuador');
+    expect(await changing.version()).not.toBe(version);
   });
 });

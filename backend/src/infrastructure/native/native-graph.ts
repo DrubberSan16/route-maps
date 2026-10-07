@@ -7,8 +7,9 @@ import { readFile } from 'node:fs/promises';
  *   "RMGRAPH2" | uint32 LE header length | UTF-8 JSON header (padded to 8 bytes) | sections
  *
  * Each section is a little-endian typed array at `dataOffset + offset`. Everything is kept in
- * typed arrays (about 60 MB for the whole country), plus indexes derived at load time: node
- * adjacency, a spatial grid of edges, connected components and edges by street name.
+ * typed arrays (about 60 MB for the whole country), plus indexes derived from them: node
+ * adjacency and a spatial grid of edges at load time, connected networks and edges by street name
+ * on first use.
  */
 
 export const ROAD_CLASSES = [
@@ -69,6 +70,14 @@ const MAGIC = 'RMGRAPH2';
 const CELL = 0.002;
 const METERS_PER_DEGREE = 111_195.08;
 
+/** Connected networks of the roads of some classes. */
+export interface RoadNetworks {
+  /** Network of every node, -1 when no road of those classes touches it. */
+  component: Int32Array;
+  /** The network with the most nodes (the main one of the country), -1 when there is none. */
+  largest: number;
+}
+
 export interface NearestEdge {
   edge: number;
   /** Distance in meters from the query point to the edge. */
@@ -102,16 +111,12 @@ export class NativeGraph {
   /** adjacency: for node n, entries adjacency[adjacencyStart[n] .. adjacencyStart[n+1]) = edge*2 + direction. */
   readonly adjacencyStart: Uint32Array;
   readonly adjacency: Int32Array;
-  /** Component ids for motor vehicles (-1 when no motor edge touches the node) and for every mode. */
-  readonly motorComponent: Int32Array;
-  readonly anyComponent: Int32Array;
-  readonly largestMotorComponent: number;
-  readonly largestAnyComponent: number;
   private readonly cellKeys: Float64Array;
   private readonly cellStart: Uint32Array;
   private readonly cellEdges: Int32Array;
   private readonly edgesByName = new Map<number, number[]>();
   private readonly nameIds = new Map<string, number>();
+  private readonly networksByClasses = new Map<number, RoadNetworks>();
 
   private constructor(buffer: Buffer, header: Header, dataOffset: number) {
     const sections = new Map(header.sections.map((section) => [section.name, section]));
@@ -174,12 +179,6 @@ export class NativeGraph {
       this.adjacency[fill[this.edgeU[edge]]++] = edge * 2;
       this.adjacency[fill[this.edgeV[edge]]++] = edge * 2 + 1;
     }
-
-    // Components.
-    const motor = (edge: number) =>
-      this.edgeClass[edge] <= CLASS.track || this.edgeClass[edge] === CLASS.connector;
-    [this.motorComponent, this.largestMotorComponent] = this.components(motor);
-    [this.anyComponent, this.largestAnyComponent] = this.components(() => true);
 
     // Spatial grid of edges (CSR over sorted cell keys).
     const keys: number[] = [];
@@ -286,6 +285,22 @@ export class NativeGraph {
       }
     }
     return this.edgesByName.get(nameId) ?? [];
+  }
+
+  /**
+   * Connected networks of the roads whose class is in `classes` (bit `1 << CLASS[name]` per class),
+   * computed once per set: two roads are connected for a mode only through roads it may use.
+   */
+  networks(classes: number): RoadNetworks {
+    let networks = this.networksByClasses.get(classes);
+    if (!networks) {
+      const [component, largest] = this.components(
+        (edge) => ((classes >>> this.edgeClass[edge]) & 1) === 1,
+      );
+      networks = { component, largest };
+      this.networksByClasses.set(classes, networks);
+    }
+    return networks;
   }
 
   degree(node: number): number {

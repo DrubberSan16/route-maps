@@ -400,6 +400,22 @@ void main() {
     expect(find.text('Mapa offline: Guayaquil'), findsOneWidget);
   });
 
+  testWidgets('credits the sources of the map, also without connection', (tester) async {
+    connectivity.status = ConnectivityStatus.offline;
+    await pumpMap(tester);
+
+    await tester.tap(find.byKey(const Key('data-sources-button')));
+    await tester.pumpAndSettle();
+    expect(find.text('Fuentes de datos'), findsOneWidget);
+    expect(
+      find.text(
+        'Fuente: INSTITUTO NACIONAL DE ESTADÍSTICA Y CENSOS – INEC; Marco Geoestadístico '
+        'Nacional; 2026; GeoPackage; Quito, Ecuador.',
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('search finds an address and makes it the destination', (tester) async {
     await pumpMap(tester);
     await tester.tap(find.byKey(const Key('search-bar')));

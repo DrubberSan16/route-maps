@@ -55,6 +55,7 @@ describe('TrafficService', () => {
   let live: Fix[];
   let typical: Fix[];
   let queries: string[];
+  let liveBoxes: unknown[][];
   let cache: MemoryCache;
   let service: TrafficService;
 
@@ -63,12 +64,15 @@ describe('TrafficService', () => {
     live = [];
     typical = [];
     queries = [];
+    liveBoxes = [];
     cache = new MemoryCache();
     const prisma = {
-      $queryRaw: jest.fn((strings: TemplateStringsArray) => {
+      $queryRaw: jest.fn((strings: TemplateStringsArray, ...values: unknown[]) => {
         const sql = strings.join('?');
         const isTypical = sql.includes('isodow');
         queries.push(isTypical ? 'typical' : 'live');
+        // Live fixes: the window, then the envelope.
+        if (!isTypical) liveBoxes.push(values.slice(1, 5));
         return Promise.resolve(isTypical ? typical : live);
       }),
     } as unknown as PrismaService;
@@ -130,6 +134,17 @@ describe('TrafficService', () => {
     await service.flow(BBOX);
 
     expect(queries).toEqual(['live', 'typical', 'live']);
+  });
+
+  it('reads whole 0.01° cells, so the views that share a cached answer are all covered', async () => {
+    live = fixes(-2.19, ['a', 'b'], 2);
+
+    const first = await service.flow([-79.9049, -2.1951, -79.8951, -2.1849]);
+    const shifted = await service.flow([-79.9001, -2.1999, -79.8901, -2.1801]);
+
+    expect(liveBoxes).toEqual([[-79.91, -2.2, -79.89, -2.18]]);
+    expect(queries).toEqual(['live', 'typical']); // the shifted view is answered from the cache
+    expect(shifted).toEqual(first);
   });
 
   it('maps speed ratios to the four colours', () => {

@@ -132,6 +132,33 @@ describe('NativeSearchIndex', () => {
     expect(hits.map((hit) => hit.name)).toEqual(['Terminal Terrestre de Cuenca']);
   });
 
+  it('finds the context word in any order, even when it also names other entries', () => {
+    const local = NativeSearchIndex.fromEntries([
+      {
+        n: 'Hospital del Río',
+        k: 'poi',
+        t: 'hospital',
+        c: 'hospital',
+        x: -79.01,
+        y: -2.88,
+        r: 60,
+        d: 'Hospital · Cuenca, Azuay',
+      },
+      {
+        n: 'C. Azuay',
+        k: 'street',
+        t: 'calle',
+        x: -79.884,
+        y: -2.19,
+        r: 46,
+        d: 'Guayaquil, Guayas',
+      },
+    ]);
+    for (const text of ['hospital azuay', 'azuay hospital']) {
+      expect(local.search(text, { limit: 5 }).map((hit) => hit.name)).toEqual(['Hospital del Río']);
+    }
+  });
+
   it('finds plurals and popular names', () => {
     expect(index.search('hospitales', { limit: 5 })[0].name).toBe('Hospital Luis Vernaza');
     expect(index.search('malecon 2000', { limit: 5 })[0].name).toBe(
@@ -194,6 +221,25 @@ describe('NativeGeocodingProvider', () => {
     expect(first.displayName).toBe(
       'Terminal Terrestre de Guayaquil, Terminal de buses · Guayaquil, Guayas',
     );
+    expect(first.address.countryCode).toBe('EC');
+  });
+
+  it('answers only when the requested countries include Ecuador', async () => {
+    expect(
+      await provider.search({ text: 'terminal terrestre', limit: 5, countryCodes: ['pe'] }),
+    ).toEqual([]);
+    expect(
+      await provider.search({
+        text: '9 de octubre y boyaca',
+        limit: 5,
+        countryCodes: ['PE', 'CO'],
+      }),
+    ).toEqual([]);
+    const [first] = await provider.search({
+      text: 'terminal terrestre',
+      limit: 5,
+      countryCodes: ['pe', 'ec'],
+    });
     expect(first.address.countryCode).toBe('EC');
   });
 

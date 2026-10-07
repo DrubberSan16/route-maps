@@ -18,10 +18,11 @@ const result = (name: string, latitude: number, longitude: number): GeocodingRes
   sourceId: null,
 });
 
-const world = (matches: WorldPlaceMatch[], available = true) =>
+const world = (matches: WorldPlaceMatch[], available = true, version = () => '1') =>
   ({
     search: jest.fn().mockResolvedValue(matches),
     available: jest.fn().mockResolvedValue(available),
+    version: jest.fn(() => Promise.resolve(version())),
   }) as unknown as WorldPlaceIndex;
 
 const detailedProvider = (overrides: Partial<GeocodingProvider>): GeocodingProvider => ({
@@ -160,6 +161,20 @@ describe('CompositeGeocodingProvider', () => {
     expect(provider.degraded).toBe(true);
     now += CompositeGeocodingProvider.DEGRADED_MS;
     expect(provider.degraded).toBe(false);
+  });
+
+  it('keys cached answers by the version of both indexes', async () => {
+    let worldVersion = '1000';
+    const detailed = detailedProvider({ dataVersion: () => Promise.resolve('graph-1') });
+    const provider = new CompositeGeocodingProvider(
+      detailed,
+      world([], true, () => worldVersion),
+    );
+
+    const before = await provider.dataVersion();
+    expect(before).toContain('graph-1');
+    worldVersion = '2000'; // world.places.json rebuilt with a new world base map
+    expect(await provider.dataVersion()).not.toBe(before);
   });
 
   it('delegates reverse geocoding, name and health to the detailed provider', async () => {

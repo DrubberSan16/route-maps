@@ -275,6 +275,15 @@ def selected_sources(item: dict[str, Any], args: argparse.Namespace) -> list[dic
     return layers
 
 
+def layer_cached(source: dict[str, Any], destination: Path) -> bool:
+    """Whether the cache still holds a layer downloaded before."""
+    if source["kind"] == "inec-geostatistical":
+        cache = destination / "inec"
+        return cache.is_dir() and any((child / "meta.json").exists() for child in cache.iterdir() if child.is_dir())
+    target = destination / f"{source['id']}.geojson"
+    return target.exists() and target.stat().st_size > 0
+
+
 def command_download(args: argparse.Namespace) -> None:
     catalog = load_catalog()
     item = region(catalog, args.region)
@@ -298,10 +307,12 @@ def command_download(args: argparse.Namespace) -> None:
             continue
         print(f"  {reports[-1]['featureCount']} features, {reports[-1].get('bytes', '-')} bytes", file=sys.stderr)
     updated = {entry["id"]: entry for entry in reports}
-    # A targeted refresh must not erase the audit records of the other cached layers.
-    if args.layer:
-        updated = {**previous, **updated}
-        reports = [updated[source["id"]] for source in item.get("layers", []) if source["id"] in updated]
+    # The layers left out of this run (a targeted refresh, or optional and large layers downloaded before)
+    # keep their audit record while the build can still read them: the build fingerprints this manifest.
+    for source in item.get("layers", []):
+        if source["id"] not in updated and source["id"] in previous and layer_cached(source, destination):
+            updated[source["id"]] = previous[source["id"]]
+    reports = [updated[source["id"]] for source in item.get("layers", []) if source["id"] in updated]
     manifest = {
         "schemaVersion": 1,
         "region": item["code"],

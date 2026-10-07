@@ -166,8 +166,12 @@ export async function createMap(options) {
     ...(options.center ? { center: options.center, zoom: options.zoom ?? 11 } : { bounds: bounds(home) }),
     minZoom: options.minZoom,
     maxZoom: options.maxZoom,
-    // Satellite imagery and elevation carry the citation their licences ask for.
-    attributionControl: { compact: true },
+    // The sources page credits the map's official sources; satellite imagery and elevation also
+    // carry the citation their licences ask for.
+    attributionControl: {
+      compact: true,
+      customAttribution: `<a href="${origin}/fuentes.html" target="_blank" rel="noopener">Fuentes de datos</a>`,
+    },
     dragRotate: false,
     pitchWithRotate: false,
   });

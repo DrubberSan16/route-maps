@@ -117,6 +117,66 @@ describe('NativeRouter', () => {
     expect(end[0]).toBeCloseTo(LON0 + 3 * STEP, 5);
   });
 
+  it.each([
+    ['motorway', ['PEDESTRIAN', 'BICYCLE']],
+    ['steps', ['BICYCLE']],
+  ] as const)(
+    'leaves a street joined to the city only by %s for a path the profile can use',
+    (link, profiles) => {
+      // The nearest street (C. Isla, east) reaches the grid only through the link; a footway
+      // ending a few meters farther does reach it.
+      const graph = city({
+        nodes: [
+          [LON0 + 6 * STEP, LAT0],
+          [LON0 + 6 * STEP, LAT0 + 2 * STEP],
+          [LON0 + 5.9 * STEP, LAT0 + STEP],
+        ],
+        edges: [
+          { u: 16, v: 17, name: 'C. Isla' },
+          { u: 3, v: 16, cls: link, name: 'Enlace' },
+          { u: 7, v: 18, cls: 'footway', name: 'Sendero' },
+        ],
+      });
+      const router = new NativeRouter(graph);
+      const origin = { longitude: LON0 + 5.97 * STEP, latitude: LAT0 + STEP };
+      for (const profile of profiles) {
+        const { primary } = router.route(profile, [origin, at(0, 2)], 0);
+        expect(primary.steps[0].streetNames).toEqual(['Sendero']);
+        const [lon, lat] = primary.geometry.coordinates[0];
+        expect(haversineMeters({ longitude: lon, latitude: lat }, origin)).toBeLessThan(10);
+      }
+    },
+  );
+
+  it('uses one snapped point for every stop, so the legs meet there', () => {
+    // An isolated street (C. Aislada) next to the first two stops, too far from the last one.
+    const graph = city({
+      nodes: [
+        [LON0 + 6 * STEP, LAT0],
+        [LON0 + 6 * STEP, LAT0 + 3 * STEP],
+      ],
+      edges: [{ u: 16, v: 17, name: 'C. Aislada' }],
+    });
+    const router = new NativeRouter(graph);
+    const stops = [
+      { longitude: LON0 + 6.02 * STEP, latitude: LAT0 + 2.5 * STEP },
+      { longitude: LON0 + 5.55 * STEP, latitude: LAT0 + 1.5 * STEP },
+      at(0, 0),
+    ];
+    const { primary } = router.route('CAR', stops, 0);
+    const points = primary.geometry.coordinates;
+    let drawn = 0;
+    for (let i = 1; i < points.length; i += 1) {
+      drawn += haversineMeters(
+        { longitude: points[i - 1][0], latitude: points[i - 1][1] },
+        { longitude: points[i][0], latitude: points[i][1] },
+      );
+    }
+    // No straight jump between two networks: the line is the distance travelled.
+    expect(Math.abs(drawn - primary.distanceMeters)).toBeLessThan(5);
+    expect(primary.steps.some((step) => step.streetNames.includes('C. Aislada'))).toBe(false);
+  });
+
   it('routes between two points of the same street segment', () => {
     const router = new NativeRouter(city());
     const { primary } = router.route('CAR', [at(0, 0, 0.0002), at(0, 0, 0.0008)], 0);
