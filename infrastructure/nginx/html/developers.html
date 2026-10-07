@@ -15,6 +15,7 @@
     .back { display: inline-block; margin-bottom: 32px; }
     h1 { margin: 0 0 12px; font-size: clamp(2rem, 5vw, 3.4rem); line-height: 1.05; letter-spacing: -.04em; }
     h2 { margin-top: 40px; font-size: 1.35rem; }
+    h3 { margin-top: 28px; font-size: 1.08rem; }
     p, li { line-height: 1.65; }
     .lead { max-width: 720px; color: #475569; font-size: 1.08rem; }
     .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin: 28px 0; }
@@ -23,6 +24,10 @@
     pre { overflow: auto; padding: 18px; border-radius: 10px; background: #0f172a; color: #e2e8f0; font: 13px/1.6 ui-monospace, monospace; }
     code { font-family: ui-monospace, monospace; }
     .note { padding: 14px 16px; border-left: 4px solid #2563eb; background: #eff6ff; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: .95rem; }
+    th, td { padding: 9px 12px; border-bottom: 1px solid #dbe4f0; text-align: left; vertical-align: top; }
+    th { color: #475569; font-weight: 600; }
+    td code { white-space: nowrap; }
     #demo-map { height: 360px; overflow: hidden; border: 1px solid #dbe4f0; border-radius: 12px; background: #e2e8f0; }
   </style>
 </head>
@@ -30,13 +35,14 @@
   <main>
     <a class="back" href="/">← Volver al mapa</a>
     <h1>Una plataforma, lista para integrar.</h1>
-    <p class="lead">El mapa, las búsquedas, las rutas y las descargas offline salen de esta misma instalación. El navegador de la aplicación cliente no necesita claves de servicios externos ni una CDN.</p>
+    <p class="lead">El mapa, las búsquedas, las rutas y las descargas offline salen de esta misma instalación. El navegador de la aplicación cliente no necesita claves de servicios externos ni una CDN, y otras aplicaciones se conectan con llaves de API, eventos y webhooks firmados.</p>
 
     <div class="cards">
       <div class="card"><strong>Mapa, satélite y relieve</strong>Regiones publicadas en PMTiles, con estilo, tipografías, imagen y alturas servidos localmente.</div>
       <div class="card"><strong>Tráfico</strong>Vías principales y tramos medidos por recorridos propios, en vivo o con lo habitual a esa hora.</div>
       <div class="card"><strong>Rutas</strong>Tres perfiles vehiculares, paradas intermedias, condiciones e indicaciones en español.</div>
       <div class="card"><strong>Modo offline</strong>Descargas reanudables, versión y SHA-256 para verificar cada archivo.</div>
+      <div class="card"><strong>Integraciones</strong>Llaves de API por aplicación, eventos y webhooks firmados para un ERP, un CRM o reportes.</div>
     </div>
 
     <h2>Demostración del SDK</h2>
@@ -86,6 +92,132 @@ const route = await calculateRoute({
 
 const url = offlineMapUrl('ecuador');
 // GET admite Range e incluye X-Checksum-Sha256 y X-Region-Version.</code></pre>
+
+    <h2 id="integraciones">Conectar otra aplicación</h2>
+    <p>Un ERP, un CRM o un sistema de reportes se conecta con una <strong>integración</strong>, que un administrador crea en el <a href="/admin/#/integraciones">panel de administración</a>. La integración actúa como una cuenta (una propia o una existente): con sus llaves de API lee y escribe los viajes, posiciones, geocercas, lugares y rutas de esa cuenta, dentro de un límite de solicitudes por minuto. Las llaves se muestran una sola vez y se envían en el encabezado <code>X-API-Key</code>:</p>
+    <pre><code>curl https://route-map.softwareeasydev.com/api/v1/trips \
+  -H "X-API-Key: $ROUTE_MAPS_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Pedido PED-2041","profile":"TRUCK","metadata":{"order":"PED-2041"}}'</code></pre>
+    <p><code>metadata</code> (hasta 4 KB de JSON) vuelve con el viaje y en sus eventos, para relacionarlos con los datos propios. Cada llave tiene permisos:</p>
+    <table>
+      <thead><tr><th>Permiso</th><th>Permite</th></tr></thead>
+      <tbody>
+        <tr><td><code>trips:read</code></td><td>Consultar viajes, sus recorridos y las posiciones en vivo</td></tr>
+        <tr><td><code>trips:write</code></td><td>Iniciar, terminar y cancelar viajes y enviar posiciones</td></tr>
+        <tr><td><code>geofences:read</code> / <code>geofences:write</code></td><td>Consultar geocercas y comprobar un punto / crearlas, editarlas y borrarlas</td></tr>
+        <tr><td><code>places:read</code> / <code>places:write</code></td><td>Consultar lugares / crearlos, editarlos, borrarlos y marcar favoritos</td></tr>
+        <tr><td><code>routes:read</code> / <code>routes:write</code></td><td>Consultar rutas guardadas / guardarlas y borrarlas</td></tr>
+        <tr><td><code>events:read</code></td><td>Leer los eventos con <code>GET /api/v1/events</code></td></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li>Las respuestas tienen la forma <code>{ "success": true, "data": … }</code>; los errores, <code>{ "success": false, "error": { "code", "message" } }</code>.</li>
+      <li><code>GET /api/v1/integrations/me</code> muestra la integración, la cuenta, los permisos y la cuota de la llave.</li>
+      <li>Rutas, búsqueda, tráfico y mapas aceptan la llave sin permisos especiales y la cuentan en la cuota de la integración.</li>
+      <li>Cada respuesta trae <code>X-RateLimit-Limit</code>, <code>X-RateLimit-Remaining</code> y <code>X-RateLimit-Reset</code>. Al pasar el límite la API responde <code>429</code> con <code>Retry-After</code>; una llave revocada o vencida, <code>401 INVALID_API_KEY</code>; un permiso que falta, <code>403 API_KEY_SCOPE_MISSING</code>.</li>
+      <li>Las llaves son para servidores: no las pongas en el código de una página web o de una app.</li>
+    </ul>
+
+    <h2 id="eventos">Eventos</h2>
+    <p>La plataforma registra <code>trip.started</code>, <code>trip.finished</code>, <code>trip.cancelled</code>, <code>geofence.entered</code>, <code>geofence.exited</code>, <code>region.published</code> y <code>region.disabled</code>. Una integración recibe los de su cuenta y los de la plataforma; con «Recibir los eventos de todas las cuentas», los de todas las personas. Todos tienen la misma forma:</p>
+    <pre><code>{
+  "id": "6f1c0d0e-2a8b-4f43-9d3e-8a3f4b1f7c21",
+  "seq": "1287",
+  "type": "geofence.entered",
+  "accountId": "b7c4…",
+  "account": { "id": "b7c4…", "email": "luis.andrade@empresa.com", "name": "Luis Andrade" },
+  "createdAt": "2026-10-07T14:03:11.402Z",
+  "data": {
+    "trip": { "id": "…", "name": "Pedido PED-2041", "metadata": { "order": "PED-2041" } },
+    "geofence": { "id": "…", "name": "Puerto", "type": "POLYGON" },
+    "position": { "latitude": -2.2731, "longitude": -79.9093, "recordedAt": "2026-10-07T14:03:09.000Z" },
+    "enteredAt": "2026-10-07T14:03:09.000Z"
+  }
+}</code></pre>
+    <p>Para leerlos sin webhooks, o ponerse al día después de una caída, usa una llave con <code>events:read</code>. Guarda la posición que devuelve la función y vuelve a llamarla cada pocos segundos (la primera vez, con <code>'0'</code>):</p>
+    <pre><code>// Procesa los eventos posteriores a `after` y devuelve la posición que hay que guardar.
+async function readEvents(after, handle) {
+  for (;;) {
+    const response = await fetch(
+      `https://route-map.softwareeasydev.com/api/v1/events?after=${after}&amp;limit=500`,
+      { headers: { 'X-API-Key': process.env.ROUTE_MAPS_KEY } },
+    );
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const { data } = await response.json(); // { items, next, hasMore }
+    for (const event of data.items) await handle(event);
+    after = data.next;
+    if (!data.hasMore) return after;
+  }
+}</code></pre>
+
+    <h2 id="webhooks">Webhooks</h2>
+    <p>Un webhook recibe los eventos elegidos como <code>POST</code> con el evento en JSON y los encabezados <code>X-RouteMaps-Event</code> (tipo), <code>X-RouteMaps-Event-Id</code>, <code>X-RouteMaps-Delivery</code> y <code>X-RouteMaps-Signature</code>.</p>
+    <ul>
+      <li>Responde con un <code>2xx</code> en pocos segundos (10 por defecto). Si no, se reintenta a los 1 min, 5 min, 30 min, 2 h, 6 h, 12 h y 24 h, y el panel muestra el resultado de cada entrega.</li>
+      <li>Un evento puede llegar más de una vez y el orden no está garantizado: usa <code>X-RouteMaps-Event-Id</code> para no procesarlo dos veces y <code>seq</code> para ordenar.</li>
+      <li>La URL debe ser <code>https://</code> y de Internet, sin redirecciones.</li>
+    </ul>
+
+    <h3>Verificar la firma</h3>
+    <p><code>X-RouteMaps-Signature: t=&lt;segundos&gt;,v1=&lt;firma&gt;</code>. La firma es el HMAC-SHA256 en hexadecimal de <code>&lt;t&gt;.&lt;cuerpo&gt;</code> con el secreto del webhook (<code>whsec_…</code>, que el panel muestra una sola vez). Calcúlala sobre el cuerpo tal como llegó, antes de interpretar el JSON, compárala en tiempo constante y rechaza las de más de 5 minutos.</p>
+    <p>Node.js (Express):</p>
+    <pre><code>import { createHmac, timingSafeEqual } from 'node:crypto';
+import express from 'express';
+
+function verify(secret, header, rawBody, toleranceSeconds = 300) {
+  const parts = Object.fromEntries(header.split(',').map((part) =&gt; part.trim().split('=')));
+  const timestamp = Number(parts.t);
+  if (!Number.isInteger(timestamp) || Math.abs(Date.now() / 1000 - timestamp) &gt; toleranceSeconds) {
+    return false;
+  }
+  const expected = createHmac('sha256', secret).update(`${timestamp}.`).update(rawBody).digest();
+  const given = Buffer.from(parts.v1 ?? '', 'hex');
+  return given.length === expected.length &amp;&amp; timingSafeEqual(given, expected);
+}
+
+const app = express();
+app.post('/route-maps', express.raw({ type: 'application/json' }), (req, res) =&gt; {
+  if (!verify(process.env.ROUTE_MAPS_WEBHOOK_SECRET, req.get('x-routemaps-signature') ?? '', req.body)) {
+    return res.sendStatus(401);
+  }
+  const event = JSON.parse(req.body.toString('utf8'));
+  // event.type, event.account, event.data…
+  res.sendStatus(204);
+});</code></pre>
+    <p>Python:</p>
+    <pre><code>import hashlib
+import hmac
+import time
+
+
+def verify(secret: str, header: str, raw_body: bytes, tolerance: int = 300) -&gt; bool:
+    parts = dict(part.strip().split('=', 1) for part in header.split(',') if '=' in part)
+    try:
+        timestamp = int(parts.get('t', ''))
+    except ValueError:
+        return False
+    if abs(time.time() - timestamp) &gt; tolerance:
+        return False
+    expected = hmac.new(secret.encode(), f'{timestamp}.'.encode() + raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, parts.get('v1', ''))
+
+# Flask: verify(secret, request.headers.get('X-RouteMaps-Signature', ''), request.get_data())</code></pre>
+    <p>PHP:</p>
+    <pre><code>function verify(string $secret, string $header, string $rawBody, int $tolerance = 300): bool {
+    $parts = [];
+    foreach (explode(',', $header) as $part) {
+        [$name, $value] = array_pad(explode('=', trim($part), 2), 2, '');
+        $parts[$name] = $value;
+    }
+    $timestamp = (int) ($parts['t'] ?? 0);
+    if ($timestamp === 0 || abs(time() - $timestamp) &gt; $tolerance) return false;
+    $expected = hash_hmac('sha256', $timestamp . '.' . $rawBody, $secret);
+    return hash_equals($expected, $parts['v1'] ?? '');
+}
+
+// $ok = verify(getenv('ROUTE_MAPS_WEBHOOK_SECRET'), $_SERVER['HTTP_X_ROUTEMAPS_SIGNATURE'] ?? '',
+//              file_get_contents('php://input'));</code></pre>
 
     <p class="note">Los endpoints completos, formatos, procedencia y respuestas se pueden consultar en la <a href="/api/docs">documentación interactiva de la API</a>. El catálogo auditable de cada publicación conserva internamente la organización, licencia y fecha de sus datos.</p>
   </main>

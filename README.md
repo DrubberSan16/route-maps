@@ -31,19 +31,29 @@ rutas o geocodificación a proveedores externos durante la ejecución.
   botón «Instalar app» en el visor web: descarga el APK publicado en el
   servidor o instala el visor como aplicación (PWA).
 - Descarga offline del archivo de mapa con checksum y manifiesto versionado.
+- Panel de administración web en `/admin/` para administradores y operadores:
+  resumen, mapa en vivo, viajes, dispositivos, geocercas, lugares, rutas,
+  sincronización, regiones de mapa, eventos, integraciones, cuentas y
+  auditoría.
+- Integraciones con otras aplicaciones (un ERP, un CRM, reportes): llaves de API
+  con permisos y cuota, eventos de viajes, geocercas y regiones, y webhooks
+  firmados con reintentos.
 
 ## Arquitectura de ejecución
 
 ```text
-Aplicación / SDK / móvil
+Aplicación / SDK / móvil / panel /admin/ / aplicaciones integradas
           |
-        Nginx ------------- /descargas/ (APK de la app)
+        Nginx ------------- /descargas/ (APK de la app), /admin/ (panel)
        /     \
   PMTiles    API NestJS
   (mapa,       |-- rutas nativas (graph.bin)
    relieve,    |-- geocodificación nativa (search.ndjson)
    satélite,   |-- tráfico agregado propio (en vivo y habitual)
-   capas)      |-- PostgreSQL/PostGIS + Redis
+   capas)      |-- administración, llaves de API y eventos
+               |-- PostgreSQL/PostGIS + Redis
+               |
+             Worker ---- webhooks firmados hacia las aplicaciones integradas
 ```
 
 Los portales oficiales solo se consultan en la fase de ingesta. Los archivos
@@ -54,13 +64,24 @@ locales.
 ## Inicio local
 
 ```bash
-cp .env.example .env
 make init
 make prepare-region REGION=ecuador
-docker compose up -d --build
+make up
 ```
 
 Abrir `http://localhost:8080`. Los datos generados no se versionan en Git.
+`make init` crea `.env` con secretos aleatorios y, si ya existe, le agrega las
+variables nuevas (por ejemplo `INTEGRATIONS_SECRET_KEY` al actualizar).
+
+El panel de administración está en `http://localhost:8080/admin/`. En
+desarrollo entra con `admin@maps.local` y `Admin1234!` (datos de demostración);
+en producción crea el primer administrador con el stack en marcha:
+
+```bash
+make admin-create EMAIL=tu@correo.com NAME="Tu nombre"
+```
+
+Ver `docs/admin.md`.
 
 `prepare-region` también genera el relieve y la vista satélite de las regiones
 que los tienen en `infrastructure/regions/regions.json` (`rasters`); para
@@ -85,6 +106,13 @@ recrea Nginx con el volumen nuevo de `storage/app`.
 - `GET /api/v1/tracking/traffic`: tráfico agregado por celdas (compatibilidad).
 - `GET /sdk/route-maps.js`: SDK web sin CDN.
 - `GET /developers.html`: ejemplos de integración.
+
+Una aplicación que necesita los datos de una cuenta (viajes, posiciones,
+geocercas, lugares, rutas) se registra como integración en el panel y usa una
+llave de API en `X-API-Key`. Recibe los eventos por webhooks firmados o con
+`GET /api/v1/events`; `GET /api/v1/integrations/me` muestra la integración, la
+cuenta, los permisos y la cuota de la llave. Detalle y ejemplos para verificar
+la firma en Node.js, Python y PHP: `docs/integration.md`.
 
 Ejemplo de ruta:
 
@@ -178,12 +206,19 @@ docker compose config
 ## Seguridad y operación
 
 - Solo Nginx publica puertos; base de datos y caché permanecen en red privada.
-- Los secretos viven en `.env`, nunca en Git.
+  El worker es el único servicio que se conecta a otros servidores: envía los
+  webhooks por HTTPS y solo a direcciones públicas.
+- Los secretos viven en `.env`, nunca en Git. Las llaves de API se guardan como
+  SHA-256 y los secretos de los webhooks, cifrados con
+  `INTEGRATIONS_SECRET_KEY`.
+- El panel tiene una política de seguridad de contenido estricta, roles
+  (`ADMIN`, `OPERATOR`) que también aplica la API, y cada cambio queda en la
+  auditoría.
 - Las descargas offline requieren archivos y checksums registrados.
 - El tráfico público es agregado y aplica umbral de privacidad.
 - No se ejecuta ningún motor ni servicio cartográfico de terceros: mapa, rutas y
   búsqueda salen de los datos oficiales procesados por la propia plataforma.
 
-Más detalle: `docs/maps.md`, `docs/integration.md`, `docs/architecture.md` y
-`docs/offline-architecture.md`. El diseño del visor y de la app está en
+Más detalle: `docs/maps.md`, `docs/integration.md`, `docs/admin.md`,
+`docs/architecture.md` y `docs/offline-architecture.md`. El diseño del visor y de la app está en
 `design-system/route-maps/`.
