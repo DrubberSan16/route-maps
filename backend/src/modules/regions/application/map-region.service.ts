@@ -221,7 +221,11 @@ export class MapRegionService {
       !force &&
       existing !== null &&
       (existing.routingFile ?? null) === (routingFile ? manifest.routingFile : null) &&
-      (existing.routingFileSize ?? null) === (routingFile?.size ?? null);
+      (existing.routingFileSize ?? null) === (routingFile?.size ?? null) &&
+      // A pack rebuilt with the same size: only its manifest checksum tells.
+      (!routingFile ||
+        !manifest.routingChecksum ||
+        manifest.routingChecksum === existing.routingChecksum);
 
     const assets = await this.syncAssets(manifest, existing, force);
     const assetsUnchanged = existing !== null && sameAssets(existing.assets, assets);
@@ -243,6 +247,18 @@ export class MapRegionService {
           ? existing.routingChecksum
           : await this.storage.sha256('routing', manifest.routingFile)
         : null;
+    // The phone verifies the pack against this checksum: a pack replaced after its manifest was
+    // written would never verify.
+    if (
+      routingChecksum &&
+      manifest.routingChecksum &&
+      manifest.routingChecksum !== routingChecksum
+    ) {
+      throw new AppException(
+        ErrorCode.CHECKSUM_MISMATCH,
+        `Checksum of ${manifest.routingFile} does not match its manifest`,
+      );
+    }
 
     await this.regions.upsert(
       {

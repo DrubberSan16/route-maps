@@ -35,7 +35,8 @@ void main() {
     code: region.code,
     name: region.name,
     version: version ?? region.version,
-    checksum: region.checksum,
+    // An older version has another map.
+    checksum: version == null || version == region.version ? region.checksum : 'map-$version',
     sizeBytes: region.mapSizeBytes,
     relativePath: 'regions/${region.code}/${version ?? region.version}/${region.code}.pmtiles',
     bbox: region.bbox,
@@ -320,6 +321,34 @@ void main() {
       await pumpScreen(tester);
 
       await tester.tap(inCard('downloaded-guayaquil', find.text('Actualizar rutas')));
+      await tester.pump();
+      expect(downloads.calls, ['download:guayaquil:2026.09.20']);
+    });
+
+    testWidgets('a new version with the same map only counts its new pack', (tester) async {
+      final older = region(
+        'guayaquil',
+        name: 'Guayaquil',
+        bbox: guayaquilBox,
+        packSize: 40 * 1000 * 1000,
+      );
+      final newer = region(
+        'guayaquil',
+        name: 'Guayaquil',
+        version: '2026.09.20',
+        bbox: guayaquilBox,
+        packSize: 41 * 1000 * 1000,
+        packChecksum: 'qq',
+      );
+      regions = InMemoryRegionRepository(
+        catalog: [newer],
+        downloaded: [stored(older, withPack: true, latest: '2026.09.20')],
+      );
+      downloads = ScriptedRegionDownloadService(regions);
+      await pumpScreen(tester);
+
+      expect(find.text('Nueva versión disponible: 2026.09.20 (41 MB)'), findsOneWidget);
+      await tester.tap(inCard('downloaded-guayaquil', find.text('Actualizar')));
       await tester.pump();
       expect(downloads.calls, ['download:guayaquil:2026.09.20']);
     });

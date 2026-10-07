@@ -159,8 +159,8 @@ model Device {
   @@map("devices")
 }
 
-/// Offline map region: a PMTiles file (visual map) plus an optional routing
-/// package. Files live in MAP_STORAGE_PATH / ROUTING_STORAGE_PATH, never in the DB.
+/// Offline map region: a PMTiles file (visual map) plus the offline pack of the
+/// phone. Files live in MAP_STORAGE_PATH / ROUTING_STORAGE_PATH, never in the DB.
 model MapRegion {
   id              String                                 @id @default(uuid()) @db.Uuid
   /// Public identifier used in URLs, e.g. "guayaquil".
@@ -182,7 +182,8 @@ model MapRegion {
   maxZoom         Int                                    @default(14) @map("max_zoom")
   /// Optional absolute URL (e.g. a CDN). When null the API download endpoint is used.
   downloadUrl     String?                                @map("download_url")
-  /// Routing package (Valhalla tile archive) relative to ROUTING_STORAGE_PATH.
+  /// Offline pack of the phone (road network and search index, .rmpack; Valhalla tiles in
+  /// legacy OSM regions) relative to ROUTING_STORAGE_PATH.
   routingFile     String?                                @map("routing_file")
   routingFileSize BigInt?                                @map("routing_file_size")
   routingChecksum String?                                @map("routing_checksum")

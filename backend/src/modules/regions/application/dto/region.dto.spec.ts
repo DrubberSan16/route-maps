@@ -54,6 +54,39 @@ describe('toRegionResponse', () => {
     ]);
   });
 
+  it('publishes the offline pack of the phone with its format', () => {
+    expect(toRegionResponse(REGION, '/maps')).toMatchObject({
+      routingDownloadUrl: null,
+      routingFormat: null,
+    });
+    const withPack = toRegionResponse(
+      {
+        ...REGION,
+        routingFile: 'guayaquil/guayaquil.rmpack',
+        routingFileSize: 41800000,
+        routingChecksum: 'c'.repeat(64),
+      },
+      '/maps',
+    );
+    expect(withPack).toMatchObject({
+      routingDownloadUrl: '/api/v1/maps/regions/guayaquil/routing/download',
+      routingFormat: 'route-maps-pack',
+      routingSize: 41800000,
+      routingChecksum: 'c'.repeat(64),
+    });
+  });
+
+  it('tells the legacy Valhalla tiles apart, so the app does not take them for a pack', () => {
+    const legacy = toRegionResponse(
+      { ...REGION, routingFile: 'guayaquil/guayaquil.valhalla.tar', routingFileSize: 1 },
+      '/maps',
+    );
+    expect(legacy.routingFormat).toBe('valhalla-tiles');
+    expect(
+      toRegionResponse({ ...REGION, routingFile: 'guayaquil/graph.bin' }, '/maps').routingFormat,
+    ).toBeNull();
+  });
+
   it('falls back to the region version for a checksum that is not a SHA-256', () => {
     const response = toRegionResponse({ ...REGION, checksum: 'pending' }, '/maps');
 

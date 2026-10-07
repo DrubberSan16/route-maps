@@ -9,12 +9,21 @@ import {
   type MapStorageProvider,
   StorageKind,
 } from '../../maps/domain/map-storage.provider';
-import { MapRegion, RegionAsset } from '../domain/map-region.entity';
+import {
+  MapRegion,
+  RegionAsset,
+  ROUTING_FORMATS,
+  routingFormatOf,
+} from '../domain/map-region.entity';
 import { parseRangeHeader } from './http-range';
 
-const CONTENT_TYPES: Record<StorageKind, string> = {
-  map: 'application/vnd.pmtiles',
-  routing: 'application/x-tar',
+const PMTILES = 'application/vnd.pmtiles';
+
+/** Type of a file of the region: PMTiles archives, or the routing file by its format. */
+const contentType = (kind: StorageKind, relativePath: string): string => {
+  if (kind === 'map') return PMTILES;
+  const format = routingFormatOf(relativePath);
+  return format ? ROUTING_FORMATS[format].contentType : 'application/octet-stream';
 };
 
 /**
@@ -76,7 +85,7 @@ export class RegionDownloadService {
     const fileName = relativePath.split('/').pop() ?? `${region.code}.bin`;
     const etag = checksum ? `"${checksum}"` : `"${file.size}-${file.modifiedAt.getTime()}"`;
     const setFileHeaders = () => {
-      res.setHeader('Content-Type', CONTENT_TYPES[kind]);
+      res.setHeader('Content-Type', contentType(kind, relativePath));
       res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
       res.setHeader('Accept-Ranges', 'bytes');
       res.setHeader('ETag', etag);

@@ -103,6 +103,14 @@ Cada región puede publicar además `assets` (relieve `terrain`, satélite
 `satellite` y capas `overlays`), cada uno con `tilesUrl` para leerlo en línea,
 `downloadUrl` reanudable, `checksum`, `size`, `format` y zooms.
 
+Con `routingFormat: route-maps-pack`, `routingDownloadUrl` es el paquete sin
+conexión de la app móvil (`routingSize`, `routingChecksum`): la red vial y el
+índice de búsqueda de la región y 5 km alrededor, con los que el teléfono
+calcula rutas, busca lugares y nombra direcciones sin Internet. Se descarga
+igual que el mapa (Range, `X-Checksum-Sha256`). Su formato binario está descrito
+en `infrastructure/data-tools/lib/mapsdata/offline_pack.py`; los límites del
+modo sin conexión, en [offline-architecture.md](offline-architecture.md).
+
 ## Integraciones: llaves de API, webhooks y eventos
 
 Otra aplicación (un ERP, un CRM, un sistema de reportes) se conecta desde el

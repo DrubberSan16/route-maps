@@ -76,7 +76,8 @@ class StraightLineRouting implements RoutingProvider {
 const REGION = 'e2e-guayaquil';
 // Deterministic content: the region keeps the same checksum across runs.
 const MAP_BYTES = Buffer.concat([Buffer.from('PMTiles'), Buffer.alloc(96 * 1024, 'e2e-tiles')]);
-const ROUTING_BYTES = Buffer.alloc(32 * 1024, 'e2e-valhalla-tiles');
+// Offline pack of the phone (road network and search index), as `region.sh pack` writes it.
+const PACK_BYTES = Buffer.concat([Buffer.from('RMPACK01'), Buffer.alloc(32 * 1024, 'e2e-pack')]);
 const SATELLITE_BYTES = Buffer.from('satellite imagery tiles (e2e)');
 const sha256 = (data: Buffer) => createHash('sha256').update(data).digest('hex');
 
@@ -121,7 +122,7 @@ describe('Maps Platform API (e2e)', () => {
       await writeFile(join(storage, path), data);
     };
     await put(`maps/ecuador/${REGION}.pmtiles`, MAP_BYTES);
-    await put(`routing/${REGION}/${REGION}.valhalla.tar`, ROUTING_BYTES);
+    await put(`routing/${REGION}/${REGION}.rmpack`, PACK_BYTES);
     await put(`maps/ecuador/${REGION}.satellite.pmtiles`, SATELLITE_BYTES);
     await put('native/graph.bin', ROAD_GRAPH);
     await put(
@@ -137,7 +138,8 @@ describe('Maps Platform API (e2e)', () => {
         minZoom: 0,
         maxZoom: 14,
         mapFile: `ecuador/${REGION}.pmtiles`,
-        routingFile: `${REGION}/${REGION}.valhalla.tar`,
+        routingFile: `${REGION}/${REGION}.rmpack`,
+        routingChecksum: sha256(PACK_BYTES),
         assets: [
           {
             kind: 'satellite',
@@ -277,7 +279,10 @@ describe('Maps Platform API (e2e)', () => {
         checksum: sha256(MAP_BYTES),
         mapSize: MAP_BYTES.length,
         mapDownloadUrl: `/api/v1/maps/regions/${REGION}/download`,
-        routingChecksum: sha256(ROUTING_BYTES),
+        routingSize: PACK_BYTES.length,
+        routingChecksum: sha256(PACK_BYTES),
+        routingFormat: 'route-maps-pack',
+        routingDownloadUrl: `/api/v1/maps/regions/${REGION}/routing/download`,
         bbox: [-80.1, -2.35, -79.75, -1.95],
         tilesUrl: `/maps/ecuador/${REGION}.pmtiles?v=${sha256(MAP_BYTES).slice(0, 16)}`,
         assets: [
@@ -353,12 +358,18 @@ describe('Maps Platform API (e2e)', () => {
       );
     });
 
-    it('serves the routing package for offline stored routes', async () => {
+    it('serves the offline pack for routes and search on the phone, resumable', async () => {
       const res = await api('get', `/maps/regions/${REGION}/routing/download`)
         .parse(binary)
         .expect(200);
-      expect(res.headers['content-type']).toBe('application/x-tar');
-      expect(sha256(res.body as Buffer)).toBe(sha256(ROUTING_BYTES));
+      expect(res.headers['content-type']).toBe('application/vnd.route-maps.offline-pack');
+      expect(res.headers['x-checksum-sha256']).toBe(sha256(PACK_BYTES));
+      expect(sha256(res.body as Buffer)).toBe(sha256(PACK_BYTES));
+      const magic = await api('get', `/maps/regions/${REGION}/routing/download`)
+        .set('Range', 'bytes=0-7')
+        .parse(binary)
+        .expect(206);
+      expect((magic.body as Buffer).toString()).toBe('RMPACK01');
     });
 
     it('answers MAP_REGION_NOT_FOUND for unknown regions', async () => {

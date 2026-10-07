@@ -85,6 +85,8 @@ NATIVE_DIR="$STORAGE_PATH/imports/native/$NATIVE_REGION"
 MANIFEST="$(find "$STORAGE_PATH/maps" -type f -name "$REGION.region.json" -print -quit)"
 MAP_REL=""
 MAP_FILES=()
+# Offline pack of the phone (roads and search index), rebuilt with the road graph.
+PACK_FILE="$STORAGE_PATH/routing/$REGION/$REGION.rmpack"
 RUNTIME_NATIVE_FILES=(graph.bin search.ndjson build.json manifest.json climate-precipitation-regions.geojson)
 mkdir -p "$BACKUP_DIR/native"
 for file in "${RUNTIME_NATIVE_FILES[@]}"; do
@@ -109,6 +111,10 @@ if [[ -n "$MANIFEST" ]]; then
   done
   cp -a "$MANIFEST" "$BACKUP_DIR/maps/$(dirname "$MAP_REL")/$REGION.region.json"
 fi
+if [[ -f "$PACK_FILE" ]]; then
+  mkdir -p "$BACKUP_DIR/routing"
+  cp -a "$PACK_FILE" "$BACKUP_DIR/routing/$REGION.rmpack"
+fi
 restore() {
   local exit_code=$?
   trap - EXIT INT TERM
@@ -121,6 +127,10 @@ restore() {
       fi
     done
     cp -a "$BACKUP_DIR/maps/$(dirname "$MAP_REL")/$REGION.region.json" "$MANIFEST"
+  fi
+  rm -f -- "$PACK_FILE"
+  if [[ -f "$BACKUP_DIR/routing/$REGION.rmpack" ]]; then
+    cp -a "$BACKUP_DIR/routing/$REGION.rmpack" "$PACK_FILE"
   fi
   mkdir -p "$NATIVE_DIR"
   for file in "${RUNTIME_NATIVE_FILES[@]}"; do
@@ -153,6 +163,7 @@ fi
 
 docker compose --profile tools run --rm data-tools build "$REGION"
 docker compose --profile tools run --rm data-tools map "$REGION"
+docker compose --profile tools run --rm data-tools pack "$REGION"
 docker compose --profile tools run --rm data-tools manifest "$REGION" >/dev/null
 docker compose exec -T backend node dist/src/cli/sync-regions.js
 
@@ -177,6 +188,15 @@ MAGIC="$(curl --fail --silent --show-error --max-time 20 -D "$HEADERS" \
 [[ "$MAGIC" == "PMTiles" ]]
 grep -qi '^HTTP/.* 206' "$HEADERS"
 grep -qi "^X-Checksum-Sha256: $EXPECTED_SHA" "$HEADERS"
+# The offline pack of the phone is published with the map and served the same way.
+[[ "$(jq -r '.data.routingFormat' <<<"$REGION_JSON")" == route-maps-pack ]]
+PACK_URL="$(jq -r '.data.routingDownloadUrl' <<<"$REGION_JSON")"
+PACK_SHA="$(jq -r '.data.routingChecksum' <<<"$REGION_JSON")"
+MAGIC="$(curl --fail --silent --show-error --max-time 20 -D "$HEADERS" \
+  -H 'Range: bytes=0-7' "$BASE_URL$PACK_URL")"
+[[ "$MAGIC" == "RMPACK01" ]]
+grep -qi '^HTTP/.* 206' "$HEADERS"
+grep -qi "^X-Checksum-Sha256: $PACK_SHA" "$HEADERS"
 
 printf '%s\n' "$CURRENT" >"$STATE_FILE"
 trap - EXIT INT TERM

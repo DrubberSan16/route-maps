@@ -3,8 +3,10 @@
   Downloads audited sources and prepares an offline region into .\storage.
 .DESCRIPTION
   Downloads and validates the official/public source catalog, builds the PMTiles
-  map, and writes the manifest registered by the backend. Routing reads the
-  audited road network directly and needs no separate service.
+  map and the offline pack of the phone (roads and search index, for routes and
+  address search without connection; -SkipRouting skips it), and writes the
+  manifest registered by the backend. Server routing reads the audited road
+  network directly and needs no separate service.
   Regions are defined in infrastructure\regions\regions.json. Everything runs
   inside the data-tools image: the host only needs Docker Desktop.
 .EXAMPLE

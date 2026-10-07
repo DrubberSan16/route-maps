@@ -30,7 +30,9 @@ rutas o geocodificación a proveedores externos durante la ejecución.
 - App Android/iOS (Flutter) con los mismos tipos de mapa, tráfico y capas, y un
   botón «Instalar app» en el visor web: descarga el APK publicado en el
   servidor o instala el visor como aplicación (PWA).
-- Descarga offline del archivo de mapa con checksum y manifiesto versionado.
+- Descarga offline por región del mapa y de su paquete sin conexión, con
+  checksum y manifiesto versionado: sin Internet, el teléfono calcula rutas,
+  busca lugares y nombra direcciones con el mismo motor que el servidor.
 - Panel de administración web en `/admin/` para administradores y operadores:
   resumen, mapa en vivo, viajes, dispositivos, geocercas, lugares, rutas,
   sincronización, regiones de mapa, eventos, integraciones, cuentas y
@@ -94,6 +96,8 @@ recrea Nginx con el volumen nuevo de `storage/app`.
 - `GET /api/v1/maps/regions`: regiones y versiones publicadas, con sus
   archivos extra (`assets`: relieve, satélite y capas).
 - `GET /api/v1/maps/regions/{id}/download`: mapa PMTiles offline.
+- `GET /api/v1/maps/regions/{id}/routing/download`: paquete sin conexión de la
+  app (red vial e índice de búsqueda de la región; reanudable, con checksum).
 - `GET /api/v1/maps/regions/{id}/assets/{terrain|satellite|overlays}/download`:
   relieve, satélite o capas de la región (reanudable, con checksum).
 - `POST /api/v1/routes/calculate`: ruta, distancia, tiempo y condiciones.

@@ -128,9 +128,7 @@ class _DownloadedRegionTile extends ConsumerWidget {
     final canUpdate = region.updateAvailable && latest != null && latest.version != region.version;
     // Downloaded before the server published its pack, or the pack changed.
     final packNeeded = latest != null && region.needsOfflinePack(latest);
-    final updateBytes = latest == null
-        ? 0
-        : latest.mapSizeBytes + (packNeeded ? latest.routingSizeBytes! : 0);
+    final updateBytes = latest == null ? 0 : region.updateBytes(latest);
     return Card(
       key: Key('downloaded-${region.code}'),
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -146,7 +144,9 @@ class _DownloadedRegionTile extends ConsumerWidget {
             _OfflinePackStatus(region: region, latest: latest),
             if (canUpdate && task == null)
               Text(
-                'Nueva versión disponible: ${latest.version} (${formatBytes(updateBytes)})',
+                updateBytes > 0
+                    ? 'Nueva versión disponible: ${latest.version} (${formatBytes(updateBytes)})'
+                    : 'Nueva versión disponible: ${latest.version}',
                 style: TextStyle(color: Theme.of(context).colorScheme.primary),
               ),
             if (task case final task?) _TaskProgress(task: task),

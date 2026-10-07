@@ -5,7 +5,9 @@
 #
 #   1. downloads and validates the region's official/public catalog;
 #   2. builds the visual map storage/maps/<dir>/<region>.pmtiles;
-#   3. writes the region manifest and registers it in the backend.
+#   3. builds the offline pack of the phone storage/routing/<region>/<region>.rmpack (roads and
+#      search index, for routes and address search without connection; --skip-routing skips it);
+#   4. writes the region manifest and registers it in the backend.
 #
 # Regions are defined in infrastructure/regions/regions.json (list them with
 # `make regions`). Everything runs inside the data-tools image: the host only
@@ -16,7 +18,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 if [[ $# -lt 1 || "$1" == -* ]]; then
-  sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+  awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
   exit 64
 fi
 REGION="$1"

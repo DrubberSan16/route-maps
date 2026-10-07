@@ -390,6 +390,38 @@ void main() {
       expect(await (await packOf(v1)).exists(), isFalse, reason: 'old pack removed');
     });
 
+    test('a new version with the same map keeps it and only downloads the new pack', () async {
+      final map = randomBytes(512 * 1024, 29);
+      final v1 = publish(map, version: '2026.08.01', pack: randomBytes(256 * 1024, 30));
+      await service.download(v1);
+      server.requests.clear();
+      sync.enqueued.clear();
+
+      final newPack = randomBytes(300 * 1024, 31);
+      final v2 = publish(map, version: '2026.09.01', pack: newPack);
+      expect((await regions.downloadedRegions()).single.updateBytes(v2), newPack.length);
+      expect(await service.download(v2), RegionDownloadResult.completed);
+      expect(requestedPaths(), [packPath], reason: 'the stored map is the same file');
+      final stored = (await regions.downloadedRegions()).single;
+      expect(stored.version, '2026.09.01');
+      expect(stored.relativePath, 'regions/guayaquil/2026.09.01/guayaquil.pmtiles');
+      expect(await (await fileOf(v2)).readAsBytes(), map);
+      expect(await (await fileOf(v1)).exists(), isFalse);
+      expect(stored.routingChecksum, v2.routingChecksum);
+      expect(await (await packOf(v1)).exists(), isFalse);
+      expect(sync.enqueued.single.payload, {'regionId': 'guayaquil', 'version': '2026.09.01'});
+
+      // Only the version changed: nothing is downloaded.
+      server.requests.clear();
+      final v3 = publish(map, version: '2026.10.01', pack: newPack);
+      expect(stored.updateBytes(v3), 0);
+      expect(await service.download(v3), RegionDownloadResult.completed);
+      expect(server.requests, isEmpty);
+      expect((await regions.downloadedRegions()).single.version, '2026.10.01');
+      expect(await (await fileOf(v3)).readAsBytes(), map);
+      expect(service.tasks, isEmpty);
+    });
+
     test('a pack interrupted by closing the app continues counting the map', () async {
       final map = randomBytes(1024 * 1024, 23);
       final pack = randomBytes(1024 * 1024, 24);

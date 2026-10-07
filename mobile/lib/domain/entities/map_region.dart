@@ -248,6 +248,16 @@ class DownloadedRegion {
   bool needsOfflinePack(MapRegion latest) =>
       latest.hasOfflinePack && latest.routingChecksum != routingChecksum;
 
+  /// Whether [latest] has the same map file as the device: a new version that
+  /// only changed the offline pack or the catalog data keeps the stored map.
+  bool sameMap(MapRegion latest) => latest.checksum == checksum;
+
+  /// Bytes that updating to [latest] downloads: the map if it changed and the
+  /// offline pack if it is new.
+  int updateBytes(MapRegion latest) =>
+      (latest.version != version && !sameMap(latest) ? latest.mapSizeBytes : 0) +
+      (needsOfflinePack(latest) ? latest.routingSizeBytes! : 0);
+
   bool contains(Coordinate point) => bbox?.contains(point) ?? false;
 }
 

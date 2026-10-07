@@ -17,6 +17,8 @@ const MAP_BYTES = randomBytes(64 * 1024);
 const MAP_SHA256 = createHash('sha256').update(MAP_BYTES).digest('hex');
 const SATELLITE_BYTES = randomBytes(8 * 1024);
 const SATELLITE_SHA256 = createHash('sha256').update(SATELLITE_BYTES).digest('hex');
+const PACK_BYTES = Buffer.concat([Buffer.from('RMPACK01'), randomBytes(16 * 1024)]);
+const PACK_SHA256 = createHash('sha256').update(PACK_BYTES).digest('hex');
 
 const REGION: MapRegion = {
   id: '6a4c3f7e-8a51-4a57-9d0e-2f0a8c6f1b11',
@@ -61,9 +63,22 @@ const REGION: MapRegion = {
   updatedAt: new Date(),
 };
 
+/** The same region once its offline pack is published. */
+const WITH_PACK: MapRegion = {
+  ...REGION,
+  routingFile: 'guayaquil/guayaquil.rmpack',
+  routingFileSize: PACK_BYTES.length,
+  routingChecksum: PACK_SHA256,
+};
+
 @Controller('regions')
 class DownloadController {
   constructor(private readonly downloads: RegionDownloadService) {}
+
+  @Get('pack/download')
+  async pack(@Req() req: Request, @Res() res: Response) {
+    await this.downloads.send(WITH_PACK, 'routing', req, res);
+  }
 
   @Get(':kind')
   async download(@Param('kind') kind: StorageKind, @Req() req: Request, @Res() res: Response) {
@@ -87,6 +102,8 @@ describe('RegionDownloadService', () => {
     await mkdir(join(root, 'maps', 'ecuador'), { recursive: true });
     await writeFile(join(root, 'maps', REGION.fileName), MAP_BYTES);
     await writeFile(join(root, 'maps', REGION.assets[0].file), SATELLITE_BYTES);
+    await mkdir(join(root, 'routing', 'guayaquil'), { recursive: true });
+    await writeFile(join(root, 'routing', WITH_PACK.routingFile!), PACK_BYTES);
 
     const maps = () => ({
       storagePath: join(root, 'maps'),
@@ -232,6 +249,28 @@ describe('RegionDownloadService', () => {
       success: false,
       error: { code: 'MAP_REGION_FILE_NOT_AVAILABLE' },
     });
+  });
+
+  it('serves the offline pack of the phone with its type and checksum, resumable', async () => {
+    const response = await get('/regions/pack/download').set('Range', 'bytes=0-7').expect(206);
+
+    expect((response.body as Buffer).toString()).toBe('RMPACK01');
+    expect(response.headers).toMatchObject({
+      'content-type': 'application/vnd.route-maps.offline-pack',
+      'content-disposition': 'attachment; filename="guayaquil.rmpack"',
+      'content-range': `bytes 0-7/${PACK_BYTES.length}`,
+      etag: `"${PACK_SHA256}"`,
+      'x-checksum-sha256': PACK_SHA256,
+    });
+  });
+
+  it('delegates offline pack transfers to Nginx from the routing storage', async () => {
+    accelRedirect = true;
+    const response = await get('/regions/pack/download').expect(200);
+    expect(response.headers['x-accel-redirect']).toBe(
+      '/_protected/routing/guayaquil/guayaquil.rmpack',
+    );
+    expect(response.headers['content-type']).toBe('application/vnd.route-maps.offline-pack');
   });
 
   it('answers 404 when the region has no routing package', async () => {

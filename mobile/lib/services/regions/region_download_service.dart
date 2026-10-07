@@ -177,9 +177,14 @@ class RegionDownloadService {
 
   Future<RegionDownloadResult> _download(MapRegion region, CancelToken token) async {
     _autoResume.remove(region.code);
-    final stored = (await _regions.downloadedRegions())
+    var stored = (await _regions.downloadedRegions())
         .where((stored) => stored.code == region.code)
         .firstOrNull;
+    if (stored != null && stored.version != region.version && stored.sameMap(region)) {
+      // A new version with the same map (only its offline pack or its catalog data changed): the
+      // stored map moves to the new version instead of being downloaded again.
+      stored = await _keepMap(stored, region);
+    }
     final files = [
       if (stored == null || stored.version != region.version)
         _RegionFile(
@@ -270,6 +275,28 @@ class RegionDownloadService {
     _tasks.remove(region.code);
     _emit();
     return RegionDownloadResult.completed;
+  }
+
+  /// Registers the map of [stored] as the map of [region], moved to the folder
+  /// of its version; null when the file is gone (it is downloaded again).
+  Future<DownloadedRegion?> _keepMap(DownloadedRegion stored, MapRegion region) async {
+    final file = await _storage.resolve(stored.relativePath);
+    if (!await file.exists()) return null;
+    final target = await _storage.regionMapFile(region.code, region.version);
+    await target.parent.create(recursive: true);
+    await file.rename(target.path);
+    final kept = await _regions.saveDownloaded(
+      region: region,
+      relativePath: await _storage.relativePathOf(target),
+      sizeBytes: stored.sizeBytes,
+    );
+    await _storage.deleteRegionFiles(region.code, keepVersion: region.version);
+    await _sync.enqueue(
+      entity: SyncEntities.downloadedRegion,
+      operation: SyncOperations.upsert,
+      payload: {'regionId': region.code, 'version': region.version},
+    );
+    return kept;
   }
 
   /// Downloads one file of [region]; null once it is complete and verified, or

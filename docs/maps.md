@@ -121,7 +121,9 @@ El mapa se distribuye como un único archivo PMTiles. El endpoint de descarga so
 ETag y checksum del manifiesto. Una aplicación puede guardar el archivo, sustituir `__PMTILES_URL__` (y
 `__OVERLAYS_URL__`) en el estilo y renderizar sin conexión. El relieve, la vista satélite y las capas se
 leen de la plataforma mientras hay conexión; también se pueden descargar con
-`GET /api/v1/maps/regions/{id}/assets/{tipo}/download`.
+`GET /api/v1/maps/regions/{id}/assets/{tipo}/download`. Las rutas, la búsqueda y las direcciones sin conexión
+de la app salen del paquete de la región (`GET /api/v1/maps/regions/{id}/routing/download`, ver
+[offline-architecture.md](offline-architecture.md)).
 
 ## Calidad y límites
 
