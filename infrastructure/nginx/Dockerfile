@@ -37,8 +37,9 @@ COPY --from=viewer-libs /libs/vendor/ /usr/share/nginx/html/vendor/
 COPY maps/fonts/ /usr/share/nginx/maps-assets/fonts/
 COPY maps/style/style.json /usr/share/nginx/maps-assets/style/style.json
 # The service worker of the installable viewer keeps a copy of these files named after their
-# content: any change in the page, the libraries or the style installs the new copy.
-RUN build="$(cd /usr/share/nginx && find html maps-assets/style -type f ! -name sw.js -print0 | sort -z \
+# content: any change in the page, the libraries or the style installs the new copy. The
+# administration panel (html/admin) is not part of the viewer and does not count.
+RUN build="$(cd /usr/share/nginx && find html maps-assets/style -type f ! -name sw.js ! -path 'html/admin/*' -print0 | sort -z \
       | xargs -0 sha256sum | sha256sum | cut -c1-16)" \
  && sed -i "s/__BUILD__/${build}/" /usr/share/nginx/html/sw.js \
  && grep -q "${build}" /usr/share/nginx/html/sw.js
