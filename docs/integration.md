@@ -113,4 +113,4 @@ Cada región puede publicar además `assets` (relieve `terrain`, satélite
   y licencia de cada conjunto oficial se conserva en el registro auditable de
   fuentes y en `/fuentes.html`. Una aplicación que muestre este mapa debe citar
   las fuentes (el INEC lo exige en todo producto derivado y pide un acuerdo para
-  uso comercial).
+  uso comercial); el SDK enlaza esa página desde el control de atribución.

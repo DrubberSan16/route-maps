@@ -30,8 +30,10 @@ sin consultar servicios cartográficos.
 perfiles `CAR`, `TRUCK`, `MOTORCYCLE`, `BICYCLE` y `PEDESTRIAN`.
 
 - **Ajuste a la vía**: cada punto se proyecta sobre el tramo más cercano utilizable por el perfil (no sobre
-  un vértice). Si origen y destino caen en fragmentos distintos de la red, se buscan los tramos cercanos
-  (2 km) que compartan red y, si no existen, se usa la red principal más cercana (hasta 30 km).
+  un vértice). Si los puntos caen en fragmentos distintos de la red, se buscan los tramos cercanos (2 km)
+  que compartan red y, si no existen, se usa la red principal más cercana (hasta 30 km). La red se calcula
+  con las vías que el perfil puede recorrer (a pie no se cruza por una autopista, en bicicleta no se suben
+  escaleras) y cada parada se ajusta una sola vez, así los tramos de una ruta con paradas empalman.
 - **Búsqueda**: A* sobre tiempo de viaje con velocidades por clase de vía y perfil (urbanas y de carretera),
   demora en intersecciones urbanas, vías lastradas más lentas. Peatones y bicicletas usan peatonales y
   escalinatas (bicicletas no suben escaleras); los vehículos no.
@@ -42,8 +44,10 @@ perfiles `CAR`, `TRUCK`, `MOTORCYCLE`, `BICYCLE` y `PEDESTRIAN`.
 
 La respuesta incluye además `conditions`:
 
-- tráfico propio: puntos GPS de los últimos 15 minutos a menos de 150 m de la ruta; se requieren al menos
-  5 muestras y 3 viajes distintos; si hay retraso, `adjustedDurationSeconds` lo incorpora (máximo 2,5 veces);
+- tráfico propio: puntos GPS de los últimos 15 minutos a menos de 150 m de la ruta, de viajes del mismo tipo
+  de vehículo (auto, moto y camión entre sí; bicicleta y a pie, cada uno con los suyos), con precisión de
+  50 m o mejor y velocidad plausible; se requieren al menos 5 muestras y 3 viajes distintos; si hay retraso,
+  `adjustedDurationSeconds` lo incorpora (máximo 2,5 veces);
 - clima: regiones de precipitación anual que cruza la ruta, con avisos para zonas muy lluviosas.
 
 Sin muestra suficiente se devuelve `traffic.status=insufficient_data`; nunca se inventa congestión. El clima
@@ -62,8 +66,8 @@ es climatología, no una observación en vivo (`climate.status=climatology`).
   reunieron al menos 3 viajes distintos.
 - `GET /api/v1/tracking/traffic`: celdas agregadas de la versión anterior (se mantiene por compatibilidad).
 
-La caja admite como máximo 2,5 grados por lado. Los datos provienen únicamente de los recorridos de esta
-plataforma.
+La caja admite como máximo 2,5 grados por lado en los tres. Los datos provienen únicamente de los recorridos
+de esta plataforma.
 
 ## Geocodificación
 
@@ -75,8 +79,8 @@ contexto (parroquia, cantón, provincia), la última puede estar incompleta y lo
 cobertura del nombre, importancia y distancia al centro del mapa del cliente: una ciudad con el nombre
 exacto va antes que las calles homónimas ("Ambato" desde Guayaquil), salvo que se escriba el tipo de vía
 ("Av. Ambato"), y los lugares del país van antes que sus homónimos del mundo ("Santo Domingo"). Las
-respuestas se guardan 24 h en caché con la versión del índice y del grafo en la clave, así que datos
-nuevos se usan de inmediato.
+respuestas se guardan 24 h en caché con la versión del índice, del grafo y del índice mundial en la clave,
+así que datos nuevos se usan de inmediato. Con `countryCodes` sin `ec`, el índice del país no responde.
 
 Las intersecciones ("Av. 9 de Octubre y Boyacá", "Amazonas & Naciones Unidas") se resuelven en el grafo:
 el resultado es el cruce exacto de ambas calles. La búsqueda inversa devuelve la calle más cercana (60 m),
