@@ -50,6 +50,12 @@ const JUNCTION_DELAY: Record<RoutingProfile, number> = {
   PEDESTRIAN: 1,
 };
 const MOTOR_PROFILES = new Set<RoutingProfile>(['CAR', 'TRUCK', 'MOTORCYCLE']);
+/** Road classes a profile may use, one bit per class: speed() is above 0 exactly on them. */
+const usableClasses = (profile: RoutingProfile): number =>
+  URBAN_SPEEDS[profile].reduce(
+    (classes, kph, cls) => (kph > 0 ? classes | (1 << cls) : classes),
+    0,
+  );
 export const NATIVE_PROFILES: RoutingProfile[] = [
   'CAR',
   'TRUCK',
@@ -123,52 +129,61 @@ export class NativeRouter {
     return this.graph.degree(node) >= 3 ? JUNCTION_DELAY[profile] : 0;
   }
 
-  /** Snaps origin and destination to roads of the same connected network. */
-  snapPair(from: Coordinate, to: Coordinate, profile: RoutingProfile): [Snap, Snap] {
+  /**
+   * Snaps every stop to a road of one network the profile can travel, so that the legs meet at the
+   * stops: the network closest to all of them or, when they have none in common nearby, the main
+   * network of the country.
+   */
+  snapStops(stops: Coordinate[], profile: RoutingProfile): Snap[] {
     const graph = this.graph;
-    const motor = MOTOR_PROFILES.has(profile);
-    const components = motor ? graph.motorComponent : graph.anyComponent;
-    const largest = motor ? graph.largestMotorComponent : graph.largestAnyComponent;
+    const { component, largest } = graph.networks(usableClasses(profile));
     const usable = (edge: number) => this.speed(profile, edge) > 0;
     const withComponent = (candidate: NearestEdge): Snap => ({
       ...candidate,
-      component: components[graph.edgeU[candidate.edge]],
+      component: component[graph.edgeU[candidate.edge]],
     });
-    const near = (point: Coordinate) =>
+    // Usable roads near each stop, closest first.
+    const nearby = stops.map((point) =>
       graph
         .nearestEdges(point.longitude, point.latitude, SNAP_CANDIDATE_METERS, usable, 12)
-        .map(withComponent);
-    const origins = near(from);
-    const destinations = near(to);
-    let best: [Snap, Snap] | null = null;
-    for (const origin of origins) {
-      for (const destination of destinations) {
-        if (origin.component !== destination.component || origin.component < 0) continue;
-        if (!best || origin.distance + destination.distance < best[0].distance + best[1].distance) {
-          best = [origin, destination];
-        }
+        .map(withComponent),
+    );
+    let best: Snap[] | null = null;
+    let bestMeters = Infinity;
+    for (const network of new Set(nearby[0].map((snap) => snap.component))) {
+      const snaps = nearby.map((candidates) =>
+        candidates.find((snap) => snap.component === network),
+      );
+      if (network < 0 || !snaps.every((snap) => snap !== undefined)) continue;
+      const meters = snaps.reduce((sum, snap) => sum + snap.distance, 0);
+      if (meters < bestMeters) {
+        best = snaps;
+        bestMeters = meters;
       }
     }
     if (best) return best;
     // Different fragments (or nothing nearby): use the main network of the country.
-    const main = (point: Coordinate) =>
-      graph
-        .nearestEdges(
-          point.longitude,
-          point.latitude,
-          MAX_SNAP_METERS,
-          (edge) => usable(edge) && components[graph.edgeU[edge]] === largest,
-          1,
-        )
-        .map(withComponent)[0];
-    const origin = origins.find((o) => o.component === largest) ?? main(from);
-    const destination = destinations.find((d) => d.component === largest) ?? main(to);
-    if (!origin || !destination) {
-      throw new NoRouteError(
-        `The ${!origin ? 'origin' : 'destination'} is more than ${MAX_SNAP_METERS / 1000} km from any road`,
-      );
-    }
-    return [origin, destination];
+    return stops.map((point, index) => {
+      const snap =
+        nearby[index].find((candidate) => candidate.component === largest) ??
+        graph
+          .nearestEdges(
+            point.longitude,
+            point.latitude,
+            MAX_SNAP_METERS,
+            (edge) => usable(edge) && component[graph.edgeU[edge]] === largest,
+            1,
+          )
+          .map(withComponent)[0];
+      if (!snap) {
+        const which =
+          index === 0 ? 'origin' : index === stops.length - 1 ? 'destination' : `stop ${index}`;
+        throw new NoRouteError(
+          `The ${which} is more than ${MAX_SNAP_METERS / 1000} km from any road`,
+        );
+      }
+      return snap;
+    });
   }
 
   /** Fastest leg between two snapped points; `penalty` multiplies the cost of some edges. */
@@ -304,9 +319,11 @@ export class NativeRouter {
     alternatives: number,
     options: RouterOptions = {},
   ): { primary: RouteResult; alternatives: RouteResult[] } {
+    const snaps = this.snapStops(stops, profile);
     const legs: { leg: Leg; from: Snap; to: Snap }[] = [];
-    for (let index = 0; index < stops.length - 1; index += 1) {
-      const [from, to] = this.snapPair(stops[index], stops[index + 1], profile);
+    for (let index = 0; index < snaps.length - 1; index += 1) {
+      const from = snaps[index];
+      const to = snaps[index + 1];
       legs.push({ leg: this.leg(profile, from, to), from, to });
     }
     const primary = this.result(profile, legs, stops, options);
