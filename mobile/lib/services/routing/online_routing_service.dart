@@ -6,7 +6,7 @@ import '../../domain/entities/routing_profile.dart';
 import '../../domain/services/routing_service.dart';
 
 /// Routes calculated by the platform (`POST /api/v1/routes/calculate`), which
-/// forwards to the self-hosted engine (Valhalla or OSRM).
+/// forwards to the platform's native official-road engine.
 class OnlineRoutingService implements RoutingService {
   OnlineRoutingService(this._api, {this.language = 'es-ES'});
 
@@ -20,9 +20,10 @@ class OnlineRoutingService implements RoutingService {
     required Coordinate origin,
     required Coordinate destination,
     required RoutingProfile profile,
+    List<Coordinate> waypoints = const [],
     bool alternatives = true,
   }) async {
-    if (!origin.isValid || !destination.isValid) {
+    if (!origin.isValid || !destination.isValid || !waypoints.every((stop) => stop.isValid)) {
       throw AppException.of(ErrorCodes.invalidCoordinates);
     }
     return _api.post(
@@ -35,8 +36,10 @@ class OnlineRoutingService implements RoutingService {
       body: {
         'origin': origin.toJson(),
         'destination': destination.toJson(),
+        if (waypoints.isNotEmpty) 'waypoints': [for (final stop in waypoints) stop.toJson()],
         'profile': profile.apiValue,
-        'alternatives': alternatives,
+        // The engine does not offer alternatives for routes with stops.
+        'alternatives': alternatives && waypoints.isEmpty,
         'language': language,
       },
     );

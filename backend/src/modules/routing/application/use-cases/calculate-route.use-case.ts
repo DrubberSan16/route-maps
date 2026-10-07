@@ -1,4 +1,4 @@
-import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import { AppException } from '../../../../common/errors/app.exception';
 import { ErrorCode } from '../../../../common/errors/error-codes';
@@ -21,10 +21,12 @@ import {
 } from '../../domain/errors';
 import { ROUTING_PROVIDER, type RoutingProvider } from '../../domain/interfaces/routing-provider';
 import { RoutingProfile } from '../../domain/value-objects/routing-profile';
+import { RouteConditions, RouteConditionsService } from '../route-conditions.service';
 
 export interface CalculatedRoute extends RouteResult {
   routeId: string;
   type: 'PRIMARY' | 'ALTERNATIVE';
+  conditions?: RouteConditions;
 }
 
 export interface CalculateRouteOutput extends CalculatedRoute {
@@ -54,6 +56,7 @@ export class CalculateRouteUseCase {
     @Inject(ROUTING_PROVIDER) private readonly provider: RoutingProvider,
     @Inject(CACHE_PROVIDER) private readonly cache: CacheProvider,
     private readonly config: AppConfigService,
+    @Optional() private readonly conditions?: RouteConditionsService,
   ) {}
 
   async execute(command: CalculateRouteCommand): Promise<CalculateRouteOutput> {
@@ -69,6 +72,14 @@ export class CalculateRouteUseCase {
         ...route,
       })),
     ];
+    if (this.conditions) {
+      await Promise.all(
+        routes.map(async (route) => {
+          route.conditions = await this.conditions!.evaluate(route);
+          route.durationSeconds = route.conditions.adjustedDurationSeconds;
+        }),
+      );
+    }
     return { ...routes[0], profile: input.profile, provider: calculation.provider, routes };
   }
 
@@ -110,7 +121,7 @@ export class CalculateRouteUseCase {
   }
 
   private async calculateWithCache(input: CalculateRouteInput): Promise<RouteCalculation> {
-    const key = this.cacheKey(input);
+    const key = this.cacheKey(input, (await this.provider.dataVersion?.()) ?? '');
     const cached = await this.cache.get<RouteCalculation>(key);
     if (cached) return cached;
 
@@ -158,13 +169,14 @@ export class CalculateRouteUseCase {
     }
   }
 
-  private cacheKey(input: CalculateRouteInput): string {
+  private cacheKey(input: CalculateRouteInput, dataVersion: string): string {
     const round = (c: { latitude: number; longitude: number }) => [
       Number(c.latitude.toFixed(5)),
       Number(c.longitude.toFixed(5)),
     ];
     const normalized = JSON.stringify({
       p: this.provider.name,
+      v: dataVersion,
       f: input.profile,
       o: round(input.origin),
       d: round(input.destination),

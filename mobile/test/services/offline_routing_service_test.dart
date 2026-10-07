@@ -218,6 +218,43 @@ void main() {
     expect(result.provider, 'test-engine');
   });
 
+  test('a stored route that passes by the stops in order answers them', () async {
+    final stops = [_north(line[40], 20), _north(line[90], 20)];
+    final result = await service([_stored(primary)]).calculateRoute(
+      origin: line.first,
+      destination: line.last,
+      profile: RoutingProfile.car,
+      waypoints: stops,
+    );
+    expect(result.source, RouteSource.savedRoute);
+    expect(result.primary.savedRouteId, 'route-1');
+    expect(result.geometry, line);
+  });
+
+  test('stops off the stored route, or in the other order, need a connection', () async {
+    final off = [_north(line[60], 500)];
+    final backwards = [_north(line[90], 20), _north(line[40], 20)];
+    for (final stops in [off, backwards]) {
+      await expectLater(
+        service([_stored(primary)], provider: _OnDeviceEngine()).calculateRoute(
+          origin: line.first,
+          destination: line.last,
+          profile: RoutingProfile.car,
+          waypoints: stops,
+        ),
+        throwsA(
+          isA<AppException>()
+              .having((e) => e.code, 'code', ErrorCodes.offlineRouteUnavailable)
+              .having(
+                (e) => e.message,
+                'message',
+                OfflineRoutingService.stopsNeedConnectionMessage,
+              ),
+        ),
+      );
+    }
+  });
+
   test('without stored routes nor engine it does not make a route up', () async {
     await expectLater(
       service(const [])

@@ -44,6 +44,11 @@ flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080
 Usuario de demostración (después de `make seed` en la raíz): `demo@maps.local`,
 con la contraseña definida en `SEED_DEMO_PASSWORD` del `.env`.
 
+Paradas: con un destino elegido, "Añadir parada" (en la tarjeta de destino o en
+el panel de la ruta, o manteniendo presionado el mapa) agrega hasta 23 paradas
+intermedias, numeradas en el mapa y visitadas en orden. Añadir o quitar una
+parada con la ruta en pantalla la calcula de nuevo.
+
 ## Pruebas y calidad
 
 ```bash
@@ -107,8 +112,8 @@ flutter build apk --release --dart-define=API_BASE_URL=https://maps.example.com
 flutter build ipa --release --dart-define=API_BASE_URL=https://maps.example.com
 ```
 
-## Atribución
+## Procedencia
 
-Datos del mapa © OpenStreetMap contributors (ODbL). La app muestra la
-atribución sobre el mapa en todo momento. Tipografías Noto Sans bajo SIL Open
-Font License (`assets/fonts/OFL.txt`).
+La cartografía proviene del catálogo auditable de fuentes oficiales de la
+plataforma. La app no muestra marcas de motores internos. Tipografías Noto Sans
+bajo SIL Open Font License (`assets/fonts/OFL.txt`).

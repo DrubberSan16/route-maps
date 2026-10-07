@@ -1,13 +1,36 @@
 {
-  "description": "Catalog of offline regions. A region is either downloaded from a legitimate OpenStreetMap extract provider (source.url) or clipped from its parent extract with a bounding box (source.parent + bbox, [minLng, minLat, maxLng, maxLat]). mapDir is the folder under storage/maps.",
+  "description": "Catalog of offline regions. Detailed Ecuador maps are built only from the audited native source catalog (source.nativeRegion). World is a public-domain low-zoom base map. mapDir is the folder under storage/maps. rasters sets the highest zoom of the relief (terrain) and satellite layers built with raster-data from the open sources of sources.json.",
   "regions": [
+    {
+      "code": "world",
+      "name": "Mundo",
+      "country": "ZZ",
+      "mapDir": "world",
+      "source": {
+        "naturalEarth": true
+      }
+    },
     {
       "code": "ecuador",
       "name": "Ecuador",
       "country": "EC",
       "mapDir": "ecuador",
+      "bbox": [
+        -92.1,
+        -5.1,
+        -75.1,
+        1.7
+      ],
       "source": {
-        "url": "https://download.geofabrik.de/south-america/ecuador-latest.osm.pbf"
+        "nativeRegion": "ecuador"
+      },
+      "rasters": {
+        "terrain": {
+          "maxZoom": 11
+        },
+        "satellite": {
+          "maxZoom": 12
+        }
       }
     },
     {
@@ -16,9 +39,22 @@
       "country": "EC",
       "province": "Guayas",
       "mapDir": "ecuador",
-      "bbox": [-80.65, -3.05, -79.2, -1.35],
+      "bbox": [
+        -80.65,
+        -3.05,
+        -79.2,
+        -1.35
+      ],
       "source": {
-        "parent": "ecuador"
+        "nativeRegion": "ecuador"
+      },
+      "rasters": {
+        "terrain": {
+          "maxZoom": 12
+        },
+        "satellite": {
+          "maxZoom": 13
+        }
       }
     },
     {
@@ -28,9 +64,22 @@
       "province": "Guayas",
       "city": "Guayaquil",
       "mapDir": "ecuador",
-      "bbox": [-80.1, -2.33, -79.78, -2.0],
+      "bbox": [
+        -80.1,
+        -2.33,
+        -79.78,
+        -2
+      ],
       "source": {
-        "parent": "ecuador"
+        "nativeRegion": "ecuador"
+      },
+      "rasters": {
+        "terrain": {
+          "maxZoom": 12
+        },
+        "satellite": {
+          "maxZoom": 14
+        }
       }
     },
     {
@@ -39,9 +88,22 @@
       "country": "EC",
       "province": "Pichincha",
       "mapDir": "ecuador",
-      "bbox": [-79.3, -0.85, -77.9, 0.35],
+      "bbox": [
+        -79.3,
+        -0.85,
+        -77.9,
+        0.35
+      ],
       "source": {
-        "parent": "ecuador"
+        "nativeRegion": "ecuador"
+      },
+      "rasters": {
+        "terrain": {
+          "maxZoom": 12
+        },
+        "satellite": {
+          "maxZoom": 13
+        }
       }
     },
     {
@@ -51,18 +113,22 @@
       "province": "Pichincha",
       "city": "Quito",
       "mapDir": "ecuador",
-      "bbox": [-78.62, -0.42, -78.3, 0.05],
+      "bbox": [
+        -78.62,
+        -0.42,
+        -78.3,
+        0.05
+      ],
       "source": {
-        "parent": "ecuador"
-      }
-    },
-    {
-      "code": "monaco",
-      "name": "Mónaco",
-      "country": "MC",
-      "mapDir": "europe",
-      "source": {
-        "url": "https://download.geofabrik.de/europe/monaco-latest.osm.pbf"
+        "nativeRegion": "ecuador"
+      },
+      "rasters": {
+        "terrain": {
+          "maxZoom": 12
+        },
+        "satellite": {
+          "maxZoom": 14
+        }
       }
     }
   ]

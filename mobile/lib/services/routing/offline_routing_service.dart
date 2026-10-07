@@ -48,17 +48,23 @@ class OfflineRoutingService implements RoutingService {
   /// Closer than this to the end of the stored route counts as arriving.
   static const _arrivalRadiusMeters = 30.0;
 
+  /// Offline answer for stops that no stored route passes through.
+  static const stopsNeedConnectionMessage =
+      'Sin conexión: una ruta con paradas necesita Internet, salvo que la hayas guardado antes.';
+
   @override
   Future<RouteResult> calculateRoute({
     required Coordinate origin,
     required Coordinate destination,
     required RoutingProfile profile,
+    List<Coordinate> waypoints = const [],
     bool alternatives = true,
   }) async {
     final stored = await matchStoredRoutes(
       origin: origin,
       destination: destination,
       profile: profile,
+      waypoints: waypoints,
     );
     if (stored.isNotEmpty) {
       final options = [
@@ -76,6 +82,10 @@ class OfflineRoutingService implements RoutingService {
         destination: destination,
       );
     }
+    if (waypoints.isNotEmpty) {
+      // On-device engines route between two points only.
+      throw const AppException(ErrorCodes.offlineRouteUnavailable, stopsNeedConnectionMessage);
+    }
     if (await _provider.canRoute(origin: origin, destination: destination, profile: profile)) {
       return _provider.calculateRoute(origin: origin, destination: destination, profile: profile);
     }
@@ -83,15 +93,17 @@ class OfflineRoutingService implements RoutingService {
   }
 
   /// Stored routes that cover the trip, best first (smallest detour to reach
-  /// and leave the route, then shortest time).
+  /// and leave the route, then shortest time). With [waypoints], the route must
+  /// also pass by every stop, in order, between the origin and the destination.
   Future<List<StoredRouteMatch>> matchStoredRoutes({
     required Coordinate origin,
     required Coordinate destination,
     required RoutingProfile profile,
+    List<Coordinate> waypoints = const [],
   }) async {
     final matches = <StoredRouteMatch>[];
     for (final route in await _savedRoutes.byProfile(profile)) {
-      final match = _match(route, origin, destination);
+      final match = _match(route, origin, destination, waypoints);
       if (match != null) matches.add(match);
     }
     matches.sort((a, b) {
@@ -103,18 +115,31 @@ class OfflineRoutingService implements RoutingService {
     return matches;
   }
 
-  StoredRouteMatch? _match(OfflineRoute route, Coordinate origin, Coordinate destination) {
+  StoredRouteMatch? _match(
+    OfflineRoute route,
+    Coordinate origin,
+    Coordinate destination,
+    List<Coordinate> waypoints,
+  ) {
     final line = route.geometry;
     if (line.length < 2) return null;
     // Cheap rejection before walking the geometry.
     final bbox = BoundingBox.around(line);
     if (!_nearBox(bbox, origin, originToleranceMeters) ||
-        !_nearBox(bbox, destination, destinationToleranceMeters)) {
+        !_nearBox(bbox, destination, destinationToleranceMeters) ||
+        !waypoints.every((stop) => _nearBox(bbox, stop, destinationToleranceMeters))) {
       return null;
     }
     final start = locateOnLine(line, origin);
     if (start.meters > originToleranceMeters) return null;
-    final end = locateOnLine(line, destination, after: start.position);
+    // Each stop further ahead than the previous one, like the destination.
+    var reached = start.position;
+    for (final stop in waypoints) {
+      final match = locateOnLine(line, stop, after: reached);
+      if (match.meters > destinationToleranceMeters) return null;
+      reached = match.position;
+    }
+    final end = locateOnLine(line, destination, after: reached);
     if (end.meters > destinationToleranceMeters) return null;
     if (end.position.compareTo(start.position) <= 0) return null;
 

@@ -213,6 +213,12 @@ void main() {
               """VALUES ('op-1', 'FINISH', 'trip', '{"id":"trip-1"}', """
               "'2026-09-01T09:00:00.000Z', 'PENDING')",
             )
+            ..execute(
+              "INSERT INTO catalog_regions VALUES ('guayaquil', 'Guayaquil', 'EC', NULL, NULL, "
+              "'2026.09.01', 1000, NULL, 'aa', NULL, -80.1, -2.35, -79.75, -1.95, 0, 14, "
+              "'/api/v1/maps/regions/guayaquil/download', NULL, '/maps/ec/guayaquil.pmtiles', "
+              "'2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')",
+            )
             ..userVersion = 1;
         },
       ),
@@ -232,5 +238,9 @@ void main() {
     expect((await trips.watchTrips().first).single.id, 'trip-1');
     expect(await queued('user-1'), ['trip:FINISH']);
     expect((await queue.byStatus(SyncStatus.pending, accountId: 'user-1')).single.id, 'op-1');
+    // The cached catalog stays; its extra layers arrive with the next refresh.
+    final catalog = await db.select(db.catalogRegions).get();
+    expect(catalog.single.code, 'guayaquil');
+    expect(catalog.single.assets, isNull);
   });
 }

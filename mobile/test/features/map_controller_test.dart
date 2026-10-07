@@ -21,17 +21,30 @@ const _port = Coordinate(43.7350, 7.4210);
 /// Routing whose answers the test releases one by one, in any order.
 class _PendingRouting implements RoutingService {
   final requests =
-      <({Coordinate destination, RoutingProfile profile, Completer<RouteResult> answer})>[];
+      <
+        ({
+          Coordinate destination,
+          List<Coordinate> waypoints,
+          RoutingProfile profile,
+          Completer<RouteResult> answer,
+        })
+      >[];
 
   @override
   Future<RouteResult> calculateRoute({
     required Coordinate origin,
     required Coordinate destination,
     required RoutingProfile profile,
+    List<Coordinate> waypoints = const [],
     bool alternatives = true,
   }) {
     final answer = Completer<RouteResult>();
-    requests.add((destination: destination, profile: profile, answer: answer));
+    requests.add((
+      destination: destination,
+      waypoints: waypoints,
+      profile: profile,
+      answer: answer,
+    ));
     return answer.future;
   }
 
@@ -158,6 +171,50 @@ void main() {
     await routing.answer(1);
     expect(state().route?.profile, RoutingProfile.pedestrian);
     expect(state().isRouting, isFalse);
+  });
+
+  test('stops go to the routing service in order and stay when the destination changes', () async {
+    controller().setDestination(_casino, label: 'Casino');
+    controller().addStop(_port, label: 'Puerto');
+    controller().addStop(_home, label: 'Casa');
+    await calculate();
+    expect(routing.requests.single.waypoints, [_port, _home]);
+
+    controller().setDestination(_home, label: 'Casa');
+    expect(state().stops, const [RouteStop(_port, 'Puerto'), RouteStop(_home, 'Casa')]);
+  });
+
+  test('adding or removing a stop with a route on screen calculates it again', () async {
+    controller().setDestination(_casino, label: 'Casino');
+    await calculate();
+    await routing.answer(0);
+    expect(state().route, isNotNull);
+
+    controller().addStop(_port, label: 'Puerto');
+    await pumpEventQueue();
+    expect(state().route, isNull);
+    expect(state().isRouting, isTrue);
+    expect(routing.requests.last.waypoints, [_port]);
+
+    await routing.answer(1);
+    expect(state().route, isNotNull);
+    controller().removeStop(0);
+    await pumpEventQueue();
+    expect(state().stops, isEmpty);
+    expect(routing.requests.last.waypoints, isEmpty);
+  });
+
+  test('a route admits a limited number of stops and closing it forgets them', () async {
+    controller().setDestination(_casino, label: 'Casino');
+    for (var i = 0; i < MapController.maxStops; i++) {
+      controller().addStop(_port, label: 'Parada $i');
+    }
+    controller().addStop(_home, label: 'Una más');
+    expect(state().stops, hasLength(MapController.maxStops));
+    expect(state().message, contains('hasta ${MapController.maxStops} paradas'));
+
+    controller().clearRoute();
+    expect(state().stops, isEmpty);
   });
 
   test('choosing another origin while calculating stops waiting for the old route', () async {

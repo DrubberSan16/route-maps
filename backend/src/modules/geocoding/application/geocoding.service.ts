@@ -41,14 +41,20 @@ export class GeocodingService {
   }
 
   private async cached<T>(kind: string, key: unknown, load: () => Promise<T>): Promise<T> {
-    const cacheKey = `geocode:v1:${kind}:${createHash('sha1')
-      .update(JSON.stringify(key))
+    // The data version keeps answers of a replaced index from being served for a day; the prefix
+    // changes with the ranking rules (v2: exact cities before streets and world namesakes).
+    const version = (await this.provider.dataVersion?.()) ?? '';
+    const cacheKey = `geocode:v2:${kind}:${createHash('sha1')
+      .update(JSON.stringify({ version, key }))
       .digest('hex')}`;
     const hit = await this.cache.get<T>(cacheKey);
     if (hit !== undefined) return hit;
     try {
       const value = await load();
-      await this.cache.set(cacheKey, value, this.config.get('geocoding').cacheTtlSeconds);
+      // Partial answers (a source is down) would hide the complete ones for a day.
+      if (!this.provider.degraded) {
+        await this.cache.set(cacheKey, value, this.config.get('geocoding').cacheTtlSeconds);
+      }
       return value;
     } catch (error) {
       if (error instanceof GeocodingUnavailableError) {

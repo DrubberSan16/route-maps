@@ -38,6 +38,10 @@ class CatalogRegions extends Table {
   DateTimeColumn get updatedAt => dateTime()();
   DateTimeColumn get fetchedAt => dateTime()();
 
+  /// Relief, satellite and overlay archives of the region (JSON array of the
+  /// API's `assets`); null in catalogs cached before they existed.
+  TextColumn get assets => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {code};
 }

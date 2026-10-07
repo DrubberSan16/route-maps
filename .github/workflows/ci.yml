@@ -74,10 +74,28 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: El estilo publicado es el que genera build-style.py
+        run: |
+          python3 infrastructure/maps/style/build-style.py
+          git diff --exit-code -- infrastructure/maps/style mobile/assets/map
       - name: La app usa el mismo estilo que el servidor
         run: cmp infrastructure/maps/style/style.json mobile/assets/map/style.json
+      - name: Visor web y SDK (sintaxis y pruebas)
+        run: |
+          for file in infrastructure/nginx/html/*.js infrastructure/nginx/html/sdk/*.js; do node --check "$file"; done
+          jq -e '.name and .start_url and (.icons | length >= 3)' infrastructure/nginx/html/manifest.webmanifest
+          node --test 'infrastructure/nginx/tests/*.test.mjs'
       - name: La app lleva los mismos glifos que sirve Nginx
         run: diff -r --exclude=README.md infrastructure/maps/fonts mobile/assets/fonts
+      - name: La app usa el logo y las miniaturas de tipo de mapa del visor
+        run: |
+          cmp infrastructure/nginx/html/icons/icon-192.png mobile/assets/images/logo.png
+          for type in map satellite relief; do
+            cmp "infrastructure/nginx/html/icons/map-type-$type.webp" "mobile/assets/images/map-type-$type.webp"
+          done
       - name: Catálogo de regiones válido
         run: jq -e '.regions | length > 0 and all(.code | test("^[a-z0-9][a-z0-9-]{1,62}$"))' infrastructure/regions/regions.json
       - name: Docker Compose válido (desarrollo y producción)
@@ -116,7 +134,25 @@ jobs:
           git diff --exit-code -- lib
       - run: flutter test
       - name: APK de release (firmado con la clave de depuración si no hay key.properties)
-        run: flutter build apk --release
+        # Apunta al servidor de producción (variable del repositorio API_BASE_URL).
+        run: >-
+          flutter build apk --release
+          --dart-define=API_BASE_URL=${{ vars.API_BASE_URL || 'https://route-map.softwareeasydev.com' }}
+      - name: El APK se publica para el botón «Instalar app» (versión leída del propio APK)
+        run: |
+          python3 ../infrastructure/scripts/publish-app.py build/app/outputs/flutter-apk/app-release.apk \
+            --storage "$RUNNER_TEMP/storage"
+          version="$(sed -n 's/^version: *\([^+]*\)+\(.*\)$/\1 \2/p' pubspec.yaml)"
+          jq -e --arg version "${version% *}" --argjson build "${version#* }" \
+            '.package == "com.mapsplatform.maps_platform" and .version == $version and .build == $build
+             and .minSdk >= 21 and (.url | startswith("/descargas/route-maps-"))' "$RUNNER_TEMP/storage/app/android.json"
+          cmp build/app/outputs/flutter-apk/app-release.apk "$RUNNER_TEMP/storage/app/route-maps.apk"
+      - name: Publicar el APK como artefacto
+        uses: actions/upload-artifact@v7
+        with:
+          name: maps-platform-apk
+          path: mobile/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14
 
   ios:
     name: App iOS (compilación sin firma)
@@ -136,33 +172,27 @@ jobs:
       - run: flutter build ios --release --no-codesign
 
   stack:
-    name: Stack Docker completo con Mónaco
+    # The national map data (INEC, several GB) is built on a workstation and published with
+    # infrastructure/scripts/publish-region.sh; CI checks the whole stack without map data and
+    # without downloading anything from third-party map services.
+    name: Stack Docker completo (sin datos cartográficos)
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
-      - name: Crear .env con secretos aleatorios, Mónaco y Nominatim
-        run: |
-          make init
-          sed -i -e 's/^ROUTING_REGION=.*/ROUTING_REGION=monaco/' \
-            -e 's/^NOMINATIM_REGION=.*/NOMINATIM_REGION=monaco/' \
-            -e 's/^GEOCODING_PROVIDER=.*/GEOCODING_PROVIDER=nominatim/' \
-            -e 's/^GEOCODING_COUNTRY_CODES=.*/GEOCODING_COUNTRY_CODES=mc/' .env
+      - name: Crear .env con secretos aleatorios
+        run: make init
       - name: Construir y levantar el stack
         run: make up
-      - name: Preparar Mónaco (extracto de Geofabrik, mapa, routing y registro)
-        run: make prepare-region REGION=monaco
-      - name: Importar Mónaco en Nominatim
-        run: make geocoding-up
       - name: Esperar a que todos los servicios estén sanos
-        run: docker compose --profile geocoding up -d --wait --wait-timeout 900
-      - name: Prueba de humo a través de Nginx
-        run: REGION=monaco ./infrastructure/scripts/smoke-test.sh http://localhost:8080
+        run: docker compose up -d --wait --wait-timeout 600
+      - name: Prueba de humo a través de Nginx (sin regiones preparadas)
+        run: ALLOW_NO_REGION=1 ./infrastructure/scripts/smoke-test.sh http://localhost:8080
       - name: Estado y logs de los servicios
         if: failure()
         run: |
-          docker compose --profile geocoding ps
-          docker compose --profile geocoding logs --no-color --tail=300
+          docker compose ps
+          docker compose logs --no-color --tail=300
       - name: Apagar el stack
         if: always()
-        run: docker compose --profile geocoding down -v
+        run: docker compose down -v

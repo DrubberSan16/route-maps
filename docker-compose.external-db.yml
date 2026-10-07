@@ -1,0 +1,33 @@
+# Maps Platform - external PostgreSQL + PostGIS (another server or a managed
+# database) instead of the postgres container.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#     -f docker-compose.external-db.yml up -d
+#
+# .env: DATABASE_HOST (reachable from the Docker host, e.g. over a VPN),
+# DATABASE_PORT, DATABASE_NAME, DATABASE_USER, DATABASE_PASSWORD and
+# DATABASE_SSLMODE:
+#   require  TLS without certificate checks (default: self-signed server
+#            certificates, links already inside a private network or VPN)
+#   disable  plain TCP
+# The database needs the postgis extension: create it once as a superuser
+# (CREATE EXTENSION postgis) when the application user may not.
+services:
+  postgres:
+    # Not started: the backend uses DATABASE_HOST.
+    profiles: [local-db]
+
+  backend:
+    environment:
+      # uselibpqcompat: node-postgres gives sslmode its libpq meaning (require =
+      # encrypt without verifying); Prisma migrations read the same URL.
+      DATABASE_URL: postgresql://${DATABASE_USER:?Set DATABASE_USER in .env}:${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}@${DATABASE_HOST:?Set DATABASE_HOST in .env}:${DATABASE_PORT:-5432}/${DATABASE_NAME:?Set DATABASE_NAME in .env}?schema=public&sslmode=${DATABASE_SSLMODE:-require}&uselibpqcompat=true
+    depends_on: !override
+      redis:
+        condition: service_healthy
+    # maps-network has no route out of the host; the database is reached
+    # through a regular bridge network.
+    networks: [maps-network, database]
+
+networks:
+  database: {}

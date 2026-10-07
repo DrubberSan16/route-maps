@@ -2,39 +2,241 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Visor de mapas · Maps Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Route Maps</title>
+  <meta name="description" content="Mapas, rutas, relieve, satélite y tráfico con datos propios.">
+  <meta name="theme-color" content="#2563eb">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="apple-mobile-web-app-title" content="Route Maps">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <!-- Everything the first map frame needs starts downloading now, in parallel, instead of one file
+       after the other: the map library, the viewer modules, the style and the list of regions. -->
+  <link rel="modulepreload" href="vendor/maplibre-gl.mjs">
+  <link rel="modulepreload" href="vendor/maplibre-gl-shared.mjs">
+  <link rel="modulepreload" href="viewer.js">
+  <link rel="modulepreload" href="sdk/map-style.js">
+  <link rel="modulepreload" href="sdk/map-icons.js">
+  <link rel="preload" href="/maps/style/style.json" as="fetch" crossorigin>
+  <link rel="preload" href="/api/v1/maps/regions" as="fetch" crossorigin>
+  <link rel="preload" href="vendor/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="vendor/maplibre-gl.css">
   <link rel="stylesheet" href="viewer.css">
 </head>
 <body>
-  <aside class="panel" aria-label="Controles">
-    <h1>Visor de mapas</h1>
-    <p class="hint">Herramienta de desarrollo: muestra las regiones preparadas con el estilo propio y
-      calcula rutas con la API. La app para usuarios es la aplicación Flutter.</p>
+  <a class="skip-link" href="#map">Saltar al mapa</a>
 
-    <label for="region">Región</label>
-    <select id="region" disabled><option>Cargando…</option></select>
-    <p id="region-info" class="muted"></p>
+  <main class="map" id="map" aria-label="Mapa" tabindex="-1"></main>
+  <p class="map-loading" id="map-loading" role="status"><span class="spinner" aria-hidden="true"></span>Cargando el mapa…</p>
 
-    <label for="profile">Perfil de ruta</label>
-    <select id="profile">
-      <option value="CAR">Auto</option>
-      <option value="TRUCK">Camión</option>
-      <option value="MOTORCYCLE">Moto</option>
-      <option value="BICYCLE">Bicicleta</option>
-      <option value="PEDESTRIAN">Peatón</option>
-    </select>
+  <div class="ui">
+    <header class="searchbar" role="search">
+      <button class="icon-button searchbar__button" type="button" id="open-menu" aria-label="Menú"
+        aria-haspopup="dialog" aria-controls="menu">
+        <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-menu"/></svg>
+      </button>
+      <div class="combobox searchbar__field">
+        <label class="sr-only" for="search-input">Buscar un lugar, una dirección o un país</label>
+        <input id="search-input" class="searchbar__input" type="search" autocomplete="off" spellcheck="false"
+          placeholder="Buscar en Route Maps" role="combobox" aria-autocomplete="list"
+          aria-expanded="false" aria-controls="search-results">
+        <ul class="listbox" id="search-results" role="listbox" aria-label="Sugerencias de búsqueda" hidden></ul>
+      </div>
+      <button class="icon-button searchbar__button searchbar__button--primary" type="button" id="open-directions"
+        aria-label="Cómo llegar" title="Cómo llegar">
+        <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-directions"/></svg>
+      </button>
+    </header>
 
-    <p class="hint">Haz clic en el mapa para marcar el <strong>origen</strong> y luego el
-      <strong>destino</strong>.</p>
-    <button id="clear" type="button">Limpiar ruta</button>
+    <section class="sheet" id="sheet" aria-label="Lugar e indicaciones" hidden>
+      <button class="sheet__handle" type="button" id="sheet-toggle" aria-label="Minimizar el panel"
+        aria-expanded="true" aria-controls="sheet-body"><span aria-hidden="true"></span></button>
+      <div class="sheet__body" id="sheet-body">
+        <p class="status status--error app-status" id="app-status" role="alert" hidden></p>
 
-    <div id="status" role="status" aria-live="polite"></div>
-    <ol id="routes"></ol>
-    <ol id="steps"></ol>
-  </aside>
-  <main id="map" aria-label="Mapa"></main>
+        <section class="place-card" id="place-card" aria-labelledby="place-name" hidden>
+          <div class="place-card__header">
+            <div class="place-card__heading">
+              <h2 class="place-card__title" id="place-name"></h2>
+              <p class="place-card__detail" id="place-detail"></p>
+            </div>
+            <button class="icon-button" type="button" id="place-close" aria-label="Cerrar lugar">
+              <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-x"/></svg>
+            </button>
+          </div>
+          <div class="actions">
+            <button class="btn btn--primary" type="button" id="place-to">
+              <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-directions"/></svg>Cómo llegar
+            </button>
+            <button class="btn btn--secondary" type="button" id="place-from">
+              <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-origin"/></svg>Salir desde aquí
+            </button>
+            <button class="btn btn--secondary" type="button" id="place-stop" hidden>
+              <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-plus"/></svg>Añadir como parada
+            </button>
+          </div>
+        </section>
+
+        <section class="directions" id="directions" aria-labelledby="directions-title" hidden>
+          <div class="directions__header">
+            <h2 class="section-title" id="directions-title">Cómo llegar</h2>
+            <button class="icon-button" type="button" id="close-directions" aria-label="Cerrar indicaciones">
+              <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-x"/></svg>
+            </button>
+          </div>
+
+          <fieldset class="profiles" id="profiles">
+            <legend class="sr-only">Medio de transporte</legend>
+          </fieldset>
+
+          <ol class="stops" id="stops" aria-label="Puntos de la ruta"></ol>
+
+          <div class="stops__toolbar">
+            <button class="btn btn--ghost" type="button" id="add-stop">
+              <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-plus"/></svg>Añadir parada
+            </button>
+            <button class="btn btn--ghost" type="button" id="swap-stops">
+              <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-swap"/></svg>Invertir
+            </button>
+          </div>
+          <p class="hint" id="directions-hint">Escribe un lugar o toca el mapa para completar el campo resaltado.
+            Puedes arrastrar los marcadores para ajustar la ruta.</p>
+
+          <div class="status" id="route-status" role="status" aria-live="polite"></div>
+          <fieldset class="routes" id="routes" hidden>
+            <legend class="sr-only">Rutas encontradas</legend>
+            <div class="routes__list" id="routes-list"></div>
+          </fieldset>
+          <details class="steps" id="steps-details" hidden>
+            <summary>Indicaciones paso a paso</summary>
+            <ol class="steps__list" id="steps"></ol>
+          </details>
+        </section>
+      </div>
+    </section>
+  </div>
+
+  <div class="map-notice" id="map-notice" role="status" hidden></div>
+  <div class="traffic-legend" id="traffic-legend" hidden>
+    <span class="traffic-legend__title">Tráfico</span>
+    <span>Fluido</span>
+    <span class="traffic-legend__scale" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+    <span>Detenido</span>
+  </div>
+
+  <dialog class="drawer" id="menu" aria-labelledby="menu-title">
+    <div class="drawer__header">
+      <img class="drawer__logo" src="icons/icon.svg" width="40" height="40" alt="">
+      <h1 class="brand" id="menu-title">Route Maps</h1>
+      <button class="icon-button" type="button" data-close aria-label="Cerrar el menú">
+        <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-x"/></svg>
+      </button>
+    </div>
+    <nav class="drawer__nav" aria-label="Menú principal">
+      <button class="drawer__item drawer__item--accent" type="button" id="menu-install">
+        <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-download"/></svg>
+        <span>Instalar la app<small>Android (APK) o desde el navegador</small></span>
+      </button>
+      <a class="drawer__item" href="/developers.html">
+        <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-code"/></svg>
+        <span>Integrar en otra aplicación</span>
+      </a>
+      <a class="drawer__item" href="/api/docs" target="_blank" rel="noopener">
+        <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-book"/></svg>
+        <span>API (Swagger)</span>
+      </a>
+      <a class="drawer__item" href="/fuentes.html">
+        <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-info"/></svg>
+        <span>Fuentes de datos</span>
+      </a>
+    </nav>
+    <section class="coverage" aria-labelledby="coverage-title">
+      <h2 class="drawer__section" id="coverage-title">Mapas disponibles</h2>
+      <ul class="coverage__list" id="coverage-list"></ul>
+      <p class="hint">El mapa base mundial muestra países, ciudades y carreteras principales hasta el zoom 7.
+        Las regiones preparadas añaden calles, rutas y direcciones.</p>
+    </section>
+  </dialog>
+
+  <dialog class="dialog install" id="install" aria-labelledby="install-title">
+    <div class="dialog__header">
+      <img src="icons/icon.svg" width="48" height="48" alt="">
+      <div class="dialog__heading">
+        <h2 class="dialog__title" id="install-title">Instala Route Maps</h2>
+        <p class="hint">Tus mapas y rutas a un toque, desde la pantalla de inicio.</p>
+      </div>
+      <button class="icon-button" type="button" data-close aria-label="Cerrar">
+        <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-x"/></svg>
+      </button>
+    </div>
+    <p class="install__done" id="install-done" hidden>
+      <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-check"/></svg>
+      Ya estás usando Route Maps instalada.
+    </p>
+    <section class="install__option" id="install-android" aria-labelledby="install-android-title">
+      <span class="install__icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><use href="#i-smartphone"/></svg></span>
+      <div class="install__text">
+        <h3 id="install-android-title">App para Android</h3>
+        <p id="install-android-detail">Mapas sin conexión, recorridos y rutas guardadas.</p>
+      </div>
+      <a class="btn btn--primary install__action" id="install-apk" href="/descargas/route-maps.apk" download hidden>
+        <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-download"/></svg>Descargar APK
+      </a>
+      <p class="install__note" id="install-android-note">Si Android lo pide, permite instalar apps de este origen.</p>
+    </section>
+    <section class="install__option" id="install-web" aria-labelledby="install-web-title">
+      <span class="install__icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><use href="#i-app"/></svg></span>
+      <div class="install__text">
+        <h3 id="install-web-title">Desde el navegador</h3>
+        <p>Sin descargas ni tiendas: se agrega a la pantalla de inicio y abre a pantalla completa.</p>
+      </div>
+      <button class="btn btn--secondary install__action" type="button" id="install-pwa" hidden>
+        <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-plus"/></svg>Instalar
+      </button>
+      <p class="install__note" id="install-web-note"></p>
+    </section>
+  </dialog>
+
+  <!-- Icons (stroke icons in the style of Lucide, 24x24). -->
+  <svg class="sr-only" aria-hidden="true" focusable="false">
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></symbol>
+    <symbol id="i-directions" viewBox="0 0 24 24"><path d="M10.6 2.6a2 2 0 0 1 2.8 0l8 8a2 2 0 0 1 0 2.8l-8 8a2 2 0 0 1-2.8 0l-8-8a2 2 0 0 1 0-2.8Z"/><path d="M9 14v-2a2 2 0 0 1 2-2h4"/><path d="m13 7 3 3-3 3"/></symbol>
+    <symbol id="i-origin" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3"/><path d="M12 19v3"/><path d="M2 12h3"/><path d="M19 12h3"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M20 10c0 5-5.5 10.2-7.4 11.8a1 1 0 0 1-1.2 0C9.5 20.2 4 15 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+    <symbol id="i-city" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01M12 6h.01M16 6h.01M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01"/></symbol>
+    <symbol id="i-car" viewBox="0 0 24 24"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><path d="M9 17h6"/><circle cx="17" cy="17" r="2"/></symbol>
+    <symbol id="i-truck" viewBox="0 0 24 24"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></symbol>
+    <symbol id="i-moto" viewBox="0 0 24 24"><circle cx="5" cy="17" r="3"/><circle cx="19" cy="17" r="3"/><path d="M8 17h6l3-6h-5"/><path d="M12 11 9.5 7H7"/><path d="m17 11 2 6"/></symbol>
+    <symbol id="i-bike" viewBox="0 0 24 24"><circle cx="18.5" cy="17.5" r="3.5"/><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="15" cy="5" r="1"/><path d="M12 17.5V14l-3-3 4-3 2 3h2"/></symbol>
+    <symbol id="i-walk" viewBox="0 0 24 24"><circle cx="13" cy="4" r="2"/><path d="m9 21 2.5-5.5L14 18v3"/><path d="M11.5 15.5 12 10l-3 2v3"/><path d="m12 10 3 2.5 2.5 1"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7Z"/><path d="m2 12 10 5 10-5"/><path d="m2 17 10 5 10-5"/></symbol>
+    <symbol id="i-map" viewBox="0 0 24 24"><path d="M14.1 5.9 9.9 3.8a2 2 0 0 0-1.8 0L3.6 6A1 1 0 0 0 3 7v12.8a.8.8 0 0 0 1.2.7l3.9-2a2 2 0 0 1 1.8 0l4.2 2.1a2 2 0 0 0 1.8 0l4.5-2.2a1 1 0 0 0 .6-.9V4.7a.8.8 0 0 0-1.2-.7l-3.9 2a2 2 0 0 1-1.8 0"/><path d="M15 5.8v15"/><path d="M9 3.2v15"/></symbol>
+    <symbol id="i-traffic" viewBox="0 0 24 24"><rect x="8" y="2" width="8" height="20" rx="3"/><circle cx="12" cy="7" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="17" r="1.5"/></symbol>
+    <symbol id="i-rain" viewBox="0 0 24 24"><path d="M20 14.9A5 5 0 0 0 17.5 5h-1.3A8 8 0 1 0 4 13.3"/><path d="M8 19v2"/><path d="M8 13v2"/><path d="M12 21v2"/><path d="M12 15v2"/><path d="M16 19v2"/><path d="M16 13v2"/></symbol>
+    <symbol id="i-thermometer" viewBox="0 0 24 24"><path d="M14 4v10.5a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/></symbol>
+    <symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 22a7 7 0 0 0 7-7c0-3.5-2.4-5.9-4-8-.6 2.3-1.8 3.5-3.5 4.1.6-2.9 0-6.4-2.9-8.6 0 4.1-3.6 7-3.6 12.5a7 7 0 0 0 7 7Z"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="m7 10 5 5 5-5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></symbol>
+    <symbol id="i-smartphone" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></symbol>
+    <symbol id="i-app" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7"/><path d="M14 17.5h7"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m8 7 4-4 4 4"/><path d="M8 11H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-2"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+  </svg>
+
   <script src="vendor/pmtiles.js"></script>
   <script type="module" src="viewer.js"></script>
 </body>

@@ -12,6 +12,7 @@ import 'package:maps_platform/domain/entities/sync.dart';
 import 'package:maps_platform/domain/entities/user.dart';
 import 'package:maps_platform/domain/repositories/auth_repository.dart';
 import 'package:maps_platform/domain/repositories/saved_route_repository.dart';
+import 'package:maps_platform/domain/repositories/settings_repository.dart';
 import 'package:maps_platform/domain/services/connectivity_service.dart';
 import 'package:maps_platform/domain/services/location_service.dart';
 import 'package:maps_platform/domain/services/synchronization_service.dart';
@@ -139,6 +140,25 @@ class InMemorySavedRouteRepository implements SavedRouteRepository {
     required List<OfflineRoute> routes,
     required List<String> deletedIds,
   }) async {}
+}
+
+/// Settings kept in memory.
+class InMemorySettingsRepository implements SettingsRepository {
+  InMemorySettingsRepository([Map<String, String> values = const {}]) : values = {...values};
+
+  final Map<String, String> values;
+
+  @override
+  Future<String?> read(String key) async => values[key];
+
+  @override
+  Future<void> write(String key, String value) async => values[key] = value;
+
+  @override
+  Future<void> remove(String key) async => values.remove(key);
+
+  @override
+  Future<String> installationId() async => values.putIfAbsent('installation.id', () => 'device-1');
 }
 
 class MemorySessionStore implements SessionStore {

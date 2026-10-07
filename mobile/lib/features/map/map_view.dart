@@ -1,13 +1,15 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:math' show Point;
+import 'dart:math' show Point, log, ln2;
 
+import 'package:flutter/foundation.dart' show listEquals, setEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 
 import '../../domain/entities/coordinate.dart';
 import '../../domain/entities/position.dart';
+import '../../services/map/map_style_service.dart';
+import 'poi_icons.dart';
 
 /// Camera movements requested by the screen.
 sealed class CameraCommand {
@@ -42,7 +44,12 @@ class MapViewProps {
     this.routes = const [],
     this.selectedRoute = 0,
     this.origin,
+    this.stops = const [],
     this.destination,
+    this.trafficVisible = false,
+    this.trafficFlow,
+    this.overlays = const {},
+    this.onCameraIdle,
   });
 
   /// MapLibre style JSON.
@@ -60,7 +67,22 @@ class MapViewProps {
   final List<List<Coordinate>> routes;
   final int selectedRoute;
   final Coordinate? origin;
+
+  /// Stops between the origin and the destination, drawn numbered in order.
+  final List<Coordinate> stops;
   final Coordinate? destination;
+
+  /// Shows the traffic: the main roads of the map and [trafficFlow] on top.
+  final bool trafficVisible;
+
+  /// Measured road segments (GeoJSON FeatureCollection of `GET /traffic/flow`).
+  final Map<String, Object?>? trafficFlow;
+
+  /// Overlays of the style shown (`precipitation`, `temperature`, `population`).
+  final Set<String> overlays;
+
+  /// The map stopped moving with these bounds at this zoom (estimated).
+  final void Function(BoundingBox bounds, double zoom)? onCameraIdle;
 }
 
 typedef MapViewBuilder = Widget Function(BuildContext context, MapViewProps props);
@@ -90,15 +112,21 @@ class _MapLibreViewState extends State<MapLibreView> {
   static const _selectedLayer = 'app-route-selected';
   static const _originLayer = 'app-origin';
   static const _destinationLayer = 'app-destination';
+  static const _stopLayer = 'app-stop';
+  static const _stopLabelLayer = 'app-stop-label';
+
+  static const _emptyCollection = {'type': 'FeatureCollection', 'features': <Object?>[]};
 
   MapLibreMapController? _controller;
   StreamSubscription<CameraCommand>? _commands;
   bool _styleReady = false;
+  late MapStyleLayers _layers;
 
   @override
   void initState() {
     super.initState();
     _commands = widget.props.cameraCommands.listen(_moveCamera);
+    _layers = MapStyleLayers.of(widget.props.style);
   }
 
   @override
@@ -112,13 +140,19 @@ class _MapLibreViewState extends State<MapLibreView> {
     if (old.style != props.style) {
       // MapLibre reloads the style; layers are added again when it is ready.
       _styleReady = false;
+      _layers = MapStyleLayers.of(props.style);
       return;
     }
     if (!_styleReady) return;
+    if (old.trafficVisible != props.trafficVisible) unawaited(_showTraffic());
+    if (!identical(old.trafficFlow, props.trafficFlow)) unawaited(_setTrafficFlow());
+    if (!setEquals(old.overlays, props.overlays)) unawaited(_showOverlays());
     if (!identical(old.routes, props.routes) || old.selectedRoute != props.selectedRoute) {
       unawaited(_controller?.setGeoJsonSource(_routesSource, _routesGeoJson()));
     }
-    if (old.origin != props.origin || old.destination != props.destination) {
+    if (old.origin != props.origin ||
+        old.destination != props.destination ||
+        !listEquals(old.stops, props.stops)) {
       unawaited(_controller?.setGeoJsonSource(_markersSource, _markersGeoJson()));
     }
     if (old.userPosition != props.userPosition) _pushLocation();
@@ -145,6 +179,7 @@ class _MapLibreViewState extends State<MapLibreView> {
         controller.onFeatureTapped.add(_onFeatureTapped);
       },
       onStyleLoadedCallback: _onStyleLoaded,
+      onCameraIdle: _reportView,
       onMapLongClick: (_, latLng) =>
           props.onLongPress(Coordinate(latLng.latitude, latLng.longitude)),
       myLocationEnabled: true,
@@ -158,14 +193,15 @@ class _MapLibreViewState extends State<MapLibreView> {
   Future<void> _onStyleLoaded() async {
     final controller = _controller;
     if (controller == null) return;
-    final below = _firstSymbolLayer(widget.props.style);
+    final below = _layers.firstSymbol;
+    // Routes and markers in the colours of the web viewer (viewer.css).
     await controller.addGeoJsonSource(_routesSource, _routesGeoJson());
     await controller.addGeoJsonSource(_markersSource, _markersGeoJson());
     await controller.addLineLayer(
       _routesSource,
       _alternativeLayer,
       const LineLayerProperties(
-        lineColor: '#8A94A6',
+        lineColor: '#7FA3E8',
         lineWidth: 5,
         lineOpacity: 0.9,
         lineJoin: 'round',
@@ -191,7 +227,7 @@ class _MapLibreViewState extends State<MapLibreView> {
       _routesSource,
       _selectedLayer,
       const LineLayerProperties(
-        lineColor: '#1A73E8',
+        lineColor: '#2563EB',
         lineWidth: 6,
         lineJoin: 'round',
         lineCap: 'round',
@@ -204,7 +240,7 @@ class _MapLibreViewState extends State<MapLibreView> {
       _originLayer,
       const CircleLayerProperties(
         circleRadius: 7,
-        circleColor: '#188038',
+        circleColor: '#047857',
         circleStrokeColor: '#FFFFFF',
         circleStrokeWidth: 3,
       ),
@@ -216,15 +252,102 @@ class _MapLibreViewState extends State<MapLibreView> {
       _destinationLayer,
       const CircleLayerProperties(
         circleRadius: 9,
-        circleColor: '#D93025',
+        circleColor: '#DC2626',
         circleStrokeColor: '#FFFFFF',
         circleStrokeWidth: 3,
       ),
       filter: ['==', 'kind', 'destination'],
       enableInteraction: false,
     );
+    await controller.addCircleLayer(
+      _markersSource,
+      _stopLayer,
+      const CircleLayerProperties(
+        circleRadius: 10,
+        circleColor: '#2563EB',
+        circleStrokeColor: '#FFFFFF',
+        circleStrokeWidth: 2,
+      ),
+      filter: ['==', 'kind', 'stop'],
+      enableInteraction: false,
+    );
+    await controller.addSymbolLayer(
+      _markersSource,
+      _stopLabelLayer,
+      const SymbolLayerProperties(
+        textField: [Expressions.get, 'label'],
+        textFont: ['Noto Sans Medium'],
+        textSize: 12,
+        textColor: '#FFFFFF',
+        textAllowOverlap: true,
+        textIgnorePlacement: true,
+      ),
+      filter: ['==', 'kind', 'stop'],
+      enableInteraction: false,
+    );
     _styleReady = true;
     _pushLocation();
+    await Future.wait([_showTraffic(), _setTrafficFlow(), _showOverlays()]);
+    unawaited(_reportView());
+    await _addPoiIcons(controller);
+  }
+
+  /// Traffic and overlays are hidden in the style: shown here, without reloading it.
+  Future<void> _showTraffic() => _setVisible(_layers.traffic, widget.props.trafficVisible);
+
+  Future<void> _showOverlays() => Future.wait([
+    for (final MapEntry(key: kind, value: ids) in _layers.overlays.entries)
+      _setVisible(ids, widget.props.overlays.contains(kind)),
+  ]);
+
+  Future<void> _setVisible(List<String> layerIds, bool visible) async {
+    final controller = _controller;
+    if (controller == null || !_styleReady) return;
+    for (final id in layerIds) {
+      await controller.setLayerVisibility(id, visible);
+    }
+  }
+
+  Future<void> _setTrafficFlow() async {
+    final controller = _controller;
+    if (controller == null || !_styleReady || _layers.traffic.isEmpty) return;
+    await controller.setGeoJsonSource(
+      MapStyleService.trafficSource,
+      widget.props.trafficFlow ?? _emptyCollection,
+    );
+  }
+
+  /// Draws the icon of every point of interest class of the style (they are
+  /// part of the style, so again after each reload).
+  Future<void> _addPoiIcons(MapLibreMapController controller) async {
+    final ratio = MediaQuery.devicePixelRatioOf(context);
+    final style = widget.props.style;
+    for (final MapEntry(key: poiClass, value: color) in _layers.poiColors.entries) {
+      if (poiClass == 'default') continue;
+      final png = await PoiIcons.png(poiClass, color, ratio);
+      if (!mounted || widget.props.style != style || !_styleReady) return;
+      await controller.addImage('poi-$poiClass', png);
+    }
+  }
+
+  /// Tells the screen which area is visible (for the traffic of that area).
+  Future<void> _reportView() async {
+    final controller = _controller;
+    final callback = widget.props.onCameraIdle;
+    if (controller == null || callback == null) return;
+    final region = await controller.getVisibleRegion();
+    if (!mounted) return;
+    final bounds = BoundingBox(
+      west: region.southwest.longitude,
+      south: region.southwest.latitude,
+      east: region.northeast.longitude,
+      north: region.northeast.latitude,
+    );
+    // Zoom from the visible width (512-point tiles) instead of tracking every camera move.
+    final width = context.size?.width ?? 360;
+    final span = bounds.east - bounds.west;
+    final zoom = span > 0 ? log(360 * width / (512 * span)) / ln2 : 0.0;
+    callback(bounds, zoom);
   }
 
   void _onFeatureTapped(
@@ -310,28 +433,20 @@ class _MapLibreViewState extends State<MapLibreView> {
 
   Map<String, dynamic> _markersGeoJson() {
     final props = widget.props;
-    Map<String, dynamic> marker(String kind, Coordinate point) => {
+    Map<String, dynamic> marker(String kind, Coordinate point, {String id = '', String? label}) => {
       'type': 'Feature',
-      'id': kind,
-      'properties': {'kind': kind},
+      'id': id.isEmpty ? kind : id,
+      'properties': {'kind': kind, 'label': ?label},
       'geometry': {'type': 'Point', 'coordinates': point.toLngLat()},
     };
     return {
       'type': 'FeatureCollection',
       'features': [
         if (props.origin != null) marker('origin', props.origin!),
+        for (var i = 0; i < props.stops.length; i++)
+          marker('stop', props.stops[i], id: 'stop-${i + 1}', label: '${i + 1}'),
         if (props.destination != null) marker('destination', props.destination!),
       ],
     };
-  }
-
-  /// Route lines go below the first label layer so street names stay readable.
-  static String? _firstSymbolLayer(String style) {
-    final layers = (jsonDecode(style) as Map<String, Object?>)['layers'] as List<Object?>?;
-    for (final layer in layers ?? const <Object?>[]) {
-      final json = layer! as Map<String, Object?>;
-      if (json['type'] == 'symbol') return json['id'] as String?;
-    }
-    return null;
   }
 }

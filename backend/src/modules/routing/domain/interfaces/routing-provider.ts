@@ -8,6 +8,8 @@ import { RoutingProfile } from '../value-objects/routing-profile';
  */
 export interface RoutingProvider {
   readonly name: string;
+  /** Version of the road data; part of the cache key, so a new graph is never hidden. */
+  dataVersion?(): Promise<string>;
   supportedProfiles(): RoutingProfile[];
   calculateRoute(input: CalculateRouteInput): Promise<RouteCalculation>;
   health(): Promise<'up' | 'down'>;

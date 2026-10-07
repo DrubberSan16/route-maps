@@ -68,7 +68,7 @@ export function configureApp(app: NestExpressApplication): void {
         .setTitle('Maps Platform API')
         .setDescription(
           'API propia de mapas, regiones offline, routing, geocodificación, tracking, ' +
-            'geocercas y sincronización. Datos © OpenStreetMap contributors (ODbL).',
+            'geocercas, tráfico, clima y sincronización, servidos desde esta instalación.',
         )
         .setVersion('1.0')
         .addBearerAuth()

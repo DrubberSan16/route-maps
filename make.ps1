@@ -6,6 +6,7 @@
   .\make.ps1 up
   .\make.ps1 prepare-region -Region guayaquil
   .\make.ps1 logs -Service backend
+  .\make.ps1 publish-app -Server ovh-serverSoft
   .\make.ps1 help
 #>
 [CmdletBinding()]
@@ -14,6 +15,9 @@ param(
   [string]$Command = 'help',
   [string]$Region = '',
   [string]$Service = '',
+  [string]$Apk = '',
+  [string]$Server = '',
+  [string]$RemoteDir = '',
   [switch]$SkipRouting,
   [switch]$WaterPolygons,
   [switch]$ForceDownload
@@ -29,6 +33,18 @@ function Invoke-Docker {
   if ($LASTEXITCODE -ne 0) { throw "docker $($filtered -join ' ') failed (exit code $LASTEXITCODE)." }
 }
 
+# Python 3 for the helper scripts: the py launcher of python.org first (on a Windows without Python,
+# "python" only opens the Microsoft Store).
+function Get-Python {
+  foreach ($candidate in @(@('py', '-3'), @('python'), @('python3'))) {
+    if (-not (Get-Command $candidate[0] -ErrorAction SilentlyContinue)) { continue }
+    $rest = @($candidate | Select-Object -Skip 1)
+    & $candidate[0] @rest --version *> $null
+    if ($LASTEXITCODE -eq 0) { return , $candidate }
+  }
+  throw 'Falta Python 3: instálalo desde python.org (o con winget install Python.Python.3.13).'
+}
+
 function Assert-Region {
   if ($Region -notmatch '^[a-z0-9][a-z0-9-]{1,62}$') {
     throw "Uso: .\make.ps1 $Command -Region <código> (ver: .\make.ps1 regions)"
@@ -42,7 +58,7 @@ $backendRun = @('compose', 'run', '--rm', '-e', 'RUN_MIGRATIONS=false', '-e', 'S
 $commands = [ordered]@{
   'help'            = 'Muestra esta ayuda'
   'init'            = 'Crea .env desde .env.example con secretos aleatorios'
-  'up'              = 'Construye y levanta nginx, backend, postgres, redis y routing'
+  'up'              = 'Construye y levanta nginx, backend, postgres y redis'
   'down'            = 'Detiene el stack (conserva volúmenes y .\storage)'
   'restart'         = 'Reinicia un servicio (-Service backend) o todo el stack'
   'ps'              = 'Estado y salud de los servicios'
@@ -53,11 +69,12 @@ $commands = [ordered]@{
   'seed'            = 'Carga usuarios y datos de demostración (idempotente)'
   'regions'         = 'Lista las regiones del catálogo y lo ya generado'
   'regions-sync'    = 'Registra en el backend las regiones preparadas'
-  'download-region' = 'Descarga (o recorta) el extracto OSM: -Region guayaquil'
+  'download-region' = 'Descarga las fuentes oficiales auditadas: -Region ecuador'
   'build-map'       = 'Genera el mapa PMTiles de una región descargada (-WaterPolygons: océanos)'
-  'build-routing'   = 'Genera el grafo de routing Valhalla de una región descargada'
-  'prepare-region'  = 'Descarga + mapa + routing + manifiesto + registro: -Region guayaquil'
-  'geocoding-up'    = 'Levanta Nominatim (la primera vez importa el extracto de NOMINATIM_REGION)'
+  'build-routing'   = 'Construye grafo de rutas, índice de búsqueda y capas nativas'
+  'prepare-region'  = 'Descarga + mapa + manifiesto + registro: -Region ecuador'
+  'publish-app'     = 'Publica el APK para el botón «Instalar app»: [-Apk ruta] [-Server servidor-ssh] [-RemoteDir /opt/route-maps]'
+  'geocoding-up'    = 'Informa sobre la geocodificación nativa integrada'
   'prod-up'         = 'Producción: construye y levanta con docker-compose.prod.yml'
   'prod-down'       = 'Producción: detiene el stack'
   'prod-logs'       = 'Producción: sigue los logs'
@@ -95,14 +112,24 @@ switch ($Command) {
   }
   'build-routing' {
     Assert-Region
-    Invoke-Docker @tools routing $Region
+    Invoke-Docker @tools build $Region
   }
   'prepare-region' {
     Assert-Region
     $scriptArgs = @{ Region = $Region; SkipRouting = $SkipRouting; WaterPolygons = $WaterPolygons; ForceDownload = $ForceDownload }
     & (Join-Path $PSScriptRoot 'infrastructure\scripts\download-region.ps1') @scriptArgs
   }
-  'geocoding-up' { Invoke-Docker compose --profile geocoding up -d }
+  'publish-app' {
+    $python = Get-Python
+    $apkPath = if ($Apk) { $Apk } else { Join-Path $PSScriptRoot 'mobile\build\app\outputs\flutter-apk\app-release.apk' }
+    $publishArgs = @($python | Select-Object -Skip 1) +
+      @((Join-Path $PSScriptRoot 'infrastructure\scripts\publish-app.py'), $apkPath)
+    if ($Server) { $publishArgs += @('--host', $Server) }
+    if ($RemoteDir) { $publishArgs += @('--remote-dir', $RemoteDir) }
+    & $python[0] @publishArgs
+    if ($LASTEXITCODE -ne 0) { throw 'No se pudo publicar la app.' }
+  }
+  'geocoding-up' { 'La geocodificación nativa forma parte del backend y no requiere un servicio externo.' }
   'prod-up' { Invoke-Docker @prod up -d --build }
   'prod-down' { Invoke-Docker @prod down }
   'prod-logs' { Invoke-Docker @prod logs -f --tail=200 $Service }

@@ -1,221 +1,1428 @@
-// Developer map viewer: renders a prepared region from its PMTiles archive with
-// the platform style and draws routes returned by POST /api/v1/routes/calculate.
+// Map viewer of the platform: the world base map (Natural Earth) with the prepared regions on top
+// (PMTiles, own style), satellite and relief views, traffic, place search (GET /geocoding/search)
+// and routes with stops (POST /routes/calculate). It installs as a web app (manifest.webmanifest,
+// sw.js) and offers the Android app published on the same server. No build step: MapLibre GL JS
+// and PMTiles are vendored by the image; the style logic is shared with the SDK (sdk/map-style.js).
 import * as maplibregl from './vendor/maplibre-gl.mjs';
+import { registerPoiIcons } from './sdk/map-icons.js';
+import {
+  buildStyle, containsBox, mapTypes, parseTemplate, pmtilesLoader, setMapType, setOverlay,
+  tilesets as regionTilesets, TrafficLayer, WORLD_MAX_VISIBLE_ZOOM,
+} from './sdk/map-style.js';
 
 const API = '/api/v1';
 const ORIGIN = window.location.origin;
+/** Origin, up to 23 stops and destination: the limit of POST /routes/calculate. */
+const MAX_POINTS = 25;
+const SEARCH_MIN_LENGTH = 3;
+const SEARCH_DEBOUNCE_MS = 300;
+const SEARCH_LIMIT = 7;
+const MAP_POINT_LABEL = 'Punto en el mapa';
+const SVG_NS = 'http://www.w3.org/2000/svg';
+/** Mainland Ecuador: the first view when the address bar has no position. */
+const HOME_BOUNDS = [-81.1, -5.05, -75.2, 1.5];
+const LAYERS_KEY = 'route-maps:layers';
+const MAP_TYPE_KEY = 'route-maps:map-type';
+/** Description of the Android app published on this server (infrastructure/scripts/publish-app.py). */
+const ANDROID_RELEASE = '/descargas/android.json';
 
-const protocol = new pmtiles.Protocol();
-maplibregl.addProtocol('pmtiles', protocol.tile);
+const PROFILES = [
+  { id: 'CAR', label: 'Auto', icon: 'i-car' },
+  { id: 'TRUCK', label: 'Camión', icon: 'i-truck' },
+  { id: 'MOTORCYCLE', label: 'Moto', icon: 'i-moto' },
+  { id: 'BICYCLE', label: 'Bici', icon: 'i-bike' },
+  { id: 'PEDESTRIAN', label: 'A pie', icon: 'i-walk' },
+];
 
-const ui = {
-  region: document.getElementById('region'),
-  regionInfo: document.getElementById('region-info'),
-  profile: document.getElementById('profile'),
-  clear: document.getElementById('clear'),
-  status: document.getElementById('status'),
-  routes: document.getElementById('routes'),
-  steps: document.getElementById('steps'),
+const ERROR_MESSAGES = {
+  ROUTE_NOT_FOUND:
+    'No hay una ruta por vías registradas entre esos puntos. Prueba con otro medio de transporte o acerca los puntos a una calle.',
+  INVALID_COORDINATES: 'Revisa los puntos: no pueden coincidir ni estar a más de 2.000 km entre sí.',
+  ROUTING_PROVIDER_UNAVAILABLE: 'El cálculo de rutas no está disponible ahora. Inténtalo en unos minutos.',
+  ROUTING_PROFILE_NOT_SUPPORTED: 'Ese medio de transporte no está disponible.',
+  GEOCODING_PROVIDER_UNAVAILABLE: 'La búsqueda no está disponible ahora. Puedes elegir los puntos en el mapa.',
+  RATE_LIMIT_EXCEEDED: 'Demasiadas solicitudes seguidas. Espera un momento.',
+  HTTP_429: 'Demasiadas solicitudes seguidas. Espera un momento.',
 };
 
-let map;
-let regions = [];
-let styleTemplate;
-let origin = null;
-let destination = null;
-let markers = [];
-let lastRoutes = [];
+maplibregl.addProtocol('pmtiles', pmtilesLoader(pmtiles));
 
-function setStatus(message, isError = false) {
-  ui.status.textContent = message;
-  ui.status.className = isError ? 'error' : '';
+const $ = (id) => document.getElementById(id);
+const theme = getComputedStyle(document.documentElement);
+const token = (name) => theme.getPropertyValue(name).trim();
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const animation = (ms) => (reducedMotion.matches ? 0 : ms);
+const canLocate = window.isSecureContext && 'geolocation' in navigator;
+/** Same breakpoint as viewer.css: below it the cards become a bottom sheet. */
+const phone = window.matchMedia('(max-width: 767px)');
+const installed = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+// ---------------------------------------------------------------- state
+
+let map;
+let mapReady = false;
+let regions = [];
+let template = null;
+let traffic = null;
+let profile = 'CAR';
+let nextStopId = 1;
+const newStop = () => ({ id: nextStopId++, point: null, label: '' });
+let stops = [newStop(), newStop()];
+let activeStopId = stops[0].id;
+let routes = [];
+let selectedRoute = 0;
+let routeRequest = 0;
+let place = null;
+let placeMarker = null;
+const stopMarkers = new Map();
+const searchCache = new Map();
+
+// ---------------------------------------------------------------- helpers
+
+class ApiError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
 }
 
+const OFFLINE_MESSAGE = 'Sin conexión con el servidor. Revisa tu conexión e inténtalo de nuevo.';
+
 async function api(path, options = {}) {
-  const response = await fetch(`${API}${path}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) },
-  });
+  let response;
+  try {
+    response = await fetch(`${API}${path}`, {
+      ...options,
+      headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) },
+    });
+  } catch {
+    throw new ApiError('OFFLINE', OFFLINE_MESSAGE);
+  }
   const body = await response.json().catch(() => null);
   if (!response.ok || !body?.success) {
     const error = body?.error ?? { code: `HTTP_${response.status}`, message: response.statusText };
-    throw new Error(`${error.code}: ${error.message}`);
+    throw new ApiError(error.code, ERROR_MESSAGES[error.code] ?? error.message ?? 'Error inesperado.');
   }
   return body.data;
 }
 
-function buildStyle(region) {
-  const json = styleTemplate
-    .replaceAll('__PMTILES_URL__', `${ORIGIN}${region.tilesUrl}`)
-    .replaceAll('__GLYPHS_URL__', `${ORIGIN}/maps/fonts`);
-  return JSON.parse(json);
-}
-
-const formatKm = (meters) => (meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${Math.round(meters)} m`);
-const formatMin = (seconds) => (seconds >= 3600
-  ? `${Math.floor(seconds / 3600)} h ${Math.round((seconds % 3600) / 60)} min`
-  : `${Math.max(1, Math.round(seconds / 60))} min`);
-const formatMb = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-
-function showRegion(region) {
-  ui.regionInfo.textContent =
-    `Versión ${region.version} · mapa ${formatMb(region.mapSize)}` +
-    (region.routingSize ? ` · routing ${formatMb(region.routingSize)}` : '') +
-    ` · SHA-256 ${region.checksum.slice(0, 16)}…`;
-  const style = buildStyle(region);
-  const bounds = region.bbox ? [[region.bbox[0], region.bbox[1]], [region.bbox[2], region.bbox[3]]] : null;
-  if (!map) {
-    map = new maplibregl.Map({
-      container: 'map',
-      style,
-      bounds: bounds ?? undefined,
-      fitBoundsOptions: { padding: 20 },
-      attributionControl: { compact: false },
-      hash: true,
-    });
-    map.addControl(new maplibregl.NavigationControl(), 'top-right');
-    map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
-    map.on('click', (event) => onMapClick(event.lngLat));
-    map.on('style.load', () => drawRoutes(lastRoutes));
-  } else {
-    map.setStyle(style);
-    if (bounds) map.fitBounds(bounds, { padding: 20, duration: 0 });
+function el(tag, attributes = {}, ...children) {
+  const element = document.createElement(tag);
+  for (const [name, value] of Object.entries(attributes)) {
+    if (value === false || value === null || value === undefined) continue;
+    element.setAttribute(name, value === true ? '' : String(value));
   }
-  window.__viewer = { map, region };
+  element.append(...children.filter((child) => child !== null && child !== undefined && child !== ''));
+  return element;
 }
 
-function addMarker(lngLat, color) {
-  const marker = new maplibregl.Marker({ color }).setLngLat(lngLat).addTo(map);
-  markers.push(marker);
+function icon(name) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', 'icon');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  const use = document.createElementNS(SVG_NS, 'use');
+  use.setAttribute('href', `#${name}`);
+  svg.append(use);
+  return svg;
 }
 
-function clearRoute() {
-  origin = null;
-  destination = null;
-  markers.forEach((marker) => marker.remove());
-  markers = [];
-  lastRoutes = [];
-  ui.routes.innerHTML = '';
-  ui.steps.innerHTML = '';
-  drawRoutes([]);
-  setStatus('');
+function iconButton(iconName, label, onClick, disabled = false) {
+  const button = el('button', { type: 'button', class: 'icon-button', 'aria-label': label, title: label, disabled },
+    icon(iconName));
+  button.addEventListener('click', onClick);
+  return button;
 }
 
-async function onMapClick(lngLat) {
-  if (!origin || destination) {
-    clearRoute();
-    origin = lngLat;
-    addMarker(lngLat, '#2e7d32');
-    setStatus('Origen marcado. Haz clic para elegir el destino.');
+const numberFormat = new Intl.NumberFormat('es', { maximumFractionDigits: 1 });
+const formatDistance = (meters) =>
+  meters >= 1000 ? `${numberFormat.format(meters / 1000)} km` : `${Math.round(meters)} m`;
+const formatSize = (bytes) => `${numberFormat.format(bytes / 1024 / 1024)} MB`;
+const formatPoint = ({ lat, lng }) => `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+function formatDuration(seconds) {
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  return minutes % 60 ? `${hours} h ${minutes % 60} min` : `${hours} h`;
+}
+
+const insideBox = (box, { lng, lat }) => lng >= box[0] && lng <= box[2] && lat >= box[1] && lat <= box[3];
+const toBounds = ([minLng, minLat, maxLng, maxLat]) => [[minLng, minLat], [maxLng, maxLat]];
+const coordinate = ({ lat, lng }) => ({ latitude: lat, longitude: lng });
+
+function setStatus(message, isError = false) {
+  const status = $('route-status');
+  status.textContent = message;
+  status.classList.toggle('status--error', isError);
+}
+
+function showAppError(message) {
+  const status = $('app-status');
+  status.textContent = message;
+  status.hidden = false;
+  $('map-loading').hidden = true;
+  updateSheet();
+}
+
+// ---------------------------------------------------------------- cards and bottom sheet
+
+/** The cards (place, directions, errors) show only with content; on phones they are a bottom sheet. */
+function updateSheet({ expand = false } = {}) {
+  const sheet = $('sheet');
+  sheet.hidden = $('place-card').hidden && $('directions').hidden && $('app-status').hidden;
+  if (sheet.hidden || expand) setSheetCollapsed(false);
+  updateSheetOffset();
+}
+
+function setSheetCollapsed(collapsed) {
+  $('sheet').classList.toggle('sheet--collapsed', collapsed);
+  $('sheet-toggle').setAttribute('aria-expanded', String(!collapsed));
+  $('sheet-toggle').setAttribute('aria-label', collapsed ? 'Expandir el panel' : 'Minimizar el panel');
+}
+
+/** Map controls and the traffic legend stay above the bottom sheet. */
+function updateSheetOffset() {
+  const sheet = $('sheet');
+  const offset = phone.matches && !sheet.hidden ? sheet.getBoundingClientRect().height : 0;
+  document.documentElement.style.setProperty('--sheet-offset', `${Math.round(offset)}px`);
+}
+
+/** Camera padding that keeps what is shown clear of the search bar and the cards. */
+function cameraPadding(base) {
+  const padding = { top: base + 64, right: base, bottom: base, left: base };
+  const sheet = $('sheet');
+  if (!sheet.hidden) {
+    const box = sheet.getBoundingClientRect();
+    if (phone.matches) padding.bottom += Math.min(box.height, window.innerHeight * 0.5);
+    else padding.left += box.right;
+  }
+  // Small or landscape screens: the padding never takes more than two thirds of the map.
+  const shrink = (a, b, size) => {
+    const scale = Math.min(1, (size * 2) / 3 / (padding[a] + padding[b]));
+    padding[a] = Math.floor(padding[a] * scale);
+    padding[b] = Math.floor(padding[b] * scale);
+  };
+  shrink('top', 'bottom', window.innerHeight);
+  shrink('left', 'right', window.innerWidth);
+  return padding;
+}
+
+/** Offset of the camera centre with the same effect as cameraPadding, for flyTo. */
+function cameraOffset() {
+  const padding = cameraPadding(0);
+  return [(padding.left - padding.right) / 2, (padding.top - padding.bottom) / 2];
+}
+
+// ---------------------------------------------------------------- regions and style
+
+const tilesets = () => regionTilesets(regions);
+
+/** World base map below, then the prepared regions; a region inside a bigger one adds nothing. */
+function styleForRegions() {
+  const { world, drawn } = tilesets();
+  return buildStyle(template, ORIGIN, [...(world ? [{ region: world, isWorld: true }] : []),
+    ...drawn.map((region) => ({ region, isWorld: false }))]);
+}
+
+function initMap() {
+  const { world, drawn } = tilesets();
+  const ecuador = drawn.find((region) => containsBox(region.bbox, HOME_BOUNDS));
+  const home = ecuador ? HOME_BOUNDS : drawn[0]?.bbox ?? world?.bbox;
+  map = new maplibregl.Map({
+    container: 'map',
+    style: styleForRegions(),
+    bounds: home ? toBounds(home) : undefined,
+    fitBoundsOptions: { padding: cameraPadding(24) },
+    // Imagery and elevation carry the citation their licences ask for.
+    attributionControl: { compact: true, customAttribution: '<a href="/fuentes.html">Fuentes de datos</a>' },
+    hash: true,
+    dragRotate: false,
+    pitchWithRotate: false,
+  });
+  map.touchZoomRotate.disableRotation();
+  registerPoiIcons(map, template.metadata?.['maps-platform:poi-colors'] ?? {});
+  map.addControl(new InstallControl(), 'top-right');
+  // Bottom corners stack upwards: scale, zoom and "my location" above the attribution.
+  map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+  if (canLocate) {
+    map.addControl(new maplibregl.GeolocateControl({
+      positionOptions: { enableHighAccuracy: true },
+      fitBoundsOptions: { maxZoom: 16 },
+    }), 'bottom-right');
+  }
+  layersControl = new LayersControl();
+  map.addControl(layersControl, 'bottom-left');
+  traffic = new TrafficLayer(map, template, {
+    fetchFlow: (bbox) => api(`/traffic/flow?bbox=${bbox}`),
+    onStatus: (text) => setLayerStatus('traffic', text),
+  });
+  map.on('load', () => {
+    mapReady = true;
+    traffic.install();
+    addActivityLayer();
+    addRouteLayers();
+    drawRoutes();
+    updateNotice();
+    applyMapType();
+    applyLayers();
+    // The first frame is on screen; the chip goes once the visible tiles are in (or soon after).
+    setTimeout(() => { $('map-loading').hidden = true; }, 4000);
+  });
+  map.once('idle', () => {
+    $('map-loading').hidden = true;
+    // Only now, so the web app files do not compete with the first tiles.
+    registerServiceWorker();
+  });
+  map.on('moveend', () => {
+    updateNotice();
+    refreshActivity();
+  });
+  map.on('click', onMapClick);
+  window.__viewer = { map };
+}
+
+function updateNotice() {
+  const notice = $('map-notice');
+  const center = map.getCenter();
+  const detailed = tilesets().drawn.some((region) => insideBox(region.bbox, center));
+  const show = map.getZoom() >= WORLD_MAX_VISIBLE_ZOOM - 0.5 && !detailed;
+  notice.hidden = !show;
+  if (show) {
+    notice.textContent = 'Aquí solo está el mapa base mundial. Las calles, búsquedas y rutas detalladas ' +
+      'están disponibles en Ecuador.';
+  }
+}
+
+// ---------------------------------------------------------------- map type and layers
+
+/** Thumbnails of the map types, rendered from the platform's own tiles (icons/). */
+const MAP_TYPE_THUMBS = {
+  map: 'icons/map-type-map.webp',
+  satellite: 'icons/map-type-satellite.webp',
+  relief: 'icons/map-type-relief.webp',
+};
+const MAP_TYPE_NOTES = {
+  map: 'Calles, lugares y límites.',
+  satellite: 'Imágenes de satélite con las calles y los nombres encima.',
+  relief: 'Montañas sombreadas y colores por altitud.',
+};
+
+const LAYER_OPTIONS = [
+  {
+    id: 'traffic', label: 'Tráfico', short: 'Tráfico', icon: 'i-traffic',
+    legend: [['--color-traffic-free', 'Sin demoras'], ['--color-traffic-moderate', 'Moderado'],
+      ['--color-traffic-slow', 'Lento'], ['--color-traffic-jammed', 'Detenido']],
+    note: 'Vías principales en verde mientras no haya demoras reportadas. Los tramos medidos por los recorridos ' +
+      'de la app se colorean en vivo (15 min) o, más tenues, con lo habitual a esta hora.',
+  },
+  {
+    id: 'precipitation', label: 'Lluvia anual', short: 'Lluvia', icon: 'i-rain',
+    legend: [['--color-rain-1', '< 500 mm'], ['--color-rain-3', '1000–2000 mm'], ['--color-rain-5', '3000–4000 mm'],
+      ['--color-rain-6', '> 4000 mm']],
+    note: 'Regiones de precipitación anual (climatología oficial).',
+  },
+  {
+    id: 'temperature', label: 'Pisos climáticos', short: 'Clima', icon: 'i-thermometer',
+    legend: [['--color-temp-1', 'Muy frío'], ['--color-temp-3', 'Templado frío'], ['--color-temp-4', 'Templado'],
+      ['--color-temp-6', 'Cálido']],
+    note: 'Termotipos por altitud (climatología oficial).',
+  },
+  {
+    id: 'population', label: 'Densidad de población', short: 'Población', icon: 'i-flame',
+    legend: [['--color-heat-low', 'Baja'], ['--color-heat-mid', 'Media'], ['--color-heat-high', 'Alta']],
+    note: 'Mapa de calor de la malla censal de 1 km².',
+  },
+  {
+    id: 'activity', label: 'Actividad de la app (24 h)', short: 'Actividad', icon: 'i-activity',
+    legend: [['--color-heat-low', 'Poca'], ['--color-heat-high', 'Mucha']],
+    note: 'Zonas por donde pasaron al menos 3 recorridos distintos en las últimas 24 horas.',
+  },
+];
+
+// Per browser: the choice survives reloads (private mode: this visit only).
+function readStored(key, fallback) {
+  try {
+    return window.localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function store(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Private mode: the choice lasts for this visit only.
+  }
+}
+
+function readLayers() {
+  try {
+    const saved = JSON.parse(readStored(LAYERS_KEY, '[]'));
+    return new Set(Array.isArray(saved) ? saved.filter((id) => LAYER_OPTIONS.some((o) => o.id === id)) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+const activeLayers = readLayers();
+let mapType = readStored(MAP_TYPE_KEY, 'map');
+const layerStatus = new Map();
+
+function setLayerStatus(kind, text) {
+  if (text) layerStatus.set(kind, text);
+  else layerStatus.delete(kind);
+  const status = $('layers-status');
+  if (status) status.textContent = [...layerStatus.values()].join(' ');
+}
+
+/**
+ * "Capas": a thumbnail of the other map type opens the panel with the map types (thumbnails) and
+ * the map details (traffic, climate, population, activity) with the legend of those switched on.
+ */
+class LayersControl {
+  onAdd() {
+    this.container = el('div', { class: 'maplibregl-ctrl layers-control' });
+    this.thumb = el('img', { alt: '', width: 72, height: 72, decoding: 'async' });
+    this.button = el('button', {
+      type: 'button', class: 'layers-button', 'aria-label': 'Tipo de mapa y capas', title: 'Tipo de mapa y capas',
+      'aria-expanded': 'false', 'aria-controls': 'layers-panel',
+    }, this.thumb, el('span', { class: 'layers-button__label', 'aria-hidden': 'true' }, icon('i-layers'), 'Capas'));
+    this.panel = el('div', { class: 'layers-panel', id: 'layers-panel', role: 'dialog',
+      'aria-labelledby': 'layers-title', hidden: true });
+
+    const close = iconButton('i-x', 'Cerrar capas', () => {
+      this.setOpen(false);
+      this.button.focus();
+    });
+    this.panel.append(el('div', { class: 'layers-panel__header' },
+      el('h2', { class: 'layers-panel__title', id: 'layers-title' }, 'Tipo de mapa'), close));
+
+    const types = mapTypes(template, regions);
+    if (!types.some((type) => type.id === mapType && type.available)) mapType = 'map';
+    this.available = new Set(types.filter((type) => type.available).map((type) => type.id));
+    const typeGroup = el('fieldset', { class: 'map-types' }, el('legend', { class: 'sr-only' }, 'Tipo de mapa'));
+    for (const type of types) {
+      const input = el('input', { type: 'radio', name: 'map-type', value: type.id, class: 'sr-only',
+        checked: type.id === mapType, disabled: !type.available });
+      input.addEventListener('change', () => {
+        mapType = type.id;
+        store(MAP_TYPE_KEY, mapType);
+        applyMapType();
+      });
+      const note = type.available ? MAP_TYPE_NOTES[type.id] ?? '' : 'Aún no está preparado en los mapas publicados.';
+      typeGroup.append(el('label', { class: 'map-type', title: note }, input,
+        el('img', { class: 'map-type__thumb', src: MAP_TYPE_THUMBS[type.id], alt: '', width: 96, height: 96,
+          loading: 'lazy', decoding: 'async' }),
+        el('span', {}, type.label)));
+    }
+    this.panel.append(typeGroup, el('p', { class: 'layers-panel__title' }, 'Detalles del mapa'));
+
+    const tiles = el('fieldset', { class: 'layer-tiles' }, el('legend', { class: 'sr-only' }, 'Detalles del mapa'));
+    for (const option of LAYER_OPTIONS) {
+      const input = el('input', { type: 'checkbox', value: option.id, class: 'sr-only',
+        checked: activeLayers.has(option.id) });
+      input.addEventListener('change', () => {
+        if (input.checked) activeLayers.add(option.id);
+        else activeLayers.delete(option.id);
+        store(LAYERS_KEY, JSON.stringify([...activeLayers]));
+        applyLayers();
+      });
+      tiles.append(el('label', { class: 'layer-tile', title: option.note }, input,
+        el('span', { class: 'layer-tile__icon' }, icon(option.icon)),
+        el('span', {}, option.short)));
+    }
+    this.panel.append(tiles,
+      el('div', { class: 'layers-legends', id: 'layers-legends' }),
+      el('p', { class: 'layers-panel__status', id: 'layers-status', role: 'status' }));
+
+    this.button.addEventListener('click', () => this.setOpen(this.panel.hidden));
+    this.panel.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      this.setOpen(false);
+      this.button.focus();
+    });
+    // A click on the map (or anywhere else) closes the panel, like a menu.
+    this.onOutside = (event) => {
+      if (!this.container.contains(event.target) && !this.panel.contains(event.target)) this.setOpen(false);
+    };
+    document.addEventListener('pointerdown', this.onOutside);
+    this.container.append(this.button);
+    // Outside the map controls (they are transformed): on phones the panel is a bottom sheet.
+    document.body.append(this.panel);
+    this.update();
+    return this.container;
+  }
+
+  setOpen(open) {
+    if (open === !this.panel.hidden) return;
+    this.panel.hidden = !open;
+    this.button.setAttribute('aria-expanded', String(open));
+    if (open) {
+      const first = this.panel.querySelector('input[name="map-type"]:checked') ?? this.panel.querySelector('input');
+      first?.focus({ preventScroll: true });
+    }
+  }
+
+  /** The thumbnail shows where one click in the panel takes you: satellite from the map, else the map. */
+  update() {
+    const next = mapType === 'map' && this.available.has('satellite') ? 'satellite' : 'map';
+    this.thumb.src = MAP_TYPE_THUMBS[next];
+  }
+
+  onRemove() {
+    document.removeEventListener('pointerdown', this.onOutside);
+    this.panel.remove();
+    this.container.remove();
+  }
+}
+
+/** Opens the install dialog: the Android app of this server and the web app. */
+class InstallControl {
+  onAdd() {
+    this.container = el('div', { class: 'maplibregl-ctrl install-control' });
+    const button = el('button', { type: 'button', class: 'install-button', 'aria-haspopup': 'dialog',
+      'aria-label': 'Instalar la app', title: 'Instalar la app' }, icon('i-download'), el('span', {}, 'Instalar app'));
+    button.addEventListener('click', () => openInstall());
+    this.container.append(button);
+    // Already running as the installed web app: the menu still offers the Android app.
+    this.container.hidden = installed();
+    return this.container;
+  }
+
+  onRemove() {
+    this.container.remove();
+  }
+}
+
+let layersControl = null;
+
+/** Legend and explanation of each map detail that is switched on. */
+function renderLegends() {
+  const blocks = LAYER_OPTIONS.filter((option) => activeLayers.has(option.id)).map((option) =>
+    el('div', { class: 'layers-legend-block' },
+      el('p', { class: 'layers-legend-block__name' }, option.label),
+      el('p', { class: 'layers-legend-block__note' }, option.note),
+      el('span', { class: 'layers-legend', 'aria-hidden': 'true' },
+        ...option.legend.map(([color, text]) =>
+          el('span', { class: 'layers-legend__item' },
+            el('span', { class: 'layers-legend__swatch', style: `background: var(${color})` }), text)))));
+  $('layers-legends')?.replaceChildren(...blocks);
+  $('traffic-legend').hidden = !activeLayers.has('traffic');
+}
+
+/** Satellite and relief read their own archives, only while shown. */
+function applyMapType() {
+  if (!mapReady) return;
+  if (!setMapType(map, template, regions, ORIGIN, mapType)) {
+    mapType = 'map';
+    setMapType(map, template, regions, ORIGIN, mapType);
+  }
+  for (const input of document.querySelectorAll('input[name="map-type"]')) input.checked = input.value === mapType;
+  layersControl?.update();
+}
+
+function applyLayers() {
+  renderLegends();
+  if (!mapReady) return;
+  for (const kind of ['precipitation', 'temperature', 'population']) {
+    setOverlay(map, template, kind, activeLayers.has(kind));
+  }
+  if (traffic.visible !== activeLayers.has('traffic')) traffic.setVisible(activeLayers.has('traffic'));
+  if (map.getLayer('activity-heat')) {
+    map.setLayoutProperty('activity-heat', 'visibility', activeLayers.has('activity') ? 'visible' : 'none');
+  }
+  refreshActivity();
+}
+
+function addActivityLayer() {
+  const firstLabel = map.getStyle().layers.find((layer) => layer.type === 'symbol')?.id;
+  map.addSource('activity', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addLayer({ id: 'activity-heat', type: 'heatmap', source: 'activity', layout: { visibility: 'none' },
+    paint: {
+      'heatmap-weight': ['interpolate', ['linear'], ['get', 'trips'], 3, 0.3, 30, 1],
+      'heatmap-radius': ['interpolate', ['exponential', 2], ['zoom'], 10, 8, 14, 30, 17, 80],
+      'heatmap-opacity': 0.8,
+    } }, firstLabel);
+}
+
+let activityRequest = 0;
+async function refreshActivity() {
+  if (!map || !activeLayers.has('activity')) {
+    setLayerStatus('activity', '');
     return;
   }
-  destination = lngLat;
-  addMarker(lngLat, '#c62828');
-  await calculate();
+  const bounds = map.getBounds();
+  const span = Math.max(bounds.getEast() - bounds.getWest(), bounds.getNorth() - bounds.getSouth());
+  if (map.getZoom() < 10 || span > 2.5) {
+    setLayerStatus('activity', 'Actividad: acércate a una ciudad para verla.');
+    return;
+  }
+  const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()]
+    .map((value) => value.toFixed(4)).join(',');
+  const request = ++activityRequest;
+  try {
+    const data = await api(`/traffic/activity?bbox=${bbox}`);
+    if (request !== activityRequest) return;
+    map.getSource('activity')?.setData(data);
+    setLayerStatus('activity', data.features.length === 0
+      ? 'Actividad: sin recorridos suficientes en las últimas 24 horas.' : '');
+  } catch (error) {
+    if (request === activityRequest) setLayerStatus('activity', error.message);
+  }
+}
+
+function renderCoverage() {
+  const { world, detailed } = tilesets();
+  const item = (name, meta, bbox) => {
+    const button = el('button', { type: 'button', class: 'coverage__item' },
+      el('span', {}, name), el('span', { class: 'coverage__meta' }, meta));
+    button.addEventListener('click', () => {
+      $('menu').close();
+      map.fitBounds(toBounds(bbox), { padding: cameraPadding(24), duration: animation(900) });
+    });
+    return el('li', {}, button);
+  };
+  const items = detailed.map((region) => item(region.name, formatSize(region.mapSize), region.bbox));
+  if (world) items.push(item('Mundo (mapa base)', formatSize(world.mapSize), [-170, -58, 170, 75]));
+  $('coverage-list').replaceChildren(...items);
+}
+
+// ---------------------------------------------------------------- search
+
+async function searchPlaces(text) {
+  const params = new URLSearchParams({ q: text, limit: String(SEARCH_LIMIT), lang: 'es' });
+  if (map && map.getZoom() >= 4) {
+    // Results near the visible area first (rounded so nearby views share the cache).
+    const center = map.getCenter();
+    params.set('lat', center.lat.toFixed(2));
+    params.set('lng', center.lng.toFixed(2));
+  }
+  const key = params.toString();
+  if (!searchCache.has(key)) {
+    searchCache.set(key, api(`/geocoding/search?${key}`).catch((error) => {
+      searchCache.delete(key);
+      throw error;
+    }));
+  }
+  return searchCache.get(key);
+}
+
+async function reverseGeocode({ lat, lng }) {
+  try {
+    return await api(`/geocoding/reverse?lat=${lat.toFixed(6)}&lng=${lng.toFixed(6)}&lang=es`);
+  } catch {
+    return null;
+  }
+}
+
+/** Name and secondary line of a search result. */
+function describe(result) {
+  const name = result.name ?? result.displayName.split(',')[0].trim();
+  const detail = result.displayName.startsWith(name)
+    ? result.displayName.slice(name.length).replace(/^\s*,\s*/, '')
+    : result.displayName;
+  return { name, detail };
+}
+
+/** Short address of a reverse geocoding result: "Avenida 9 de Octubre 412". */
+function describeReverse(result) {
+  const address = result.address ?? {};
+  const name = address.road
+    ? [address.road, address.houseNumber].filter(Boolean).join(' ')
+    : result.name ?? result.displayName.split(',')[0].trim();
+  const detail = [address.suburb ?? address.neighbourhood, address.city, address.country]
+    .filter((part) => part && part !== name)
+    .join(', ');
+  return { name, detail };
+}
+
+function resultIcon(result) {
+  if (result.type === 'country') return 'i-globe';
+  if (['capital', 'city', 'town', 'village', 'administrative'].includes(result.type)) return 'i-city';
+  return 'i-pin';
+}
+
+const pointOf = (result) => ({ lng: result.longitude, lat: result.latitude });
+
+let comboboxCount = 0;
+
+/** Accessible autocomplete (combobox + listbox) over the place search. */
+function createCombobox(input, listbox, { onSelect }) {
+  const prefix = `option-${++comboboxCount}`;
+  let results = [];
+  let active = -1;
+  let timer = 0;
+  let request = 0;
+
+  const setOpen = (open) => {
+    listbox.hidden = !open;
+    input.setAttribute('aria-expanded', String(open));
+    if (!open) {
+      active = -1;
+      input.removeAttribute('aria-activedescendant');
+    }
+  };
+  const close = () => {
+    clearTimeout(timer);
+    request++;
+    setOpen(false);
+  };
+  const info = (text) => {
+    results = [];
+    listbox.replaceChildren(el('li', { class: 'option option--info', role: 'option', 'aria-disabled': 'true' }, text));
+    setOpen(true);
+  };
+  const highlight = (index) => {
+    active = index;
+    [...listbox.children].forEach((child, i) => child.setAttribute('aria-selected', String(i === index)));
+    input.setAttribute('aria-activedescendant', `${prefix}-${index}`);
+    listbox.children[index]?.scrollIntoView({ block: 'nearest' });
+  };
+  const choose = (index) => {
+    const result = results[index];
+    if (!result) return;
+    close();
+    onSelect(result);
+  };
+  const render = () => {
+    if (results.length === 0) {
+      info('Sin resultados. Prueba con otro nombre o haz clic en el mapa.');
+      return;
+    }
+    listbox.replaceChildren(...results.map((result, index) => {
+      const { name, detail } = describe(result);
+      const option = el('li', { id: `${prefix}-${index}`, class: 'option', role: 'option', 'aria-selected': 'false' },
+        icon(resultIcon(result)),
+        el('span', { class: 'option__text' },
+          el('span', { class: 'option__name' }, name),
+          detail ? el('span', { class: 'option__detail' }, detail) : null));
+      // Keep the focus in the input so the click reaches the option.
+      option.addEventListener('mousedown', (event) => event.preventDefault());
+      option.addEventListener('click', () => choose(index));
+      return option;
+    }));
+    active = -1;
+    setOpen(true);
+  };
+  const run = async (text, chooseFirst = false) => {
+    const id = ++request;
+    if (listbox.hidden) info('Buscando…');
+    try {
+      const found = await searchPlaces(text);
+      if (id !== request) return;
+      results = found;
+      if (chooseFirst && results.length > 0) {
+        choose(0);
+        return;
+      }
+      render();
+    } catch (error) {
+      if (id === request) info(error.message);
+    }
+  };
+
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    const text = input.value.trim();
+    if (text.length < SEARCH_MIN_LENGTH) {
+      close();
+      return;
+    }
+    timer = setTimeout(() => run(text), SEARCH_DEBOUNCE_MS);
+  });
+  input.addEventListener('keydown', (event) => {
+    const open = !listbox.hidden && results.length > 0;
+    if (event.key === 'ArrowDown' && open) {
+      event.preventDefault();
+      highlight((active + 1) % results.length);
+    } else if (event.key === 'ArrowUp' && open) {
+      event.preventDefault();
+      highlight((active - 1 + results.length) % results.length);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      if (open) {
+        choose(Math.max(active, 0));
+      } else if (input.value.trim().length >= 2) {
+        clearTimeout(timer);
+        run(input.value.trim(), true);
+      }
+    } else if (event.key === 'Escape' && !listbox.hidden) {
+      event.preventDefault();
+      close();
+    }
+  });
+  input.addEventListener('blur', close);
+}
+
+// ---------------------------------------------------------------- place card
+
+function markerElement(role, text, label) {
+  return el('div', { class: `marker marker--${role}`, role: 'img', 'aria-label': label, title: label },
+    el('span', {}, text));
+}
+
+function showPlace(next, { move = true } = {}) {
+  place = next;
+  $('place-name').textContent = next.name;
+  $('place-detail').textContent = next.detail ?? '';
+  $('place-detail').hidden = !next.detail;
+  $('place-stop').hidden = $('directions').hidden;
+  $('place-card').hidden = false;
+  placeMarker?.remove();
+  placeMarker = new maplibregl.Marker({
+    element: markerElement('place', '', next.name), anchor: 'bottom', offset: [0, -6],
+  }).setLngLat(next.point).addTo(map);
+  updateSheet({ expand: true });
+  if (move) moveToPlace(next);
+  else revealPoint(next.point);
+}
+
+/** Phones: a point tapped behind where the bottom sheet opens is brought into view. */
+function revealPoint(point) {
+  if (!phone.matches || $('sheet').hidden) return;
+  if (map.project(point).y > $('sheet').getBoundingClientRect().top - 48) {
+    map.easeTo({ center: point, offset: cameraOffset(), duration: animation(400) });
+  }
+}
+
+function moveToPlace({ point, bbox, type }) {
+  // Outside the prepared regions only the world base map exists: do not zoom past it.
+  const detailed = tilesets().drawn.some((region) => insideBox(region.bbox, point));
+  const maxZoom = detailed ? 16 : WORLD_MAX_VISIBLE_ZOOM - 1;
+  const box = bbox && bbox[2] - bbox[0] > 0.0005 && bbox[3] - bbox[1] > 0.0005 ? bbox : null;
+  if (box) {
+    map.fitBounds(toBounds(box), { padding: cameraPadding(48), maxZoom, duration: animation(900) });
+    return;
+  }
+  const zoom = type === 'country' ? 5 : ['capital', 'city', 'town'].includes(type) ? 11 : 16;
+  map.flyTo({ center: point, zoom: Math.min(zoom, maxZoom), offset: cameraOffset(), duration: animation(900) });
+}
+
+function hidePlace() {
+  place = null;
+  $('place-card').hidden = true;
+  placeMarker?.remove();
+  placeMarker = null;
+  updateSheet();
+}
+
+const placeFromResult = (result) => ({ point: pointOf(result), ...describe(result), bbox: result.bbox, type: result.type });
+
+// ---------------------------------------------------------------- directions and stops
+
+const stopRole = (index) => (index === 0 ? 'origin' : index === stops.length - 1 ? 'destination' : 'stop');
+const stopName = (index) =>
+  ({ origin: 'Origen', destination: 'Destino', stop: `Parada ${index}` })[stopRole(index)];
+const stopBadge = (index) => ({ origin: 'A', destination: 'B', stop: String(index) })[stopRole(index)];
+const PLACEHOLDERS = { origin: 'Punto de partida', destination: 'Destino', stop: 'Parada' };
+const stopInput = (id) => $('stops').querySelector(`input[data-stop-id="${id}"]`);
+const focusStop = (id) => stopInput(id)?.focus();
+
+function renderStops() {
+  const focusedId = document.activeElement?.dataset?.stopId;
+  $('stops').replaceChildren(...stops.map(stopRow));
+  if (focusedId) focusStop(focusedId);
+  $('add-stop').disabled = stops.length >= MAX_POINTS;
+}
+
+function stopRow(stop, index) {
+  const role = stopRole(index);
+  const name = stopName(index);
+  const inputId = `stop-input-${stop.id}`;
+  const listId = `stop-list-${stop.id}`;
+  const input = el('input', {
+    id: inputId, class: 'input', type: 'text', autocomplete: 'off', spellcheck: 'false', role: 'combobox',
+    'aria-autocomplete': 'list', 'aria-expanded': 'false', 'aria-controls': listId,
+    placeholder: PLACEHOLDERS[role], 'data-stop-id': stop.id,
+  });
+  input.value = stop.label;
+  const listbox = el('ul', { id: listId, class: 'listbox', role: 'listbox', 'aria-label': `Sugerencias para ${name}`,
+    hidden: true });
+  createCombobox(input, listbox, {
+    onSelect: (result) => setStop(stop.id, pointOf(result), describe(result).name, { focusNext: true }),
+  });
+  input.addEventListener('focus', () => setActiveStop(stop.id));
+  input.addEventListener('input', () => {
+    if (!input.value.trim() && stop.point) {
+      stop.point = null;
+      stop.label = '';
+      syncMarkers();
+      calculate();
+    }
+  });
+  // Typed text that was not chosen from the suggestions does not replace the point.
+  input.addEventListener('blur', () => {
+    if (stop.point) input.value = stop.label;
+  });
+
+  const actions = el('div', { class: 'stop__actions' });
+  if (role === 'origin' && canLocate) actions.append(iconButton('i-locate', 'Usar mi ubicación', () => locate(stop.id)));
+  actions.append(
+    iconButton('i-up', `Subir ${name}`, () => moveStop(index, -1), index === 0),
+    iconButton('i-down', `Bajar ${name}`, () => moveStop(index, 1), index === stops.length - 1),
+    iconButton('i-x', stops.length > 2 ? `Quitar ${name}` : `Borrar ${name}`, () => removeStop(index)),
+  );
+  return el('li', { class: `stop${stop.id === activeStopId ? ' stop--active' : ''}`, 'data-stop-id': stop.id },
+    el('span', { class: `stop__badge stop__badge--${role}`, 'aria-hidden': 'true' }, stopBadge(index)),
+    el('div', { class: 'combobox' }, el('label', { class: 'sr-only', for: inputId }, name), input, listbox),
+    actions);
+}
+
+function setActiveStop(id) {
+  activeStopId = id;
+  for (const row of $('stops').children) row.classList.toggle('stop--active', row.dataset.stopId === String(id));
+}
+
+function update() {
+  renderStops();
+  syncMarkers();
+  calculate();
+}
+
+function setStop(id, point, label, { focusNext = false } = {}) {
+  const stop = stops.find((item) => item.id === id);
+  if (!stop) return;
+  stop.point = point;
+  stop.label = label;
+  const next = stops.find((item) => !item.point);
+  activeStopId = next?.id ?? id;
+  update();
+  if (focusNext && next) focusStop(next.id);
+}
+
+/** Replaces "Punto en el mapa" with the address once the reverse geocoding answers. */
+async function nameFromMap(stopId, point) {
+  const result = await reverseGeocode(point);
+  const stop = stops.find((item) => item.id === stopId);
+  if (!result || !stop || stop.point !== point) return;
+  stop.label = describeReverse(result).name;
+  const input = stopInput(stopId);
+  if (input && document.activeElement !== input) input.value = stop.label;
+}
+
+function moveStop(index, delta) {
+  const target = index + delta;
+  if (target < 0 || target >= stops.length) return;
+  [stops[index], stops[target]] = [stops[target], stops[index]];
+  const moved = stops[target].id;
+  update();
+  focusStop(moved);
+}
+
+function removeStop(index) {
+  if (stops.length > 2) {
+    const [removed] = stops.splice(index, 1);
+    if (removed.id === activeStopId) activeStopId = stops[Math.min(index, stops.length - 1)].id;
+  } else {
+    Object.assign(stops[index], { point: null, label: '' });
+    activeStopId = stops[index].id;
+  }
+  update();
+  focusStop(stops[Math.min(index, stops.length - 1)].id);
+}
+
+function addStop(point = null, label = '') {
+  if (stops.length >= MAX_POINTS) return null;
+  const stop = { ...newStop(), point, label };
+  stops.splice(stops.length - 1, 0, stop);
+  activeStopId = point ? stops.find((item) => !item.point)?.id ?? stop.id : stop.id;
+  update();
+  return stop;
+}
+
+function locate(stopId) {
+  setStatus('Buscando tu ubicación…');
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      setStatus('');
+      setStop(stopId, { lng: position.coords.longitude, lat: position.coords.latitude }, 'Tu ubicación',
+        { focusNext: true });
+    },
+    (error) => setStatus(error.code === error.PERMISSION_DENIED
+      ? 'No hay permiso para usar tu ubicación.' : 'No se pudo obtener tu ubicación.', true),
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
+  );
+}
+
+function syncMarkers() {
+  if (!map) return;
+  for (const marker of stopMarkers.values()) marker.remove();
+  stopMarkers.clear();
+  stops.forEach((stop, index) => {
+    if (!stop.point) return;
+    const marker = new maplibregl.Marker({
+      element: markerElement(stopRole(index), stopBadge(index), `${stopName(index)}: ${stop.label}`),
+      anchor: 'bottom', offset: [0, -6], draggable: true,
+    }).setLngLat(stop.point).addTo(map);
+    marker.on('dragend', () => {
+      const { lng, lat } = marker.getLngLat();
+      const point = { lng, lat };
+      setStop(stop.id, point, MAP_POINT_LABEL);
+      nameFromMap(stop.id, point);
+    });
+    stopMarkers.set(stop.id, marker);
+  });
+}
+
+function openDirections({ focus = true } = {}) {
+  $('directions').hidden = false;
+  $('place-stop').hidden = !place;
+  renderStops();
+  updateSheet({ expand: true });
+  if (focus) focusStop(stops.find((stop) => !stop.point)?.id ?? activeStopId);
+}
+
+function closeDirections() {
+  $('directions').hidden = true;
+  $('place-stop').hidden = true;
+  stops = [newStop(), newStop()];
+  activeStopId = stops[0].id;
+  update();
+  updateSheet();
+  $('open-directions').focus();
+}
+
+async function onMapClick(event) {
+  if (event.originalEvent?.target?.closest?.('.maplibregl-marker')) return;
+  const point = { lng: event.lngLat.lng, lat: event.lngLat.lat };
+  if (!$('directions').hidden) {
+    const target = stops.find((stop) => stop.id === activeStopId && !stop.point) ?? stops.find((stop) => !stop.point);
+    if (target) {
+      setStop(target.id, point, MAP_POINT_LABEL);
+      nameFromMap(target.id, point);
+      return;
+    }
+  }
+  // Like a dropped pin: show what is there and offer the route.
+  showPlace({ point, name: MAP_POINT_LABEL, detail: formatPoint(point) }, { move: false });
+  const result = await reverseGeocode(point);
+  if (!result || place?.point !== point) return;
+  Object.assign(place, describeReverse(result));
+  $('place-name').textContent = place.name;
+  $('place-detail').textContent = place.detail;
+  $('place-detail').hidden = !place.detail;
+}
+
+// ---------------------------------------------------------------- routes
+
+function renderProfiles() {
+  for (const option of PROFILES) {
+    const input = el('input', { type: 'radio', name: 'profile', value: option.id, class: 'sr-only',
+      checked: option.id === profile });
+    input.addEventListener('change', () => {
+      profile = option.id;
+      calculate();
+    });
+    $('profiles').append(el('label', { class: 'profile' }, input, icon(option.icon), el('span', {}, option.label)));
+  }
 }
 
 async function calculate() {
+  const request = ++routeRequest;
+  if (stops.some((stop) => !stop.point)) {
+    routes = [];
+    drawRoutes();
+    renderRoutes();
+    setStatus(stops.some((stop) => stop.point) ? 'Completa los puntos vacíos para calcular la ruta.' : '');
+    return;
+  }
   setStatus('Calculando ruta…');
+  const [origin, ...rest] = stops;
+  const destination = rest.pop();
   try {
     const result = await api('/routes/calculate', {
       method: 'POST',
       body: JSON.stringify({
-        origin: { latitude: origin.lat, longitude: origin.lng },
-        destination: { latitude: destination.lat, longitude: destination.lng },
-        profile: ui.profile.value,
-        alternatives: true,
+        origin: coordinate(origin.point),
+        destination: coordinate(destination.point),
+        ...(rest.length ? { waypoints: rest.map((stop) => coordinate(stop.point)) } : { alternatives: true }),
+        profile,
       }),
     });
-    lastRoutes = result.routes;
-    drawRoutes(lastRoutes);
-    listRoutes(lastRoutes, 0);
-    setStatus(`Ruta calculada con ${result.provider} (${result.profile}).`);
+    if (request !== routeRequest) return;
+    routes = result.routes;
+    selectedRoute = 0;
+    drawRoutes();
+    renderRoutes();
+    fitRoute();
+    setStatus(rest.length
+      ? `Ruta con ${rest.length} ${rest.length === 1 ? 'parada' : 'paradas'}.`
+      : routes.length > 1 ? `${routes.length} rutas encontradas.` : 'Ruta encontrada.');
   } catch (error) {
-    lastRoutes = [];
-    drawRoutes([]);
+    if (request !== routeRequest) return;
+    routes = [];
+    drawRoutes();
+    renderRoutes();
     setStatus(error.message, true);
   }
 }
 
-function drawRoutes(routes, selected = 0) {
-  if (!map || !map.isStyleLoaded()) return;
-  const data = {
-    type: 'FeatureCollection',
-    features: routes.map((route, index) => ({
-      type: 'Feature',
-      properties: { selected: index === selected },
-      geometry: route.geometry,
-    })),
-  };
-  const source = map.getSource('route');
-  if (source) {
-    source.setData(data);
-    return;
-  }
-  map.addSource('route', { type: 'geojson', data });
-  map.addLayer({
-    id: 'route-casing', type: 'line', source: 'route',
-    layout: { 'line-join': 'round', 'line-cap': 'round', 'line-sort-key': ['case', ['get', 'selected'], 1, 0] },
-    paint: { 'line-color': '#ffffff', 'line-width': 9 },
-  });
-  map.addLayer({
-    id: 'route-line', type: 'line', source: 'route',
-    layout: { 'line-join': 'round', 'line-cap': 'round', 'line-sort-key': ['case', ['get', 'selected'], 1, 0] },
-    paint: {
-      'line-color': ['case', ['get', 'selected'], '#1a73e8', '#9bb8e8'],
-      'line-width': 5,
-    },
-  });
+function routeLabel(index) {
+  const waypoints = stops.length - 2;
+  if (waypoints > 0) return `Pasa por ${waypoints} ${waypoints === 1 ? 'parada' : 'paradas'}`;
+  return index === 0 ? 'Ruta recomendada' : `Alternativa ${index}`;
 }
 
-function listRoutes(routes, selected) {
-  ui.routes.innerHTML = '';
-  routes.forEach((route, index) => {
-    const item = document.createElement('li');
-    item.textContent = `${route.type === 'PRIMARY' ? 'Principal' : 'Alternativa'}: ` +
-      `${formatKm(route.distanceMeters)} · ${formatMin(route.durationSeconds)}`;
-    item.className = index === selected ? 'selected' : '';
-    item.addEventListener('click', () => {
-      drawRoutes(routes, index);
-      listRoutes(routes, index);
+function renderRoutes() {
+  $('routes-list').replaceChildren(...routes.map((route, index) => {
+    const input = el('input', { type: 'radio', name: 'route', value: index, class: 'sr-only',
+      checked: index === selectedRoute });
+    input.addEventListener('change', () => {
+      selectedRoute = index;
+      drawRoutes();
+      renderSteps();
     });
-    ui.routes.appendChild(item);
-  });
-  ui.steps.innerHTML = '';
-  for (const step of routes[selected]?.steps ?? []) {
-    const item = document.createElement('li');
-    item.textContent = `${step.instruction} (${formatKm(step.distanceMeters)})`;
-    ui.steps.appendChild(item);
+    return el('label', { class: 'route-option' }, input,
+      el('span', { class: 'route-option__time' }, formatDuration(route.durationSeconds)),
+      el('span', { class: 'route-option__distance' }, formatDistance(route.distanceMeters)),
+      el('span', { class: 'route-option__label' }, routeLabel(index)),
+      ...conditionLines(route).map((line) => el('span', { class: 'route-option__condition' }, line)));
+  }));
+  $('routes').hidden = routes.length === 0;
+  renderSteps();
+}
+
+/** Traffic and climate of a route in one or two short lines (never invented: see the API). */
+function conditionLines(route) {
+  const lines = [];
+  const approximate = (route.approximateSections ?? []).reduce((sum, section) => sum + section.distanceMeters, 0);
+  if (approximate > 0) {
+    lines.push(`Incluye ${formatDistance(approximate)} de acceso sin vía registrada (trazo aproximado)`);
   }
+  const conditions = route.conditions;
+  if (!conditions) return lines;
+  const traffic = conditions.traffic;
+  if (traffic?.status === 'observed') {
+    const delay = Math.round((traffic.delaySeconds ?? 0) / 60);
+    lines.push(delay > 0
+      ? `Tráfico actual: ${traffic.averageSpeedKph} km/h, +${delay} min`
+      : `Tráfico actual: fluido (${traffic.averageSpeedKph} km/h)`);
+  } else {
+    lines.push('Tráfico: sin recorridos recientes en el trayecto');
+  }
+  const warning = conditions.climate?.warnings?.[0];
+  if (warning) lines.push(warning);
+  return lines;
+}
+
+function renderSteps() {
+  const steps = routes[selectedRoute]?.steps ?? [];
+  $('steps').replaceChildren(...steps.map((step) =>
+    el('li', {}, `${step.instruction} `, el('span', { class: 'step__distance' }, `· ${formatDistance(step.distanceMeters)}`))));
+  $('steps-details').hidden = steps.length === 0;
+}
+
+function fitRoute() {
+  const bbox = routes[selectedRoute]?.bbox;
+  if (bbox) map.fitBounds(toBounds(bbox), { padding: cameraPadding(48), maxZoom: 16, duration: animation(700) });
+}
+
+function addRouteLayers() {
+  if (map.getSource('route')) return;
+  // Under the labels, above the roads.
+  const firstLabel = map.getStyle().layers.find((layer) => layer.type === 'symbol')?.id;
+  map.addSource('route', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  const layout = { 'line-join': 'round', 'line-cap': 'round', 'line-sort-key': ['case', ['get', 'selected'], 1, 0] };
+  map.addLayer({
+    id: 'route-casing', type: 'line', source: 'route', layout,
+    paint: { 'line-color': token('--color-route-casing'), 'line-width': 9 },
+  }, firstLabel);
+  map.addLayer({
+    id: 'route-line', type: 'line', source: 'route', layout,
+    paint: {
+      'line-color': ['case', ['get', 'selected'], token('--color-route'), token('--color-route-alternative')],
+      'line-width': 5,
+    },
+  }, firstLabel);
+  // Dotted link between a point off the road and where the route starts or ends.
+  map.addSource('route-links', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addLayer({
+    id: 'route-links', type: 'line', source: 'route-links', layout: { 'line-cap': 'round' },
+    paint: { 'line-color': token('--color-route'), 'line-width': 3, 'line-dasharray': [0.1, 2] },
+  }, firstLabel);
+}
+
+function drawRoutes() {
+  const source = map?.getSource('route');
+  if (!source) return; // added on load, which draws the current routes
+  source.setData({
+    type: 'FeatureCollection',
+    features: routes.flatMap((route, index) => mappedParts(route).map((coordinates) => ({
+      type: 'Feature', properties: { selected: index === selectedRoute },
+      geometry: { type: 'LineString', coordinates },
+    }))),
+  });
+  const route = routes[selectedRoute];
+  const coordinates = route?.geometry?.coordinates ?? [];
+  const ends = [[stops[0]?.point, coordinates[0]], [stops.at(-1)?.point, coordinates.at(-1)]];
+  const links = route ? ends
+    .filter(([point, end]) => point && end && distanceMeters(point, end) > 10)
+    .map(([point, end]) => ({
+      type: 'Feature', properties: {},
+      geometry: { type: 'LineString', coordinates: [[point.lng, point.lat], end] },
+    })) : [];
+  // Stretches without a mapped road (access to a town): dotted like the links, never as a road.
+  for (const section of route?.approximateSections ?? []) {
+    const [from, to] = section.geometryIndex;
+    links.push({ type: 'Feature', properties: {},
+      geometry: { type: 'LineString', coordinates: coordinates.slice(from, to + 1) } });
+  }
+  map.getSource('route-links')?.setData({ type: 'FeatureCollection', features: links });
+}
+
+/** The route geometry without its approximate sections (those are drawn dotted). */
+function mappedParts(route) {
+  const coordinates = route.geometry?.coordinates ?? [];
+  const sections = [...(route.approximateSections ?? [])].sort((a, b) => a.geometryIndex[0] - b.geometryIndex[0]);
+  const parts = [];
+  let start = 0;
+  for (const { geometryIndex: [from, to] } of sections) {
+    if (from > start) parts.push(coordinates.slice(start, from + 1));
+    start = Math.max(start, to);
+  }
+  if (start < coordinates.length - 1) parts.push(coordinates.slice(start));
+  return parts.filter((part) => part.length >= 2);
+}
+
+function distanceMeters(point, [lng, lat]) {
+  const kx = 111_195 * Math.cos((lat * Math.PI) / 180);
+  return Math.hypot((point.lng - lng) * kx, (point.lat - lat) * 111_195);
+}
+
+// ---------------------------------------------------------------- install: Android app and web app
+
+/** The browser's offer to install the viewer (Chrome, Edge, Samsung Internet…), used by our buttons. */
+let installPrompt = null;
+let webInstalled = false;
+/** android.json of this server; androidState: idle → loading → ready | none | error. */
+let androidRelease = null;
+let androidState = 'idle';
+
+window.addEventListener('beforeinstallprompt', (event) => {
+  // Offered by the "Instalar app" button and the menu instead of the browser's own banner.
+  event.preventDefault();
+  installPrompt = event;
+  renderInstall();
+});
+window.addEventListener('appinstalled', () => {
+  installPrompt = null;
+  webInstalled = true;
+  renderInstall();
+});
+
+function openInstall() {
+  renderInstall();
+  if (!$('install').open) $('install').showModal();
+  if (!isIos) loadAndroidRelease();
+}
+
+async function loadAndroidRelease() {
+  if (['loading', 'ready', 'none'].includes(androidState)) return;
+  androidState = 'loading';
+  renderInstall();
+  try {
+    const response = await fetch(ANDROID_RELEASE, { cache: 'no-cache' });
+    if (response.status === 404) {
+      androidState = 'none';
+    } else if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    } else {
+      androidRelease = await response.json();
+      androidState = androidRelease?.url && androidRelease?.version ? 'ready' : 'none';
+    }
+  } catch {
+    androidState = 'error'; // asked again the next time the dialog opens
+  }
+  renderInstall();
+}
+
+function renderInstall() {
+  const standalone = installed();
+  $('install-done').hidden = !standalone;
+
+  // The Android app, as published by infrastructure/scripts/publish-app.py (not for iPhone or iPad).
+  $('install-android').hidden = isIos;
+  const apk = $('install-apk');
+  apk.hidden = androidState !== 'ready';
+  if (androidState === 'ready') {
+    const { version, size, minAndroid, url, file } = androidRelease;
+    apk.href = url;
+    if (file) apk.setAttribute('download', file);
+    $('install-android-detail').textContent = [`Versión ${version}`, size ? formatSize(size) : null,
+      minAndroid ? `Android ${minAndroid} o superior` : null].filter(Boolean).join(' · ');
+    $('install-android-note').textContent = 'Si Android lo pide, permite instalar apps de este origen.';
+  } else {
+    $('install-android-detail').textContent = 'Mapas sin conexión, recorridos y rutas guardadas.';
+    $('install-android-note').textContent = {
+      idle: '',
+      loading: 'Buscando la última versión…',
+      none: 'La app para Android todavía no está publicada en este servidor.',
+      error: 'No se pudo consultar la app para Android. Inténtalo de nuevo en un momento.',
+    }[androidState];
+  }
+
+  // The viewer itself, installed from the browser.
+  $('install-web').hidden = standalone;
+  $('install-pwa').hidden = !installPrompt;
+  const note = $('install-web-note');
+  if (webInstalled) {
+    note.replaceChildren('Listo: Route Maps quedó en tu pantalla de inicio.');
+  } else if (installPrompt) {
+    note.replaceChildren();
+  } else if (!window.isSecureContext) {
+    note.replaceChildren('Para instalarla desde el navegador, abre esta página con https://.');
+  } else if (isIos) {
+    note.replaceChildren('En Safari, toca ', icon('i-share'), ' Compartir y luego «Agregar a inicio».');
+  } else {
+    note.replaceChildren('En el menú del navegador, elige «Instalar app» o «Agregar a la pantalla de inicio».');
+  }
+}
+
+async function installWebApp() {
+  const prompt = installPrompt;
+  if (!prompt) return;
+  installPrompt = null; // an offer can be used only once
+  try {
+    await prompt.prompt();
+    if ((await prompt.userChoice).outcome === 'accepted') webInstalled = true;
+  } catch {
+    // The browser withdrew the offer: its menu still has "Instalar".
+  }
+  renderInstall();
+}
+
+/** Keeps the viewer files for the next visits (sw.js); the map works the same without it. */
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
+// ---------------------------------------------------------------- start
+
+function wireDialogs() {
+  // Close buttons, a click on the backdrop and Escape (native) close the menu and the dialogs.
+  for (const dialog of document.querySelectorAll('dialog')) {
+    for (const button of dialog.querySelectorAll('[data-close]')) {
+      button.addEventListener('click', () => dialog.close());
+    }
+    dialog.addEventListener('click', (event) => {
+      if (event.target !== dialog) return;
+      const box = dialog.getBoundingClientRect();
+      const inside = event.clientX >= box.left && event.clientX <= box.right &&
+        event.clientY >= box.top && event.clientY <= box.bottom;
+      if (!inside) dialog.close();
+    });
+  }
+  $('open-menu').addEventListener('click', () => $('menu').showModal());
+  $('menu-install').addEventListener('click', () => {
+    $('menu').close();
+    openInstall();
+  });
+  $('install-pwa').addEventListener('click', installWebApp);
+}
+
+function wireSheet() {
+  $('sheet-toggle').addEventListener('click', () => {
+    setSheetCollapsed(!$('sheet').classList.contains('sheet--collapsed'));
+    updateSheetOffset();
+  });
+  new ResizeObserver(() => updateSheetOffset()).observe($('sheet'));
+  phone.addEventListener('change', () => updateSheetOffset());
+}
+
+function wireControls() {
+  wireDialogs();
+  wireSheet();
+  createCombobox($('search-input'), $('search-results'), {
+    onSelect: (result) => showPlace(placeFromResult(result)),
+  });
+  $('open-directions').addEventListener('click', () => openDirections());
+  $('close-directions').addEventListener('click', closeDirections);
+  $('place-close').addEventListener('click', hidePlace);
+  $('place-to').addEventListener('click', () => {
+    if (!place) return;
+    const destination = stops.at(-1);
+    Object.assign(destination, { point: place.point, label: place.name });
+    activeStopId = stops.find((stop) => !stop.point)?.id ?? destination.id;
+    hidePlace();
+    openDirections();
+    update();
+  });
+  $('place-from').addEventListener('click', () => {
+    if (!place) return;
+    Object.assign(stops[0], { point: place.point, label: place.name });
+    activeStopId = stops.find((stop) => !stop.point)?.id ?? stops[0].id;
+    hidePlace();
+    openDirections();
+    update();
+  });
+  $('place-stop').addEventListener('click', () => {
+    if (!place) return;
+    const empty = stops.find((stop) => !stop.point);
+    if (empty) {
+      setStop(empty.id, place.point, place.name);
+    } else if (!addStop(place.point, place.name)) {
+      setStatus(`Se admiten hasta ${MAX_POINTS - 2} paradas.`, true);
+      return;
+    }
+    hidePlace();
+  });
+  $('add-stop').addEventListener('click', () => {
+    const stop = addStop();
+    if (stop) focusStop(stop.id);
+  });
+  $('swap-stops').addEventListener('click', () => {
+    stops.reverse();
+    update();
+  });
 }
 
 async function main() {
-  ui.clear.addEventListener('click', clearRoute);
-  ui.profile.addEventListener('change', () => origin && destination && calculate());
+  renderProfiles();
+  renderStops();
+  wireControls();
   try {
-    [regions, styleTemplate] = await Promise.all([
+    // Both were preloaded by index.html while the scripts downloaded.
+    let styleText;
+    [regions, styleText] = await Promise.all([
       api('/maps/regions'),
-      fetch('/maps/style/style.json').then((response) => response.text()),
+      fetch('/maps/style/style.json').then((response) => {
+        if (!response.ok) throw new Error(`style.json: HTTP ${response.status}`);
+        return response.text();
+      }),
     ]);
+    template = parseTemplate(styleText, ORIGIN);
   } catch (error) {
-    setStatus(`No se pudo cargar el catálogo: ${error.message}`, true);
+    if (error.code === 'OFFLINE' || error instanceof TypeError) {
+      // The installed app opens without a connection: the map comes as soon as there is one.
+      showAppError('Sin conexión con el servidor. El mapa se cargará cuando vuelva la conexión.');
+      window.addEventListener('online', () => window.location.reload(), { once: true });
+    } else {
+      showAppError(`No se pudo cargar el mapa: ${error.message}`);
+    }
     return;
   }
   if (regions.length === 0) {
-    ui.region.replaceChildren(new Option('Sin regiones'));
-    setStatus('No hay regiones preparadas. Ejecuta: make prepare-region REGION=<región>', true);
+    showAppError('No hay mapas preparados. Ejecuta make prepare-region REGION=world (mapa mundial) ' +
+      'y REGION=<país> (detalle).');
     return;
   }
-  ui.region.replaceChildren(...regions.map((region) => new Option(`${region.name} (${region.id})`, region.id)));
-  ui.region.disabled = false;
-  const requested = new URLSearchParams(window.location.search).get('region');
-  const initial = regions.find((region) => region.id === requested) ?? regions[0];
-  ui.region.value = initial.id;
-  ui.region.addEventListener('change', () => {
-    clearRoute();
-    showRegion(regions.find((region) => region.id === ui.region.value));
-  });
-  showRegion(initial);
+  initMap();
+  renderCoverage();
+  // "Cómo llegar" shortcut of the installed app (manifest.webmanifest): once, not on every reload.
+  const params = new URLSearchParams(window.location.search);
+  if (params.has('ruta')) {
+    params.delete('ruta');
+    const query = params.toString();
+    window.history.replaceState(window.history.state, '',
+      `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`);
+    openDirections();
+  }
 }
 
 main();

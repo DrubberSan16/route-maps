@@ -226,6 +226,15 @@ class $CatalogRegionsTable extends CatalogRegions
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _assetsMeta = const VerificationMeta('assets');
+  @override
+  late final GeneratedColumn<String> assets = GeneratedColumn<String>(
+    'assets',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     code,
@@ -249,6 +258,7 @@ class $CatalogRegionsTable extends CatalogRegions
     tilesUrl,
     updatedAt,
     fetchedAt,
+    assets,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -424,6 +434,12 @@ class $CatalogRegionsTable extends CatalogRegions
     } else if (isInserting) {
       context.missing(_fetchedAtMeta);
     }
+    if (data.containsKey('assets')) {
+      context.handle(
+        _assetsMeta,
+        assets.isAcceptableOrUnknown(data['assets']!, _assetsMeta),
+      );
+    }
     return context;
   }
 
@@ -517,6 +533,10 @@ class $CatalogRegionsTable extends CatalogRegions
         DriftSqlType.dateTime,
         data['${effectivePrefix}fetched_at'],
       )!,
+      assets: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}assets'],
+      ),
     );
   }
 
@@ -549,6 +569,10 @@ class CatalogRegionRow extends DataClass
   final String tilesUrl;
   final DateTime updatedAt;
   final DateTime fetchedAt;
+
+  /// Relief, satellite and overlay archives of the region (JSON array of the
+  /// API's `assets`); null in catalogs cached before they existed.
+  final String? assets;
   const CatalogRegionRow({
     required this.code,
     required this.name,
@@ -571,6 +595,7 @@ class CatalogRegionRow extends DataClass
     required this.tilesUrl,
     required this.updatedAt,
     required this.fetchedAt,
+    this.assets,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -614,6 +639,9 @@ class CatalogRegionRow extends DataClass
     map['tiles_url'] = Variable<String>(tilesUrl);
     map['updated_at'] = Variable<DateTime>(updatedAt);
     map['fetched_at'] = Variable<DateTime>(fetchedAt);
+    if (!nullToAbsent || assets != null) {
+      map['assets'] = Variable<String>(assets);
+    }
     return map;
   }
 
@@ -652,6 +680,9 @@ class CatalogRegionRow extends DataClass
       tilesUrl: Value(tilesUrl),
       updatedAt: Value(updatedAt),
       fetchedAt: Value(fetchedAt),
+      assets: assets == null && nullToAbsent
+          ? const Value.absent()
+          : Value(assets),
     );
   }
 
@@ -684,6 +715,7 @@ class CatalogRegionRow extends DataClass
       tilesUrl: serializer.fromJson<String>(json['tilesUrl']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
       fetchedAt: serializer.fromJson<DateTime>(json['fetchedAt']),
+      assets: serializer.fromJson<String?>(json['assets']),
     );
   }
   @override
@@ -711,6 +743,7 @@ class CatalogRegionRow extends DataClass
       'tilesUrl': serializer.toJson<String>(tilesUrl),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
       'fetchedAt': serializer.toJson<DateTime>(fetchedAt),
+      'assets': serializer.toJson<String?>(assets),
     };
   }
 
@@ -736,6 +769,7 @@ class CatalogRegionRow extends DataClass
     String? tilesUrl,
     DateTime? updatedAt,
     DateTime? fetchedAt,
+    Value<String?> assets = const Value.absent(),
   }) => CatalogRegionRow(
     code: code ?? this.code,
     name: name ?? this.name,
@@ -762,6 +796,7 @@ class CatalogRegionRow extends DataClass
     tilesUrl: tilesUrl ?? this.tilesUrl,
     updatedAt: updatedAt ?? this.updatedAt,
     fetchedAt: fetchedAt ?? this.fetchedAt,
+    assets: assets.present ? assets.value : this.assets,
   );
   CatalogRegionRow copyWithCompanion(CatalogRegionsCompanion data) {
     return CatalogRegionRow(
@@ -794,6 +829,7 @@ class CatalogRegionRow extends DataClass
       tilesUrl: data.tilesUrl.present ? data.tilesUrl.value : this.tilesUrl,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
       fetchedAt: data.fetchedAt.present ? data.fetchedAt.value : this.fetchedAt,
+      assets: data.assets.present ? data.assets.value : this.assets,
     );
   }
 
@@ -820,7 +856,8 @@ class CatalogRegionRow extends DataClass
           ..write('routingDownloadUrl: $routingDownloadUrl, ')
           ..write('tilesUrl: $tilesUrl, ')
           ..write('updatedAt: $updatedAt, ')
-          ..write('fetchedAt: $fetchedAt')
+          ..write('fetchedAt: $fetchedAt, ')
+          ..write('assets: $assets')
           ..write(')'))
         .toString();
   }
@@ -848,6 +885,7 @@ class CatalogRegionRow extends DataClass
     tilesUrl,
     updatedAt,
     fetchedAt,
+    assets,
   ]);
   @override
   bool operator ==(Object other) =>
@@ -873,7 +911,8 @@ class CatalogRegionRow extends DataClass
           other.routingDownloadUrl == this.routingDownloadUrl &&
           other.tilesUrl == this.tilesUrl &&
           other.updatedAt == this.updatedAt &&
-          other.fetchedAt == this.fetchedAt);
+          other.fetchedAt == this.fetchedAt &&
+          other.assets == this.assets);
 }
 
 class CatalogRegionsCompanion extends UpdateCompanion<CatalogRegionRow> {
@@ -898,6 +937,7 @@ class CatalogRegionsCompanion extends UpdateCompanion<CatalogRegionRow> {
   final Value<String> tilesUrl;
   final Value<DateTime> updatedAt;
   final Value<DateTime> fetchedAt;
+  final Value<String?> assets;
   final Value<int> rowid;
   const CatalogRegionsCompanion({
     this.code = const Value.absent(),
@@ -921,6 +961,7 @@ class CatalogRegionsCompanion extends UpdateCompanion<CatalogRegionRow> {
     this.tilesUrl = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.fetchedAt = const Value.absent(),
+    this.assets = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   CatalogRegionsCompanion.insert({
@@ -945,6 +986,7 @@ class CatalogRegionsCompanion extends UpdateCompanion<CatalogRegionRow> {
     required String tilesUrl,
     required DateTime updatedAt,
     required DateTime fetchedAt,
+    this.assets = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : code = Value(code),
        name = Value(name),
@@ -980,6 +1022,7 @@ class CatalogRegionsCompanion extends UpdateCompanion<CatalogRegionRow> {
     Expression<String>? tilesUrl,
     Expression<DateTime>? updatedAt,
     Expression<DateTime>? fetchedAt,
+    Expression<String>? assets,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1005,6 +1048,7 @@ class CatalogRegionsCompanion extends UpdateCompanion<CatalogRegionRow> {
       if (tilesUrl != null) 'tiles_url': tilesUrl,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (fetchedAt != null) 'fetched_at': fetchedAt,
+      if (assets != null) 'assets': assets,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1031,6 +1075,7 @@ class CatalogRegionsCompanion extends UpdateCompanion<CatalogRegionRow> {
     Value<String>? tilesUrl,
     Value<DateTime>? updatedAt,
     Value<DateTime>? fetchedAt,
+    Value<String?>? assets,
     Value<int>? rowid,
   }) {
     return CatalogRegionsCompanion(
@@ -1055,6 +1100,7 @@ class CatalogRegionsCompanion extends UpdateCompanion<CatalogRegionRow> {
       tilesUrl: tilesUrl ?? this.tilesUrl,
       updatedAt: updatedAt ?? this.updatedAt,
       fetchedAt: fetchedAt ?? this.fetchedAt,
+      assets: assets ?? this.assets,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1125,6 +1171,9 @@ class CatalogRegionsCompanion extends UpdateCompanion<CatalogRegionRow> {
     if (fetchedAt.present) {
       map['fetched_at'] = Variable<DateTime>(fetchedAt.value);
     }
+    if (assets.present) {
+      map['assets'] = Variable<String>(assets.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1155,6 +1204,7 @@ class CatalogRegionsCompanion extends UpdateCompanion<CatalogRegionRow> {
           ..write('tilesUrl: $tilesUrl, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('fetchedAt: $fetchedAt, ')
+          ..write('assets: $assets, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();

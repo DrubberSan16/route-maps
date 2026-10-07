@@ -4,21 +4,27 @@
 ARG NODE_IMAGE=node:24-alpine
 ARG NGINX_IMAGE=nginx:1.28-alpine
 
-# Viewer libraries (MapLibre GL JS + PMTiles) taken from the npm registry at
-# build time, so no third-party CDN is needed at runtime.
+# Viewer libraries (MapLibre GL JS + PMTiles) and its font (Inter, SIL OFL 1.1)
+# taken from the npm registry at build time, so no third-party CDN is needed at
+# runtime.
 FROM ${NODE_IMAGE} AS viewer-libs
 ARG MAPLIBRE_GL_VERSION=6.11.2
 ARG PMTILES_VERSION=4.5.0
+ARG INTER_VERSION=5.3.0
 WORKDIR /libs
 RUN npm pack --silent "maplibre-gl@${MAPLIBRE_GL_VERSION}" "pmtiles@${PMTILES_VERSION}" \
- && mkdir -p maplibre pmtiles vendor \
+       "@fontsource-variable/inter@${INTER_VERSION}" \
+ && mkdir -p maplibre pmtiles inter vendor/fonts \
  && tar -xzf "maplibre-gl-${MAPLIBRE_GL_VERSION}.tgz" -C maplibre \
  && tar -xzf "pmtiles-${PMTILES_VERSION}.tgz" -C pmtiles \
+ && tar -xzf "fontsource-variable-inter-${INTER_VERSION}.tgz" -C inter \
  && cp maplibre/package/dist/maplibre-gl.mjs maplibre/package/dist/maplibre-gl-shared.mjs \
        maplibre/package/dist/maplibre-gl-worker.mjs maplibre/package/dist/maplibre-gl.css vendor/ \
  && cp maplibre/package/LICENSE.txt vendor/maplibre-gl.LICENSE.txt \
  && cp pmtiles/package/dist/pmtiles.js vendor/ \
- && (cp pmtiles/package/LICENSE vendor/pmtiles.LICENSE 2>/dev/null || true)
+ && (cp pmtiles/package/LICENSE vendor/pmtiles.LICENSE 2>/dev/null || true) \
+ && cp inter/package/files/inter-latin-wght-normal.woff2 vendor/fonts/ \
+ && cp inter/package/LICENSE vendor/fonts/inter.LICENSE.txt
 
 FROM ${NGINX_IMAGE}
 RUN rm -f /etc/nginx/conf.d/default.conf
@@ -30,7 +36,19 @@ COPY nginx/html/ /usr/share/nginx/html/
 COPY --from=viewer-libs /libs/vendor/ /usr/share/nginx/html/vendor/
 COPY maps/fonts/ /usr/share/nginx/maps-assets/fonts/
 COPY maps/style/style.json /usr/share/nginx/maps-assets/style/style.json
-RUN mkdir -p /data/maps /data/routing
+# The service worker of the installable viewer keeps a copy of these files named after their
+# content: any change in the page, the libraries or the style installs the new copy.
+RUN build="$(cd /usr/share/nginx && find html maps-assets/style -type f ! -name sw.js -print0 | sort -z \
+      | xargs -0 sha256sum | sha256sum | cut -c1-16)" \
+ && sed -i "s/__BUILD__/${build}/" /usr/share/nginx/html/sw.js \
+ && grep -q "${build}" /usr/share/nginx/html/sw.js
+# Gzipped copies served as they are (gzip_static): the viewer's ES modules shrink from about
+# 1.1 MB to 300 kB and the glyphs by 40 %, with no compression work per request.
+RUN find /usr/share/nginx/html /usr/share/nginx/maps-assets -type f \
+      \( -name '*.js' -o -name '*.mjs' -o -name '*.css' -o -name '*.html' -o -name '*.json' \
+         -o -name '*.pbf' -o -name '*.svg' -o -name '*.webmanifest' \) \
+      -exec sh -c 'for f; do gzip -9 -n -c "$f" > "$f.gz"; done' sh {} + \
+ && mkdir -p /data/maps /data/routing /data/app
 EXPOSE 80 443
 HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -q -O /dev/null http://127.0.0.1/nginx-health || exit 1

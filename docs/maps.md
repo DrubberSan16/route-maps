@@ -1,157 +1,133 @@
-# Mapas
+# Cartografía autónoma
 
-Los mapas de la plataforma son teselas vectoriales propias generadas a partir
-de extractos de OpenStreetMap y guardadas en un archivo PMTiles por región. El
-mismo archivo sirve para ver el mapa en línea (lecturas por rango desde Nginx)
-y para usarlo sin conexión (descargado en el teléfono).
+## Flujo
 
-No se descargan teselas de `tile.openstreetmap.org` ni de ningún otro servidor
-de teselas, y no se usan datos ni teselas de Google Maps.
+1. `native-data download ecuador` lee el registro `infrastructure/sources/sources.json` y descarga, valida
+   y guarda cada capa oficial en `storage/imports/native/ecuador/`:
+   - **Marco Geoestadístico Nacional del INEC** (tipo `inec-geostatistical`): un GeoPackage por provincia
+     (y el nacional solo para la malla de población). Cada paquete se descarga, se verifica, se reproyecta
+     de UTM 17S a WGS 84 y se guarda comprimido en `inec/<provincia>/`; el paquete original se borra.
+     Una provincia solo se vuelve a procesar si cambia su tamaño, fecha o ETag remotos.
+   - Capas ArcGIS/WFS (red vial estatal, límites, salud, educación, turismo, agua, clima, barrios):
+     GeoJSON EPSG:4326 validado (tipo, coordenadas, conteo, límites) con SHA-256 en `manifest.json`.
+2. `native-data build ecuador` genera, a partir de esas capas:
+   - `graph.bin`: grafo nacional de rutas (calles del censo + red vial estatal), ver `docs/routing.md`;
+   - `search.ndjson`: índice de búsqueda (lugares, calles, puntos de interés, parroquias, barrios);
+   - `map-*.geojson`: capas del mapa con clases, nombres legibles y rangos (calles, lugares, POI, parques,
+     manzanas, edificaciones, población).
+3. `region.sh map ecuador` genera con el generador propio (Planetiler) dos archivos PMTiles: el mapa
+   (`--native_layers=map`) y, aparte, la población y el clima (`--native_layers=overlays`, hasta el zoom
+   12) en `ecuador.overlays.pmtiles`. Así la primera carga del mapa no descarga capas que empiezan
+   ocultas.
+4. `region.sh rasters ecuador` (`raster-data download` + `build`) genera el relieve
+   (`ecuador.terrain.pmtiles`) y la vista satélite (`ecuador.satellite.pmtiles`) de las regiones que los
+   declaran en `regions.json` (`rasters`, con su zoom máximo).
+5. `region.sh manifest` calcula checksum, cobertura y versión del mapa y de esos archivos extra
+   (`assets`). El backend registra el manifiesto; Nginx sirve los archivos.
 
-## Proceso
+`make prepare-region REGION=ecuador` ejecuta todos los pasos (`--skip-rasters` omite el 4). No hay
+solicitudes de datos cartográficos durante el uso del mapa.
 
-```mermaid
-flowchart LR
-  catalog["regions.json<br/>catálogo"] --> dl
-  dl["Extracto .osm.pbf<br/>Geofabrik o recorte por bbox"] --> tilegen["tilegen<br/>Planetiler + perfil propio"]
-  water["Polígonos de agua<br/>OSMCoastline (opcional)"] -.-> tilegen
-  tilegen --> pmtiles["&lt;región&gt;.pmtiles"]
-  pmtiles --> manifest["&lt;región&gt;.region.json<br/>versión, SHA-256, bbox"]
-  manifest --> api["Backend<br/>tabla map_regions"]
-  pmtiles --> nginx["Nginx<br/>Range / descargas"]
-```
+## Nombres
 
-```bash
-make prepare-region REGION=guayaquil          # todo el proceso
-make build-map REGION=guayaquil               # solo el mapa (extracto ya descargado)
-make build-map REGION=guayaquil WATER=1       # con océanos
-```
+Las fuentes guardan los nombres en mayúsculas y casi siempre sin tildes. La construcción los convierte a
+títulos en español (`12 S-E (MALECON SIMON BOLIVAR PALACIOS)` → `Av. 12 S-E - Malecón Simón Bolívar
+Palacios`), restaura tildes con un diccionario curado más las grafías con tilde de las propias fuentes,
+repara la "Ñ" que el censo exporta como "NI" (`BANIOS` → `Baños`) y los caracteres dañados por
+exportaciones. Los nombres populares que no están en las fuentes (p. ej. "Malecón 2000") se declaran en
+`infrastructure/sources/aliases.json` y se resuelven contra la entrada oficial; si no se encuentra, la
+construcción lo informa y no lo inventa.
 
-1. **Extracto.** Las regiones con `source.url` se descargan de Geofabrik
-   (reintentos, reanudación, MD5 publicado y verificación con `osmium`); las que
-   tienen `source.parent` + `bbox` se recortan del extracto padre con
-   `osmium extract`. Ejemplo: Guayaquil se recorta de Ecuador.
-2. **Teselas.** `tilegen` (Java 21, Planetiler 0.10.2) aplica el perfil propio
-   `MapsPlatformProfile` y escribe PMTiles v3 de zoom 0 a 14. Los clientes
-   amplían más allá del zoom 14 sin perder calidad (sobrezoom de vectores).
-   Memoria de Java: `TILEGEN_MEMORY` (2g por defecto; 4g para Ecuador completo).
-3. **Manifiesto.** `storage/maps/<carpeta>/<región>.region.json` con la versión,
-   los SHA-256 del mapa y del paquete de routing, el bbox, los zooms, la fuente y
-   la fecha de los datos OSM.
-4. **Registro.** El backend lee los manifiestos al arrancar
-   (`REGIONS_SYNC_ON_STARTUP`) o con `make regions-sync` y actualiza
-   `map_regions`. Un administrador puede deshabilitar una región con
-   `PATCH /api/v1/maps/regions/{id}`.
+Los barrios que el municipio publica por etapas o sectores ("Alborada I … XII Etapa", "Urdesa Central" y
+"Urdesa Norte") reciben además una entrada de búsqueda con el nombre que usa la gente ("Alborada",
+"Urdesa"), que cubre la unión de sus etapas. `region.sh aliases <región>` aplica grupos y alias al índice
+sin reconstruir la geometría (segundos en lugar de la construcción completa).
 
-Los archivos se escriben primero con un nombre temporal y se renombran al
-terminar: Nginx y el backend nunca ven un mapa a medio generar.
+## Capas del mapa
 
-## Versiones
+| Capa | Contenido |
+|---|---|
+| `transportation` | Calles del censo con su jerarquía (autopista, avenida, calle, pasaje, peatonal, escalinata…), nombre y numeración de la red estatal; la red estatal completa en los zooms bajos |
+| `landuse` | Áreas urbanas (zooms bajos), manzanas (z13+), parques, canchas, cementerios y plazas |
+| `building` | Huellas de edificaciones del censo (z14, se amplían en zooms mayores) |
+| `place` | Ciudades, cabeceras cantonales y parroquiales, localidades, barrios de Guayaquil y parroquias urbanas de Quito |
+| `poi` | Terminales, aeropuertos, centros comerciales, mercados, hospitales, centros de salud, farmacias, universidades, escuelas, iglesias, parques, estadios, bancos, UPC, bomberos, oficinas públicas, hoteles, restaurantes, gasolineras… (`class`, `subclass`, `rank`) |
+| `boundary` | Provincia, cantón y parroquia |
+| `water`, `waterway` | Cuerpos de agua y ríos |
+| `population` | Malla censal de 1 km² (mapa de calor), en el archivo de capas |
+| `climate` | Regiones de precipitación anual y pisos térmicos, en el archivo de capas |
 
-- La versión es `AAAA.MM.DD.HHMM` (UTC) del momento de la generación, o el
-  valor de `REGION_VERSION` si se define.
-- `GET /api/v1/maps/regions/{id}/version` devuelve la versión actual y
-  `POST /api/v1/maps/regions/updates` compara las versiones que tiene un
-  dispositivo.
-- Para actualizar una región basta con volver a ejecutar `make prepare-region`
-  (con `FORCE=1` para descargar un extracto nuevo aunque ya exista uno).
+El estilo se genera con `infrastructure/maps/style/build-style.py` (web, SDK y app móvil). Los iconos de los
+puntos de interés los dibujan los clientes a partir de `poi-<class>` (`/sdk/map-icons.js` en la web,
+`poi_icons.dart` en la app) con los colores de `maps-platform:poi-colors`. Las capas
+`overlay-precipitation`, `overlay-temperature` y `overlay-population` empiezan ocultas y leen la fuente
+`overlays` (`__OVERLAYS_URL__`): el archivo de capas de la región o, en mapas generados antes de que
+existiera, el propio mapa.
 
-Ejemplo de manifiesto:
+## Tipos de mapa: satélite y relieve
 
-```json
-{
-  "code": "monaco",
-  "name": "Mónaco",
-  "country": "MC",
-  "version": "2026.09.25.1844",
-  "bbox": [7.349, 43.71, 7.491, 43.77],
-  "minZoom": 0,
-  "maxZoom": 14,
-  "mapFile": "europe/monaco.pmtiles",
-  "mapChecksum": "efc60875a9f9…",
-  "routingFile": "monaco/monaco.valhalla.tar",
-  "routingChecksum": "d3cd80973270…",
-  "source": "https://download.geofabrik.de/europe/monaco-latest.osm.pbf",
-  "dataTimestamp": "2016-03-05T00:26:02Z",
-  "generatedAt": "2026-09-25T18:44:12Z"
-}
-```
+El estilo describe en `maps-platform:map-types` cómo dibujar cada tipo, y los clientes lo aplican solo si
+la región publica el archivo que necesita (`assets` del catálogo):
 
-## Esquema de teselas
+| Tipo | Archivo | Qué hace |
+|---|---|---|
+| `map` | el mapa | Mapa vectorial |
+| `satellite` | `<región>.satellite.pmtiles` (WebP) | Imagen bajo calles y nombres; oculta senderos y bordes de calles y aclara los nombres |
+| `relief` | `<región>.terrain.pmtiles` (Terrarium, WebP) | Colorea por altura (`color-relief`) y sombrea las laderas (`hillshade`, método `igor`) |
 
-Esquema propio `maps-platform` versión `1.0.0` (en la metadata del PMTiles).
-Los nombres de las capas y de las clases siguen convenciones habituales de los
-mapas vectoriales, pero el perfil es una implementación propia sobre los datos
-de OpenStreetMap. Todas las capas con nombre incluyen `name`, y `name_es` /
-`name_en` cuando difieren de `name`; el estilo usa `coalesce(name_es, name)`.
+- **Satélite**: compuestos anuales Sentinel-2 de ESA WorldCover (mediana sin nubes, 10 m). Se usa el de
+  2021 y sus vacíos se completan con el de 2020. Zoom máximo 12-14 según la región.
+- **Relieve**: Copernicus DEM GLO-30 (~30 m), modelo de superficie: incluye edificios y vegetación; el mar
+  se toma como altura 0. Zoom máximo 11-12.
 
-| Capa | Geometría | Contenido | Zoom mínimo |
-| --- | --- | --- | --- |
-| `water` | polígonos | ocean, lake, reservoir, lagoon, river, pond, basin, dock | 0 (océano), 4 (lagos), 6 (ríos), 10 (resto) |
-| `waterway` | líneas | river, canal, stream, drain | 8, 11, 12, 13 |
-| `water_name` | puntos | nombres de mares, bahías, lagos y lagunas | 0 (océanos), 3 (mares), según tamaño |
-| `landuse` | polígonos | parques, bosques, humedales (manglar), cultivos, zonas residenciales, comerciales e industriales, cementerios, hospitales, escuelas, aeródromos… | 7, 9 o 12 según la clase |
-| `building` | polígonos | edificios con `height` / `min_height` | 13 |
-| `transportation` | líneas | motorway, trunk, primary, secondary, tertiary, minor, busway, service, track, path, rail, transit, ferry, runway, taxiway, aerialway; atributos `ramp`, `brunnel`, `layer`, `oneway`, `surface`, `access`, `ref` | 4 (autopistas) a 14 (senderos) |
-| `boundary` | líneas | límites administrativos de nivel 2 a 8 (`admin_level`, `maritime`, `disputed`) | 0 (países), 4 (provincias), 8, 10 |
-| `place` | puntos | país, provincia, ciudad, pueblo, aldea, isla, barrio (`rank`, `population`, `capital`) | 2 (país) a 14 |
-| `poi` | puntos | 40 categorías (`class`): hospital, farmacia, escuela, gasolinera, supermercado, banco, parada de bus, aeropuerto… con `subclass` y `rank` | según importancia y tamaño |
-| `housenumber` | puntos | números de casa | 14 (se muestran desde el 17) |
+Donde se superponen regiones (país, provincia y ciudad), el visor y la app dibujan la imagen satélite de
+todas, la de la región más pequeña encima: en una ciudad se ve la de más zoom. El relieve se toma solo de
+la región exterior, porque sombrear dos veces las mismas laderas las oscurece.
 
-Los océanos solo existen si se pasan los polígonos de agua de OSMCoastline
-(`WATER=1`, descarga única de ~1 GB en `storage/imports/`), porque
-OpenStreetMap modela el mar como líneas de costa y no como polígonos. Sin
-ellos, el mar se ve con el color de fondo del estilo.
+Ambas fuentes son abiertas, se descargan una vez (`storage/imports/raster/`) y se sirven desde la propia
+instalación con la cita que pide su licencia (control de atribución del mapa y `/fuentes.html`).
 
-## Estilo
+## Tráfico
 
-`infrastructure/maps/style/style.json` ("Maps Platform Light", 45 capas) es el
-único estilo de la plataforma; la app lleva una copia idéntica en
-`mobile/assets/map/style.json` (el CI comprueba que no difieran). Es una
-plantilla con dos marcadores que cada cliente reemplaza:
+Al activar el tráfico, los clientes muestran `traffic-network` (autopistas, troncales, primarias,
+secundarias y terciarias del mapa) en verde, que significa «sin demoras reportadas», y encima los tramos
+medidos que devuelve `GET /api/v1/traffic/flow?bbox=…` para vistas de ciudad (zoom 10 o más y hasta 2,5°):
+verde, amarillo (moderado), naranja (lento) y rojo (detenido) según `maps-platform:traffic`. Los tramos
+salen solo de recorridos anónimos de la propia app: en vivo (últimos 15 minutos) o, más tenues, lo
+habitual para ese día y hora en las últimas 4 semanas (`source: typical`, zona horaria
+`TRAFFIC_TIME_ZONE`). Sin muestras suficientes no se pinta congestión.
 
-| Marcador | Valor |
-| --- | --- |
-| `__PMTILES_URL__` | Archivo PMTiles: `https://host/maps/ecuador/guayaquil.pmtiles` o `file:///…` |
-| `__GLYPHS_URL__` | Carpeta de glifos: `https://host/maps/fonts` o `file:///…/fonts` |
+Como en un buscador de mapas, la densidad de puntos crece con el zoom: aeropuertos, terminales,
+hospitales y centros comerciales desde el 12; mercados, museos y municipios desde el 13; parques y
+centros de salud desde el 14-15; escuelas, templos y restaurantes desde el 16; consultorios desde el 18.
+Los puntos principales se colocan antes que los nombres de calles y los menores después, para que las
+calles conserven sus nombres.
 
-El visor web (`/`) y la app (`MapStyleService`) hacen ese reemplazo. Nginx
-sirve la plantilla en `/maps/style/style.json` sin caché para que los cambios
-de estilo lleguen de inmediato.
+## Fuentes y citas
 
-### Glifos
+La página `/fuentes.html` del visor lista las fuentes con su cita oficial. El INEC exige citar la fuente en
+todo producto derivado ("Fuente: INSTITUTO NACIONAL DE ESTADÍSTICA Y CENSOS – INEC; Marco Geoestadístico
+Nacional; 2026; GeoPackage; Quito, Ecuador.") y un acuerdo específico para uso comercial. La cartografía
+1:50.000 del IGM no se usa: su licencia prohíbe redistribuirla por Internet.
 
-Las etiquetas usan Noto Sans Regular, Medium e Italic en PBF SDF
-(`{fontstack}/{range}.pbf`), con los rangos `0-255`, `256-511`, `512-767`,
-`768-1023`, `1024-1279`, `7680-7935`, `8192-8447` y `8448-8703`: latín
-completo con tildes y ñ, griego, cirílico, puntuación y flechas. Nginx los
-sirve en `/maps/fonts/` y la app los lleva dentro para dibujar etiquetas sin
-conexión. Procedencia y licencia en
-[infrastructure/maps/fonts/README.md](../infrastructure/maps/fonts/README.md).
+## Formato offline
 
-## Servir los mapas
+El mapa se distribuye como un único archivo PMTiles. El endpoint de descarga soporta `Range`, reanudación,
+ETag y checksum del manifiesto. Una aplicación puede guardar el archivo, sustituir `__PMTILES_URL__` (y
+`__OVERLAYS_URL__`) en el estilo y renderizar sin conexión. El relieve, la vista satélite y las capas se
+leen de la plataforma mientras hay conexión; también se pueden descargar con
+`GET /api/v1/maps/regions/{id}/assets/{tipo}/download`.
 
-| Ruta | Uso |
-| --- | --- |
-| `GET /maps/<carpeta>/<región>.pmtiles` | Lectura por rangos para ver el mapa en línea (`pmtiles://`); `206 Partial Content`, CORS y caché de 1 h |
-| `GET /api/v1/maps/regions/{id}/download` | Descarga completa para usar sin conexión: el backend valida la región y Nginx entrega el archivo (`X-Accel-Redirect`) con `Range`, `If-Range`, `X-Checksum-Sha256` y `X-Region-Version` |
-| `GET /api/v1/maps/regions/{id}/routing/download` | Paquete de routing de la región (mismo mecanismo) |
-| `GET /maps/style/style.json` | Plantilla del estilo |
-| `GET /maps/fonts/{fontstack}/{range}.pbf` | Glifos |
+## Calidad y límites
 
-El resto de `/maps/` (manifiestos, archivos temporales) no es público. El
-servidor no genera ni guarda teselas sueltas: todo sale del archivo PMTiles.
-
-## Licencias
-
-- Los datos son © OpenStreetMap contributors bajo la
-  [Open Database License 1.0](https://opendatacommons.org/licenses/odbl/). Los
-  PMTiles y los paquetes de routing contienen esos datos: al distribuirlos (por
-  ejemplo, en las descargas de la app) se aplican las condiciones de la ODbL,
-  atribución y compartir bajo la misma licencia las bases de datos derivadas.
-- La atribución "© OpenStreetMap contributors" va en la metadata de cada
-  PMTiles, en la fuente del estilo y siempre visible sobre el mapa en la app y
-  en el visor.
-- Los glifos Noto Sans están bajo la SIL Open Font License 1.1.
-- Planetiler, MapLibre y PMTiles mantienen sus licencias; el visor incluye las
-  de MapLibre GL JS y PMTiles junto a sus archivos.
+- Las calles provienen de la cartografía censal: cubren todas las áreas amanzanadas del país (ciudades,
+  cabeceras y localidades), no tienen sentidos de circulación ni restricciones de giro y la propia fuente
+  advierte que no tiene precisión métrica.
+- Entre pueblos, la red es la estatal. Si el acceso de un pueblo a su carretera no está en ninguna fuente,
+  el grafo lo une con un tramo recto marcado como aproximado (nunca sobre agua); los clientes lo muestran
+  punteado.
+- El clima es climatología (precipitación anual y pisos térmicos), no pronóstico en vivo.
+- El tráfico y la actividad solo aparecen con recorridos recientes de la propia plataforma y con umbrales
+  de privacidad. El sistema responde sin datos antes que inventarlos.
+- La vista satélite tiene 10 m por píxel: muestra barrios, parques y vías grandes, no el detalle de una
+  ortofoto. Las ortofotos requieren autorización/licencia por zona antes de incorporarse.

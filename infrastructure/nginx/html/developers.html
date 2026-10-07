@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Integrar Route Maps</title>
+  <link rel="preload" href="vendor/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <style>
+    @font-face { font-family: Inter; src: url("vendor/fonts/inter-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+    :root { color-scheme: light; font-family: Inter, system-ui, sans-serif; color: #0f172a; background: #f8fafc; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    main { width: min(880px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0 72px; }
+    a { color: #1d4ed8; }
+    .back { display: inline-block; margin-bottom: 32px; }
+    h1 { margin: 0 0 12px; font-size: clamp(2rem, 5vw, 3.4rem); line-height: 1.05; letter-spacing: -.04em; }
+    h2 { margin-top: 40px; font-size: 1.35rem; }
+    p, li { line-height: 1.65; }
+    .lead { max-width: 720px; color: #475569; font-size: 1.08rem; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin: 28px 0; }
+    .card { padding: 18px; border: 1px solid #dbe4f0; border-radius: 12px; background: white; }
+    .card strong { display: block; margin-bottom: 6px; }
+    pre { overflow: auto; padding: 18px; border-radius: 10px; background: #0f172a; color: #e2e8f0; font: 13px/1.6 ui-monospace, monospace; }
+    code { font-family: ui-monospace, monospace; }
+    .note { padding: 14px 16px; border-left: 4px solid #2563eb; background: #eff6ff; }
+    #demo-map { height: 360px; overflow: hidden; border: 1px solid #dbe4f0; border-radius: 12px; background: #e2e8f0; }
+  </style>
+</head>
+<body>
+  <main>
+    <a class="back" href="/">← Volver al mapa</a>
+    <h1>Una plataforma, lista para integrar.</h1>
+    <p class="lead">El mapa, las búsquedas, las rutas y las descargas offline salen de esta misma instalación. El navegador de la aplicación cliente no necesita claves de servicios externos ni una CDN.</p>
+
+    <div class="cards">
+      <div class="card"><strong>Mapa, satélite y relieve</strong>Regiones publicadas en PMTiles, con estilo, tipografías, imagen y alturas servidos localmente.</div>
+      <div class="card"><strong>Tráfico</strong>Vías principales y tramos medidos por recorridos propios, en vivo o con lo habitual a esa hora.</div>
+      <div class="card"><strong>Rutas</strong>Tres perfiles vehiculares, paradas intermedias, condiciones e indicaciones en español.</div>
+      <div class="card"><strong>Modo offline</strong>Descargas reanudables, versión y SHA-256 para verificar cada archivo.</div>
+    </div>
+
+    <h2>Demostración del SDK</h2>
+    <div id="demo-map" aria-label="Mapa de demostración"></div>
+
+    <h2>Insertar un mapa</h2>
+    <pre><code>&lt;div id="map" style="height: 480px"&gt;&lt;/div&gt;
+&lt;script type="module"&gt;
+  import { createMap } from
+    'https://route-map.softwareeasydev.com/sdk/route-maps.js';
+
+  const platform = await createMap({
+    container: 'map',
+    region: 'ecuador'
+  });
+&lt;/script&gt;</code></pre>
+
+    <h2>Satélite, relieve y tráfico</h2>
+    <pre><code>const platform = await createMap({
+  container: 'map',
+  region: 'guayaquil',
+  mapType: 'satellite',          // 'map', 'satellite' o 'relief'
+  traffic: true,
+  onTrafficStatus: (text) =&gt; console.log(text)
+});
+
+platform.mapTypes;               // [{ id, label, available }]
+platform.setMapType('relief');   // false si la región no publica sus alturas
+platform.getMapType();
+platform.setTraffic(false);
+platform.setOverlay('population', true); // 'precipitation', 'temperature'</code></pre>
+
+    <h2>Calcular una ruta</h2>
+    <pre><code>import { calculateRoute } from
+  'https://route-map.softwareeasydev.com/sdk/route-maps.js';
+
+const route = await calculateRoute({
+  origin: { latitude: -2.1960, longitude: -79.8832 },
+  destination: { latitude: -2.1709, longitude: -79.9224 },
+  profile: 'CAR',
+  alternatives: true
+});</code></pre>
+
+    <h2>Descargar un mapa para usarlo offline</h2>
+    <pre><code>import { offlineMapUrl } from
+  'https://route-map.softwareeasydev.com/sdk/route-maps.js';
+
+const url = offlineMapUrl('ecuador');
+// GET admite Range e incluye X-Checksum-Sha256 y X-Region-Version.</code></pre>
+
+    <p class="note">Los endpoints completos, formatos, procedencia y respuestas se pueden consultar en la <a href="/api/docs">documentación interactiva de la API</a>. El catálogo auditable de cada publicación conserva internamente la organización, licencia y fecha de sus datos.</p>
+  </main>
+  <script type="module">
+    import { createMap } from './sdk/route-maps.js';
+    createMap({ container: 'demo-map', region: 'ecuador', navigationControl: true }).catch((error) => {
+      const demo = document.getElementById('demo-map');
+      demo.textContent = `No se pudo cargar la demostración: ${error.message}`;
+      demo.setAttribute('role', 'alert');
+    });
+  </script>
+</body>
+</html>

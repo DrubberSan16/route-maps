@@ -95,6 +95,51 @@ export class TrackingService {
     };
   }
 
+  /** Privacy-preserving traffic cells derived solely from this platform's recent trips. */
+  async traffic(bounds: { minLat: number; minLng: number; maxLat: number; maxLng: number }) {
+    if (bounds.minLat >= bounds.maxLat || bounds.minLng >= bounds.maxLng) {
+      throw new AppException(ErrorCode.VALIDATION_ERROR, 'Invalid traffic bounding box');
+    }
+    const rows = await this.prisma.$queryRaw<
+      {
+        longitude: number;
+        latitude: number;
+        speed_kph: number;
+        samples: bigint;
+        trips: bigint;
+        measured_at: Date;
+      }[]
+    >`
+      SELECT round(ST_X(location)::numeric, 3)::double precision AS longitude,
+             round(ST_Y(location)::numeric, 3)::double precision AS latitude,
+             round((avg(speed) * 3.6)::numeric, 1)::double precision AS speed_kph,
+             count(*) AS samples, count(DISTINCT trip_id) AS trips,
+             max(recorded_at) AS measured_at
+      FROM trip_points
+      WHERE recorded_at >= now() - interval '15 minutes'
+        AND speed IS NOT NULL
+        AND location && ST_MakeEnvelope(${bounds.minLng}, ${bounds.minLat}, ${bounds.maxLng}, ${bounds.maxLat}, 4326)
+      GROUP BY 1, 2
+      HAVING count(*) >= 5 AND count(DISTINCT trip_id) >= 3
+      ORDER BY measured_at DESC
+      LIMIT 5000`;
+    return {
+      type: 'FeatureCollection',
+      generatedAt: new Date().toISOString(),
+      windowMinutes: 15,
+      features: rows.map((row) => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [row.longitude, row.latitude] },
+        properties: {
+          speedKph: row.speed_kph,
+          samples: Number(row.samples),
+          trips: Number(row.trips),
+          measuredAt: row.measured_at,
+        },
+      })),
+    };
+  }
+
   private validate(point: LocationPoint): void {
     if (!isValidCoordinate(point)) {
       throw new AppException(ErrorCode.INVALID_COORDINATES, 'Coordinates are out of range');

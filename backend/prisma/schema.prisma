@@ -156,6 +156,8 @@ model MapRegion {
   routingFile     String?                                @map("routing_file")
   routingFileSize BigInt?                                @map("routing_file_size")
   routingChecksum String?                                @map("routing_checksum")
+  /// Relief, satellite and overlay archives: [{kind, file, size, checksum, minZoom, maxZoom, format}].
+  assets          Json                                   @default("[]")
   enabled         Boolean                                @default(true)
   createdAt       DateTime                               @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt       DateTime                               @updatedAt @map("updated_at") @db.Timestamptz(3)

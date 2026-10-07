@@ -2,7 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 import { BoundingBox } from '../../../common/geo/geojson';
-import { MapRegion, MapRegionRepository, UpsertMapRegion } from '../domain/map-region.entity';
+import {
+  MapRegion,
+  MapRegionRepository,
+  RegionAsset,
+  UpsertMapRegion,
+} from '../domain/map-region.entity';
 
 interface MapRegionRow {
   id: string;
@@ -21,6 +26,7 @@ interface MapRegionRow {
   routing_file: string | null;
   routing_file_size: bigint | null;
   routing_checksum: string | null;
+  assets: RegionAsset[] | null;
   enabled: boolean;
   created_at: Date;
   updated_at: Date;
@@ -30,7 +36,7 @@ interface MapRegionRow {
 const SELECT = Prisma.sql`
   SELECT id, code, name, country, province, city, version, file_name, file_size, checksum,
          min_zoom, max_zoom, download_url, routing_file, routing_file_size, routing_checksum,
-         enabled, created_at, updated_at,
+         assets, enabled, created_at, updated_at,
          CASE WHEN bounding_box IS NULL THEN NULL ELSE json_build_array(
            ST_XMin(bounding_box), ST_YMin(bounding_box), ST_XMax(bounding_box), ST_YMax(bounding_box)
          ) END AS bbox
@@ -56,6 +62,7 @@ const toEntity = (row: MapRegionRow): MapRegion => ({
   routingFile: row.routing_file,
   routingFileSize: row.routing_file_size === null ? null : Number(row.routing_file_size),
   routingChecksum: row.routing_checksum,
+  assets: Array.isArray(row.assets) ? row.assets : [],
   enabled: row.enabled,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -105,6 +112,7 @@ export class PrismaMapRegionRepository implements MapRegionRepository {
       routingFile: region.routingFile ?? null,
       routingFileSize: region.routingFileSize == null ? null : BigInt(region.routingFileSize),
       routingChecksum: region.routingChecksum ?? null,
+      assets: (region.assets ?? []) as unknown as Prisma.InputJsonValue,
       enabled: region.enabled,
     };
     const [minLng, minLat, maxLng, maxLat] = region.bbox;

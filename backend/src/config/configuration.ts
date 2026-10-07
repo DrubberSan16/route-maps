@@ -1,5 +1,7 @@
-export type RoutingProviderName = 'valhalla' | 'osrm';
-export type GeocodingProviderName = 'nominatim' | 'none';
+import { join } from 'node:path';
+
+export type RoutingProviderName = 'native' | 'valhalla' | 'osrm';
+export type GeocodingProviderName = 'native' | 'nominatim' | 'none';
 
 export interface AppConfig {
   nodeEnv: string;
@@ -33,6 +35,8 @@ export interface AppConfig {
     language: string;
     cacheTtlSeconds: number;
     maxAlternatives: number;
+    /** Road graph built by the data pipeline (graph.bin). */
+    nativeGraphFile: string;
   };
   geocoding: {
     provider: GeocodingProviderName;
@@ -40,6 +44,11 @@ export interface AppConfig {
     timeoutMs: number;
     cacheTtlSeconds: number;
     defaultCountryCodes?: string;
+    /** Countries and cities of the world base map (world.places.json), searched with Nominatim. */
+    placesFile: string;
+    nativeDataPath: string;
+    /** Search index built by the data pipeline (search.ndjson). */
+    nativeSearchFile: string;
   };
   maps: {
     storagePath: string;
@@ -50,6 +59,10 @@ export interface AppConfig {
     accelRedirect: boolean;
     accelMapsPrefix: string;
     accelRoutingPrefix: string;
+  };
+  traffic: {
+    /** IANA time zone whose weekday and hour pick the historical ("typical") traffic. */
+    timeZone: string;
   };
   rateLimit: { ttlMs: number; limit: number };
 }
@@ -75,6 +88,7 @@ const optional = (value: string | undefined): string | undefined =>
 export const loadConfiguration = (): AppConfig => {
   const env = process.env;
   const cors = (env.CORS_ORIGINS ?? '*').trim();
+  const nativeDataPath = optional(env.NATIVE_DATA_PATH) ?? '/data/native/ecuador';
   return {
     nodeEnv: env.NODE_ENV ?? 'development',
     port: int(env.APP_PORT, 3000),
@@ -105,7 +119,7 @@ export const loadConfiguration = (): AppConfig => {
       refreshTtlSeconds: int(env.JWT_REFRESH_TTL_SECONDS, 60 * 60 * 24 * 30),
     },
     routing: {
-      provider: (env.ROUTING_PROVIDER ?? 'valhalla').toLowerCase() as RoutingProviderName,
+      provider: (env.ROUTING_PROVIDER ?? 'native').toLowerCase() as RoutingProviderName,
       valhallaUrl: env.VALHALLA_URL ?? 'http://routing:8002',
       osrm: {
         carUrl: optional(env.OSRM_URL) ?? optional(env.OSRM_CAR_URL),
@@ -116,6 +130,7 @@ export const loadConfiguration = (): AppConfig => {
       language: env.ROUTING_LANGUAGE ?? 'es-ES',
       cacheTtlSeconds: int(env.ROUTING_CACHE_TTL_SECONDS, 600),
       maxAlternatives: int(env.ROUTING_MAX_ALTERNATIVES, 2),
+      nativeGraphFile: optional(env.NATIVE_ROUTING_GRAPH_FILE) ?? join(nativeDataPath, 'graph.bin'),
     },
     geocoding: {
       provider: (env.GEOCODING_PROVIDER ?? 'none').toLowerCase() as GeocodingProviderName,
@@ -123,6 +138,11 @@ export const loadConfiguration = (): AppConfig => {
       timeoutMs: int(env.GEOCODING_TIMEOUT_MS, 8000),
       cacheTtlSeconds: int(env.GEOCODING_CACHE_TTL_SECONDS, 86400),
       defaultCountryCodes: optional(env.GEOCODING_COUNTRY_CODES),
+      placesFile:
+        optional(env.GEOCODING_PLACES_FILE) ??
+        join(env.MAP_STORAGE_PATH ?? '/data/maps', 'world', 'world.places.json'),
+      nativeDataPath,
+      nativeSearchFile: optional(env.NATIVE_SEARCH_FILE) ?? join(nativeDataPath, 'search.ndjson'),
     },
     maps: {
       storagePath: env.MAP_STORAGE_PATH ?? '/data/maps',
@@ -131,6 +151,9 @@ export const loadConfiguration = (): AppConfig => {
       accelRedirect: bool(env.MAP_DOWNLOAD_ACCEL_REDIRECT, false),
       accelMapsPrefix: env.MAP_DOWNLOAD_ACCEL_MAPS_PREFIX ?? '/_protected/maps/',
       accelRoutingPrefix: env.MAP_DOWNLOAD_ACCEL_ROUTING_PREFIX ?? '/_protected/routing/',
+    },
+    traffic: {
+      timeZone: optional(env.TRAFFIC_TIME_ZONE) ?? 'America/Guayaquil',
     },
     rateLimit: {
       ttlMs: int(env.RATE_LIMIT_TTL_MS, 60000),

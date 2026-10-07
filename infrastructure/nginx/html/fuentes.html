@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fuentes de datos</title>
+  <link rel="preload" href="vendor/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <style>
+    @font-face { font-family: Inter; src: url("vendor/fonts/inter-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+    :root {
+      --color-foreground: #0f172a; --color-muted-foreground: #475569; --color-background: #f8fafc;
+      --color-card: #ffffff; --color-border: #dbe4f0; --color-primary: #1d4ed8;
+      color-scheme: light; font-family: Inter, system-ui, sans-serif; color: var(--color-foreground);
+      background: var(--color-background);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    main { width: min(880px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0 72px; }
+    a { color: var(--color-primary); }
+    .back { display: inline-block; margin-bottom: 32px; }
+    h1 { margin: 0 0 12px; font-size: clamp(1.8rem, 4vw, 2.6rem); line-height: 1.1; letter-spacing: -0.03em; }
+    p, li { line-height: 1.65; }
+    .lead { color: var(--color-muted-foreground); max-width: 720px; }
+    ul { padding: 0; list-style: none; display: grid; gap: 12px; }
+    li { padding: 16px 18px; background: var(--color-card); border: 1px solid var(--color-border); border-radius: 12px; }
+    li strong { display: block; }
+    li span { color: var(--color-muted-foreground); font-size: 0.95rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <a class="back" href="/">← Volver al mapa</a>
+    <h1>Fuentes de datos</h1>
+    <p class="lead">El mapa, las búsquedas y las rutas se generan en esta plataforma a partir de información
+      geográfica pública del Estado ecuatoriano y de programas abiertos de observación de la Tierra, descargada,
+      validada y servida desde nuestros propios servidores. Estas son las fuentes y sus citas oficiales.</p>
+    <ul>
+      <li><strong>Fuente: INSTITUTO NACIONAL DE ESTADÍSTICA Y CENSOS – INEC; Marco Geoestadístico Nacional; 2026; GeoPackage; Quito, Ecuador.</strong>
+        <span>Ejes viales, manzanas, edificaciones, áreas amanzanadas, localidades y malla de población.</span></li>
+      <li><strong>Ministerio de Transporte y Obras Públicas, Red Vial Estatal.</strong>
+        <span>Carreteras entre ciudades y su numeración.</span></li>
+      <li><strong>Comité Nacional de Límites Internos (CONALI), organización territorial 2026.</strong>
+        <span>Límites de provincias, cantones y parroquias.</span></li>
+      <li><strong>Ministerio de Salud Pública, establecimientos de salud 2023.</strong>
+        <span>Hospitales, centros y puestos de salud.</span></li>
+      <li><strong>Ministerio de Educación, instituciones educativas.</strong>
+        <span>Escuelas, colegios y unidades educativas.</span></li>
+      <li><strong>Ministerio de Turismo, inventario de atractivos turísticos 2024.</strong>
+        <span>Atractivos naturales y culturales.</span></li>
+      <li><strong>Secretaría Nacional de Gestión de Riesgos.</strong>
+        <span>Servicios de publicación de las capas nacionales y la hidrografía.</span></li>
+      <li><strong>Instituto Nacional de Meteorología e Hidrología (INAMHI).</strong>
+        <span>Regiones de precipitación y de temperatura (climatología).</span></li>
+      <li><strong>GAD Municipal de Guayaquil y Municipio del Distrito Metropolitano de Quito.</strong>
+        <span>Cooperativas, urbanizaciones y parroquias urbanas.</span></li>
+      <li><strong>ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021) processed by ESA WorldCover consortium.</strong>
+        <span>Vista satélite: compuestos Sentinel-2 sin nubes de 10 m (2021, completados con 2020). Licencia CC BY 4.0.</span></li>
+      <li><strong>Copernicus DEM GLO-30 © DLR e.V. 2010-2014 y © Airbus Defence and Space GmbH 2014-2018, provisto por COPERNICUS de la Unión Europea y la ESA.</strong>
+        <span>Relieve: altura de la superficie cada ~30 m (incluye edificios y vegetación).</span></li>
+      <li><strong>Natural Earth.</strong>
+        <span>Mapa base mundial (dominio público).</span></li>
+    </ul>
+    <p class="lead">El tráfico, en vivo y habitual, y la actividad provienen únicamente de recorridos anónimos
+      registrados con esta aplicación; sin datos suficientes no se muestra congestión. La cartografía censal no tiene
+      precisión métrica ni determina límites oficiales.</p>
+  </main>
+</body>
+</html>

@@ -20,5 +20,6 @@ Object.assign(process.env, {
   MAP_DOWNLOAD_ACCEL_REDIRECT: 'false',
   MAP_STORAGE_PATH: join(storage, 'maps'),
   ROUTING_STORAGE_PATH: join(storage, 'routing'),
+  NATIVE_ROUTING_GRAPH_FILE: join(storage, 'native', 'graph.bin'),
   E2E_STORAGE_PATH: storage,
 });

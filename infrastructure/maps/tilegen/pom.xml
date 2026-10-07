@@ -9,7 +9,7 @@
   <version>1.0.0</version>
   <name>Maps Platform tile generator</name>
   <description>
-    Builds the platform's own vector tiles (PMTiles) from OpenStreetMap extracts with Planetiler.
+    Builds the platform's own vector tiles (PMTiles) from audited public and official sources.
   </description>
 
   <properties>

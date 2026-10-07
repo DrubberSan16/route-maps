@@ -32,7 +32,10 @@ class TripsScreen extends ConsumerWidget {
             final trip = value[index];
             final isRecording = recording?.trip?.id == trip.id;
             return ListTile(
-              leading: Icon(_icon(trip.status), color: isRecording ? Colors.red : null),
+              leading: Icon(
+                _icon(trip.status),
+                color: isRecording ? Theme.of(context).colorScheme.error : null,
+              ),
               title: Text(trip.name ?? 'Recorrido ${trip.profile.label.toLowerCase()}'),
               subtitle: Text(
                 '${formatDateTime(trip.startedAt)} · ${formatDistance(trip.distanceMeters)} · '

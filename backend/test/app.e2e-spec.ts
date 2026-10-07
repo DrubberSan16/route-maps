@@ -8,6 +8,7 @@ import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/bootstrap';
 import { haversineMeters, Position, toPosition } from '../src/common/geo/geojson';
+import { encodeGraph } from '../src/infrastructure/native/testing/graph-fixture';
 import { PrismaService } from '../src/infrastructure/prisma/prisma.service';
 import { MapRegionService } from '../src/modules/regions/application/map-region.service';
 import {
@@ -76,11 +77,23 @@ const REGION = 'e2e-guayaquil';
 // Deterministic content: the region keeps the same checksum across runs.
 const MAP_BYTES = Buffer.concat([Buffer.from('PMTiles'), Buffer.alloc(96 * 1024, 'e2e-tiles')]);
 const ROUTING_BYTES = Buffer.alloc(32 * 1024, 'e2e-valhalla-tiles');
+const SATELLITE_BYTES = Buffer.from('satellite imagery tiles (e2e)');
 const sha256 = (data: Buffer) => createHash('sha256').update(data).digest('hex');
 
 // Guayaquil: Malecón 2000 -> Parque Seminario.
 const ORIGIN = { latitude: -2.1962, longitude: -79.8862 };
 const DESTINATION = { latitude: -2.1894, longitude: -79.8975 };
+
+// Three parallel 55 km/h avenues in the south of the city, away from the other trips of the suite.
+const AVENUES = [-2.23, -2.225, -2.22];
+const TRAFFIC_BBOX = [-79.935, -2.235, -79.92, -2.215];
+const ROAD_GRAPH = encodeGraph({
+  nodes: AVENUES.flatMap((lat): [number, number][] => [
+    [-79.93, lat],
+    [-79.925, lat],
+  ]),
+  edges: AVENUES.map((_, index) => ({ u: index * 2, v: index * 2 + 1, cls: 'primary' as const })),
+});
 
 const binary = (res: request.Response, callback: (error: Error | null, body: Buffer) => void) => {
   const chunks: Buffer[] = [];
@@ -109,6 +122,8 @@ describe('Maps Platform API (e2e)', () => {
     };
     await put(`maps/ecuador/${REGION}.pmtiles`, MAP_BYTES);
     await put(`routing/${REGION}/${REGION}.valhalla.tar`, ROUTING_BYTES);
+    await put(`maps/ecuador/${REGION}.satellite.pmtiles`, SATELLITE_BYTES);
+    await put('native/graph.bin', ROAD_GRAPH);
     await put(
       `maps/ecuador/${REGION}.region.json`,
       JSON.stringify({
@@ -123,6 +138,16 @@ describe('Maps Platform API (e2e)', () => {
         maxZoom: 14,
         mapFile: `ecuador/${REGION}.pmtiles`,
         routingFile: `${REGION}/${REGION}.valhalla.tar`,
+        assets: [
+          {
+            kind: 'satellite',
+            file: `ecuador/${REGION}.satellite.pmtiles`,
+            checksum: sha256(SATELLITE_BYTES),
+            minZoom: 0,
+            maxZoom: 14,
+            format: 'webp',
+          },
+        ],
       }),
     );
 
@@ -254,7 +279,29 @@ describe('Maps Platform API (e2e)', () => {
         mapDownloadUrl: `/api/v1/maps/regions/${REGION}/download`,
         routingChecksum: sha256(ROUTING_BYTES),
         bbox: [-80.1, -2.35, -79.75, -1.95],
+        tilesUrl: `/maps/ecuador/${REGION}.pmtiles?v=${sha256(MAP_BYTES).slice(0, 16)}`,
+        assets: [
+          {
+            kind: 'satellite',
+            format: 'webp',
+            minZoom: 0,
+            maxZoom: 14,
+            size: SATELLITE_BYTES.length,
+            checksum: sha256(SATELLITE_BYTES),
+            tilesUrl: `/maps/ecuador/${REGION}.satellite.pmtiles?v=${sha256(SATELLITE_BYTES).slice(0, 16)}`,
+            downloadUrl: `/api/v1/maps/regions/${REGION}/assets/satellite/download`,
+          },
+        ],
       });
+    });
+
+    it('serves the satellite archive of the region for offline use', async () => {
+      const res = await api('get', `/maps/regions/${REGION}/assets/satellite/download`)
+        .parse(binary)
+        .expect(200);
+      expect(res.headers['x-checksum-sha256']).toBe(sha256(SATELLITE_BYTES));
+      expect(sha256(res.body as Buffer)).toBe(sha256(SATELLITE_BYTES));
+      await api('get', `/maps/regions/${REGION}/assets/terrain/download`).expect(404);
     });
 
     it('locates the region covering a GPS position (PostGIS)', async () => {
@@ -611,6 +658,69 @@ describe('Maps Platform API (e2e)', () => {
 
       expect(routes.sort()).toEqual(ids.slice(0, 4).sort());
       expect(deletedRouteIds).toEqual([ids[4]]);
+    });
+  });
+
+  describe("traffic from the platform's own trips (PostGIS)", () => {
+    type Flow = {
+      typicalWindowDays: number;
+      features: {
+        geometry: { coordinates: Position[] };
+        properties: { source: string; status: string; trips: number };
+      }[];
+    };
+
+    /** Fixes along an avenue, from `trips` different trips, `minutesAgo` before now. */
+    const drive = async (lat: number, trips: number, speed: number, minutesAgo: number) => {
+      const prisma = app.get(PrismaService);
+      const me = await api('get', '/auth/me').expect(200);
+      for (let trip = 0; trip < trips; trip++) {
+        const tripId = randomUUID();
+        await prisma.$executeRaw`
+          INSERT INTO trips (id, user_id, profile, status, started_at, updated_at)
+          VALUES (${tripId}::uuid, ${me.body.data.id}::uuid, 'CAR', 'COMPLETED',
+                  now() - make_interval(mins => ${minutesAgo}), now())`;
+        for (let fix = 0; fix < 2; fix++) {
+          await prisma.$executeRaw`
+            INSERT INTO trip_points (id, trip_id, location, accuracy, speed, recorded_at)
+            VALUES (gen_random_uuid(), ${tripId}::uuid,
+                    ST_SetSRID(ST_MakePoint(${-79.929 + fix * 0.002}, ${lat}), 4326), 6, ${speed},
+                    now() - make_interval(mins => ${minutesAgo}, secs => ${fix * 10 + trip}))`;
+        }
+      }
+    };
+
+    it('colours live segments and fills the rest with the same hour of past weeks', async () => {
+      const prisma = app.get(PrismaService);
+      // The test owns this corner of the e2e database: start from a clean slate on every run.
+      await prisma.$executeRaw`
+        DELETE FROM trips WHERE id IN (
+          SELECT trip_id FROM trip_points
+          WHERE location && ST_MakeEnvelope(${TRAFFIC_BBOX[0]}, ${TRAFFIC_BBOX[1]},
+                                            ${TRAFFIC_BBOX[2]}, ${TRAFFIC_BBOX[3]}, 4326))`;
+      const WEEK = 7 * 24 * 60;
+      await drive(AVENUES[0], 2, 2, 5); // now: 7 km/h, jammed
+      await drive(AVENUES[1], 3, 14, WEEK); // same weekday and hour last week: 50 km/h
+      await drive(AVENUES[2], 3, 3, WEEK + 5 * 60); // last week, five hours earlier: ignored
+      await drive(AVENUES[2], 1, 3, 3); // a single trip now: not enough to say anything
+
+      const res = await api('get', `/traffic/flow?bbox=${TRAFFIC_BBOX.join(',')}`).expect(200);
+      const flow = res.body.data as Flow;
+      const byAvenue = new Map(
+        flow.features.map((feature) => [feature.geometry.coordinates[0][1], feature.properties]),
+      );
+      expect([...byAvenue.keys()].sort()).toEqual([AVENUES[0], AVENUES[1]].sort());
+      expect(byAvenue.get(AVENUES[0])).toMatchObject({
+        source: 'live',
+        status: 'jammed',
+        trips: 2,
+      });
+      expect(byAvenue.get(AVENUES[1])).toMatchObject({
+        source: 'typical',
+        status: 'free',
+        trips: 3,
+      });
+      expect(flow.typicalWindowDays).toBe(28);
     });
   });
 

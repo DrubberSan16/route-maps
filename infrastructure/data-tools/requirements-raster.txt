@@ -1,0 +1,7 @@
+# Relief and satellite layers (bin/raster-data.py), installed in /opt/raster by the Dockerfile.
+# rasterio's wheels bundle GDAL, PROJ and libcurl: no system GIS packages are needed.
+numpy==2.4.6
+rasterio==1.4.4
+affine==3.0.1
+pillow==12.3.0
+pmtiles==3.8.1

@@ -37,6 +37,10 @@ export interface GeocodingSearchQuery {
 export interface GeocodingProvider {
   readonly name: string;
   readonly enabled: boolean;
+  /** True while answers are partial because a source failed recently: they are not cached. */
+  readonly degraded?: boolean;
+  /** Version of the data behind the answers; part of the cache key, so new data is never hidden. */
+  dataVersion?(): Promise<string>;
   search(query: GeocodingSearchQuery): Promise<GeocodingResult[]>;
   reverse(latitude: number, longitude: number, language?: string): Promise<GeocodingResult | null>;
   health(): Promise<'up' | 'down' | 'disabled'>;

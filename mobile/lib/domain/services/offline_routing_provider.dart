@@ -6,8 +6,7 @@ import '../entities/routing_profile.dart';
 ///
 /// Map tiles (PMTiles) only draw the map; routing needs the road graph of the
 /// region and an engine running on the device. See docs/offline-architecture.md
-/// for the plan based on Valhalla's mobile build and the per-region routing
-/// package the API already serves.
+/// for the planned device port of the platform's native official-road graph.
 abstract class OfflineRoutingProvider {
   /// Engine name shown to the user.
   String get name;
