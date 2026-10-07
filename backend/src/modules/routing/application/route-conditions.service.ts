@@ -1,10 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 import { AppConfigService } from '../../../config/app-config.service';
-import { Position } from '../../../common/geo/geojson';
-import { RouteResult } from '../domain/entities/route-result';
+import { BoundingBox, Position } from '../../../common/geo/geojson';
+import { RouteResult, bboxOf } from '../domain/entities/route-result';
+import { RoutingProfile } from '../domain/value-objects/routing-profile';
 
 interface ClimateZone {
   id: string;
@@ -40,6 +42,32 @@ export interface RouteConditions {
   adjustedDurationSeconds: number;
 }
 
+const MOTOR: RoutingProfile[] = ['CAR', 'MOTORCYCLE', 'TRUCK'];
+/** Trips whose speeds tell how a route of each profile flows: the same kind of vehicle. */
+const COMPARABLE_PROFILES: Record<RoutingProfile, RoutingProfile[]> = {
+  CAR: MOTOR,
+  MOTORCYCLE: MOTOR,
+  TRUCK: MOTOR,
+  BICYCLE: ['BICYCLE'],
+  PEDESTRIAN: ['PEDESTRIAN'],
+};
+
+/** Fixes this close to a route tell how it flows. */
+const NEAR_ROUTE_METERS = 150;
+
+/**
+ * The box of a route widened by twice NEAR_ROUTE_METERS, counting 110 km per degree (fewer meters
+ * than any degree has): the spatial index of the fixes narrows the search with it, with room to
+ * spare, before the exact distance is measured.
+ */
+function nearRouteBox(positions: Position[]): BoundingBox {
+  const [west, south, east, north] = bboxOf(positions);
+  const dLat = (2 * NEAR_ROUTE_METERS) / 110_000;
+  const farthestLat = Math.min(Math.max(Math.abs(south), Math.abs(north)) + dLat, 89);
+  const dLng = dLat / Math.cos((farthestLat * Math.PI) / 180);
+  return [west - dLng, south - dLat, east + dLng, north + dLat];
+}
+
 /** Adds first-party traffic observations and locally cached climate zones to a route. */
 @Injectable()
 export class RouteConditionsService {
@@ -51,9 +79,9 @@ export class RouteConditionsService {
     private readonly config: AppConfigService,
   ) {}
 
-  async evaluate(route: RouteResult): Promise<RouteConditions> {
+  async evaluate(route: RouteResult, profile: RoutingProfile): Promise<RouteConditions> {
     const [traffic, climate] = await Promise.all([
-      this.traffic(route).catch((error: unknown) => {
+      this.traffic(route, profile).catch((error: unknown) => {
         this.logger.warn({ err: error }, 'Could not evaluate route traffic');
         return null;
       }),
@@ -92,22 +120,31 @@ export class RouteConditionsService {
     };
   }
 
-  private async traffic(route: RouteResult) {
+  /**
+   * Fixes of the last 15 minutes near the route, from trips of the same kind of vehicle and as
+   * plausible as those of the traffic map. Both the time and the box use an index of the fixes.
+   */
+  private async traffic(route: RouteResult, profile: RoutingProfile) {
     const geometry = JSON.stringify(route.geometry);
+    const box = nearRouteBox(route.geometry.coordinates);
     const rows = await this.prisma.$queryRaw<
       { average_speed_kph: number; samples: bigint; trips: bigint }[]
     >`
-      SELECT round((avg(speed) * 3.6)::numeric, 1)::double precision AS average_speed_kph,
-             count(*) AS samples, count(DISTINCT trip_id) AS trips
-      FROM trip_points
-      WHERE recorded_at >= now() - interval '15 minutes'
-        AND speed IS NOT NULL
+      SELECT round((avg(p.speed) * 3.6)::numeric, 1)::double precision AS average_speed_kph,
+             count(*) AS samples, count(DISTINCT p.trip_id) AS trips
+      FROM trip_points p
+      JOIN trips t ON t.id = p.trip_id
+      WHERE p.recorded_at >= now() - interval '15 minutes'
+        AND p.location && ST_MakeEnvelope(${box[0]}, ${box[1]}, ${box[2]}, ${box[3]}, 4326)
+        AND p.speed IS NOT NULL AND p.speed >= 0 AND p.speed < 70
+        AND (p.accuracy IS NULL OR p.accuracy <= 50)
+        AND t.profile::text IN (${Prisma.join(COMPARABLE_PROFILES[profile])})
         AND ST_DWithin(
-          location::geography,
+          p.location::geography,
           ST_SetSRID(ST_GeomFromGeoJSON(${geometry}), 4326)::geography,
-          150
+          ${NEAR_ROUTE_METERS}
         )
-      HAVING count(*) >= 5 AND count(DISTINCT trip_id) >= 3`;
+      HAVING count(*) >= 5 AND count(DISTINCT p.trip_id) >= 3`;
     return rows[0] ?? null;
   }
 

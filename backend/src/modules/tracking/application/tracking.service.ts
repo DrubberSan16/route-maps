@@ -10,6 +10,8 @@ import { LocationPoint, TrackingBatchResult } from '../domain/location-point';
 
 const MAX_FUTURE_SKEW_MS = 24 * 60 * 60 * 1000;
 const MIN_TIMESTAMP = Date.UTC(2000, 0, 1);
+/** Largest box of the public traffic cells (degrees, about a province), as for /traffic/flow. */
+const MAX_TRAFFIC_SPAN = 2.5;
 
 @Injectable()
 export class TrackingService {
@@ -99,6 +101,15 @@ export class TrackingService {
   async traffic(bounds: { minLat: number; minLng: number; maxLat: number; maxLng: number }) {
     if (bounds.minLat >= bounds.maxLat || bounds.minLng >= bounds.maxLng) {
       throw new AppException(ErrorCode.VALIDATION_ERROR, 'Invalid traffic bounding box');
+    }
+    if (
+      bounds.maxLat - bounds.minLat > MAX_TRAFFIC_SPAN ||
+      bounds.maxLng - bounds.minLng > MAX_TRAFFIC_SPAN
+    ) {
+      throw new AppException(
+        ErrorCode.VALIDATION_ERROR,
+        `The traffic bounding box must span at most ${MAX_TRAFFIC_SPAN} degrees`,
+      );
     }
     const rows = await this.prisma.$queryRaw<
       {

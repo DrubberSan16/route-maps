@@ -722,6 +722,55 @@ describe('Maps Platform API (e2e)', () => {
       });
       expect(flow.typicalWindowDays).toBe(28);
     });
+
+    it('times a route with the recent trips of its own kind of vehicle only', async () => {
+      const prisma = app.get(PrismaService);
+      const from = { latitude: -2.3, longitude: -79.96 };
+      const to = { latitude: -2.3, longitude: -79.95 };
+      await prisma.$executeRaw`
+        DELETE FROM trips WHERE id IN (
+          SELECT trip_id FROM trip_points
+          WHERE location && ST_MakeEnvelope(-79.965, -2.305, -79.945, -2.295, 4326))`;
+      const me = await api('get', '/auth/me').expect(200);
+      // Three people walked along the route a few minutes ago, at 3.6 km/h.
+      for (let trip = 0; trip < 3; trip++) {
+        const tripId = randomUUID();
+        await prisma.$executeRaw`
+          INSERT INTO trips (id, user_id, profile, status, started_at, updated_at)
+          VALUES (${tripId}::uuid, ${me.body.data.id}::uuid, 'PEDESTRIAN', 'COMPLETED',
+                  now() - interval '10 minutes', now())`;
+        for (let fix = 0; fix < 2; fix++) {
+          await prisma.$executeRaw`
+            INSERT INTO trip_points (id, trip_id, location, accuracy, speed, recorded_at)
+            VALUES (gen_random_uuid(), ${tripId}::uuid,
+                    ST_SetSRID(ST_MakePoint(${-79.958 + fix * 0.004}, -2.3), 4326), 5, 1,
+                    now() - make_interval(mins => 5, secs => ${fix * 10 + trip}))`;
+        }
+      }
+      type Traffic = { status: string; tripCount: number; averageSpeedKph: number | null };
+      const traffic = async (profile: string) =>
+        (
+          await api('post', '/routes/calculate')
+            .send({ origin: from, destination: to, profile })
+            .expect(200)
+        ).body.data.conditions.traffic as Traffic;
+
+      // Walkers say nothing about the traffic of a car...
+      expect(await traffic('CAR')).toMatchObject({ status: 'insufficient_data', tripCount: 0 });
+      // ...and everything about a walk.
+      expect(await traffic('PEDESTRIAN')).toMatchObject({
+        status: 'observed',
+        tripCount: 3,
+        averageSpeedKph: 3.6,
+      });
+    });
+
+    it('limits the public traffic cells to about a province', async () => {
+      await api('get', '/tracking/traffic?minLat=-60&minLng=-170&maxLat=60&maxLng=170').expect(400);
+      await api('get', '/tracking/traffic?minLat=-2.3&minLng=-80&maxLat=-2.1&maxLng=-79.8').expect(
+        200,
+      );
+    });
   });
 
   describe('geocoding and documentation', () => {

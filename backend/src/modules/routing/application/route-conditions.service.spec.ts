@@ -54,16 +54,16 @@ describe('RouteConditionsService', () => {
 
   afterAll(async () => rm(directory, { recursive: true, force: true }));
 
-  const service = (trafficRows: unknown[]) =>
+  const service = (trafficRows: unknown[], queryRaw = jest.fn().mockResolvedValue(trafficRows)) =>
     new RouteConditionsService(
-      { $queryRaw: jest.fn().mockResolvedValue(trafficRows) } as unknown as PrismaService,
+      { $queryRaw: queryRaw } as unknown as PrismaService,
       {
         get: jest.fn().mockReturnValue({ nativeDataPath: directory }),
       } as unknown as AppConfigService,
     );
 
   it('keeps the base duration without enough traffic and reports local climatology', async () => {
-    const conditions = await service([]).evaluate(ROUTE);
+    const conditions = await service([]).evaluate(ROUTE, 'CAR');
 
     expect(conditions.traffic.status).toBe('insufficient_data');
     expect(conditions.adjustedDurationSeconds).toBe(100);
@@ -79,7 +79,7 @@ describe('RouteConditionsService', () => {
         samples: BigInt(9),
         trips: BigInt(3),
       },
-    ]).evaluate(ROUTE);
+    ]).evaluate(ROUTE, 'CAR');
 
     expect(conditions.traffic).toMatchObject({
       status: 'observed',
@@ -90,5 +90,24 @@ describe('RouteConditionsService', () => {
     });
     expect(conditions.baseDurationSeconds).toBe(100);
     expect(conditions.adjustedDurationSeconds).toBe(200);
+  });
+
+  it('lets the spatial index narrow the fixes to the box of the route, 150 m wider and more', async () => {
+    const queryRaw = jest.fn().mockResolvedValue([]);
+    await service([], queryRaw).evaluate(ROUTE, 'CAR');
+
+    const [west, south, east, north] = (queryRaw.mock.calls[0] as unknown[]).filter(
+      (value): value is number => typeof value === 'number',
+    );
+    const degrees = (meters: number) => meters / 110_000;
+    // A fix 150 m beyond each end of the route is inside the box; one a kilometer away is not.
+    expect(west).toBeLessThan(-79.9 - degrees(150));
+    expect(west).toBeGreaterThan(-79.9 - degrees(1000));
+    expect(south).toBeLessThan(-2.2 - degrees(150));
+    expect(south).toBeGreaterThan(-2.2 - degrees(1000));
+    expect(east).toBeGreaterThan(-79.89 + degrees(150));
+    expect(east).toBeLessThan(-79.89 + degrees(1000));
+    expect(north).toBeGreaterThan(-2.19 + degrees(150));
+    expect(north).toBeLessThan(-2.19 + degrees(1000));
   });
 });
