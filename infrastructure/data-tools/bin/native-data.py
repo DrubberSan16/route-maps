@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Download and validate non-OSM geospatial sources into an auditable local cache, then build the
-region's routing graph, search index and map layers from it (`build`)."""
+region's routing graph, search index and map layers from it (`build`) and the offline packs of the
+mobile app (`pack`)."""
 
 from __future__ import annotations
 
@@ -24,7 +25,7 @@ for candidate in (Path(__file__).resolve().parent.parent / "lib", Path("/opt/map
         sys.path.insert(0, str(candidate))
         break
 
-from mapsdata import catalog, geo, inec, network  # noqa: E402
+from mapsdata import catalog, geo, inec, network, offline_pack  # noqa: E402
 from mapsdata.text import Speller  # noqa: E402
 
 CATALOG = Path(os.environ.get("SOURCES_CATALOG", "/etc/maps-platform/sources.json"))
@@ -410,6 +411,22 @@ def command_aliases(args: argparse.Namespace) -> None:
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
 
+def command_pack(args: argparse.Namespace) -> None:
+    """Offline pack of a region: its roads and search index, for routes and searches on the phone."""
+    try:
+        bbox = [float(value) for value in args.bbox.split(",")]
+    except ValueError:
+        raise SystemExit(f"invalid --bbox {args.bbox!r}: use min_lon,min_lat,max_lon,max_lat") from None
+    if len(bbox) != 4:
+        raise SystemExit(f"invalid --bbox {args.bbox!r}: use min_lon,min_lat,max_lon,max_lat")
+    for path in (args.graph, args.search):
+        if not path.is_file():
+            raise SystemExit(f"{path} not found: run 'build' first")
+    report = offline_pack.write_pack(args.graph, args.search, args.output, bbox=bbox, margin_km=args.margin_km,
+                                     region=args.region, name=args.name or args.region)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -430,6 +447,16 @@ def parse_args() -> argparse.Namespace:
     aliases = sub.add_parser("aliases", help="apply neighbourhood groups and popular names to the search index")
     aliases.add_argument("region")
     aliases.set_defaults(handler=command_aliases)
+    pack = sub.add_parser("pack", help="offline pack of a region (roads and search index for the mobile app)")
+    pack.add_argument("--graph", type=Path, required=True, help="graph.bin of the native data")
+    pack.add_argument("--search", type=Path, required=True, help="search.ndjson of the native data")
+    pack.add_argument("--bbox", required=True, help="region bounds: min_lon,min_lat,max_lon,max_lat")
+    pack.add_argument("--margin-km", type=float, default=offline_pack.MARGIN_KM,
+                      help=f"area kept around the bounds (default {offline_pack.MARGIN_KM:g} km)")
+    pack.add_argument("--region", required=True, help="region code")
+    pack.add_argument("--name", help="region name")
+    pack.add_argument("--output", type=Path, required=True, help="the .rmpack file to write")
+    pack.set_defaults(handler=command_pack)
     return parser.parse_args()
 
 

@@ -1,7 +1,8 @@
 import 'package:maps_platform/domain/entities/coordinate.dart';
 import 'package:maps_platform/domain/entities/map_region.dart';
 
-/// A catalog entry as the API publishes it.
+/// A catalog entry as the API publishes it; with [packSize], it publishes an
+/// offline pack too.
 MapRegion region(
   String code, {
   String? name,
@@ -11,6 +12,8 @@ MapRegion region(
   String checksum = 'aa',
   int maxZoom = 14,
   List<String> assets = const [],
+  int? packSize,
+  String packChecksum = 'pp',
 }) => MapRegion(
   code: code,
   name: name ?? code,
@@ -19,6 +22,10 @@ MapRegion region(
   version: version,
   mapSizeBytes: size,
   checksum: checksum,
+  routingSizeBytes: packSize,
+  routingChecksum: packSize == null ? null : packChecksum,
+  routingDownloadUrl: packSize == null ? null : '/api/v1/maps/regions/$code/routing/download',
+  routingFormat: packSize == null ? null : MapRegion.offlinePackFormat,
   bbox: bbox,
   minZoom: 0,
   maxZoom: maxZoom,
@@ -55,6 +62,7 @@ Map<String, Object?> regionJson(MapRegion region) => {
   'maxZoom': region.maxZoom,
   'mapDownloadUrl': region.mapDownloadUrl,
   'routingDownloadUrl': region.routingDownloadUrl,
+  'routingFormat': region.routingFormat,
   'tilesUrl': region.tilesUrl,
   'enabled': true,
   'updatedAt': region.updatedAt.toIso8601String(),

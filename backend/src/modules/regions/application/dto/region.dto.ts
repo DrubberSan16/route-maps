@@ -11,7 +11,14 @@ import {
   Length,
   ValidateNested,
 } from 'class-validator';
-import { MapRegion, REGION_ASSET_KINDS, RegionAsset } from '../../domain/map-region.entity';
+import {
+  MapRegion,
+  REGION_ASSET_KINDS,
+  RegionAsset,
+  ROUTING_FORMATS,
+  RoutingFormat,
+  routingFormatOf,
+} from '../../domain/map-region.entity';
 import { toBoolean } from '../../../../common/dto/transforms';
 
 export class RegionAssetResponse {
@@ -40,16 +47,33 @@ export class MapRegionResponse {
   @ApiPropertyOptional({ example: 'Guayaquil' }) city: string | null;
   @ApiProperty({ example: '2026.09.01' }) version: string;
   @ApiProperty({ example: 185420000, description: 'PMTiles size in bytes' }) mapSize: number;
-  @ApiPropertyOptional({ example: 65200000, description: 'Routing package size in bytes' })
+  @ApiPropertyOptional({
+    example: 41800000,
+    description: 'Size in bytes of the offline pack (routingDownloadUrl)',
+  })
   routingSize: number | null;
   @ApiProperty({ example: 'sha256 hex' }) checksum: string;
-  @ApiPropertyOptional() routingChecksum: string | null;
+  @ApiPropertyOptional({ example: 'sha256 hex', description: 'SHA-256 of the offline pack' })
+  routingChecksum: string | null;
+  @ApiPropertyOptional({
+    enum: Object.keys(ROUTING_FORMATS),
+    example: 'route-maps-pack',
+    description:
+      'Format of the routing file. "route-maps-pack": offline pack of the mobile app, with the ' +
+      'road network and the search index of the region and a margin around it, for routes, ' +
+      'place search and addresses without connection. "valhalla-tiles": Valhalla tiles of a ' +
+      'legacy OSM region, not used by the app. Null when the region has no routing file.',
+  })
+  routingFormat: RoutingFormat | null;
   @ApiPropertyOptional({ example: [-80.05, -2.3, -79.8, -2.05] })
   bbox: [number, number, number, number] | null;
   @ApiProperty({ example: 0 }) minZoom: number;
   @ApiProperty({ example: 14 }) maxZoom: number;
   @ApiProperty({ example: '/api/v1/maps/regions/guayaquil/download' }) mapDownloadUrl: string;
-  @ApiPropertyOptional({ example: '/api/v1/maps/regions/guayaquil/routing/download' })
+  @ApiPropertyOptional({
+    example: '/api/v1/maps/regions/guayaquil/routing/download',
+    description: 'Download of the routing file (Range / resumable), when the region has one',
+  })
   routingDownloadUrl: string | null;
   @ApiProperty({
     example: '/maps/ecuador/guayaquil.pmtiles?v=3f5a0c9d1e2b4a67',
@@ -107,6 +131,7 @@ export const toRegionResponse = (
   routingSize: region.routingFileSize,
   checksum: region.checksum,
   routingChecksum: region.routingChecksum,
+  routingFormat: routingFormatOf(region.routingFile),
   bbox: region.bbox,
   minZoom: region.minZoom,
   maxZoom: region.maxZoom,

@@ -26,11 +26,17 @@ void main() {
   );
   final quito = region('quito', name: 'Quito', size: 150 * 1000 * 1000);
 
-  DownloadedRegion stored(MapRegion region, {String? version, String? latest}) => DownloadedRegion(
+  DownloadedRegion stored(
+    MapRegion region, {
+    String? version,
+    String? latest,
+    bool withPack = false,
+  }) => DownloadedRegion(
     code: region.code,
     name: region.name,
     version: version ?? region.version,
-    checksum: region.checksum,
+    // An older version has another map.
+    checksum: version == null || version == region.version ? region.checksum : 'map-$version',
     sizeBytes: region.mapSizeBytes,
     relativePath: 'regions/${region.code}/${version ?? region.version}/${region.code}.pmtiles',
     bbox: region.bbox,
@@ -38,6 +44,11 @@ void main() {
     maxZoom: 14,
     downloadedAt: DateTime.utc(2026, 9, 1),
     latestVersion: latest ?? version ?? region.version,
+    routingRelativePath: withPack
+        ? 'packs/${region.code}/${region.version}/${region.code}.rmpack'
+        : null,
+    routingChecksum: withPack ? region.routingChecksum : null,
+    routingSizeBytes: withPack ? region.routingSizeBytes : null,
   );
 
   RegionDownloadTask task(RegionDownloadStatus status, int received, {String? error}) =>
@@ -189,5 +200,157 @@ void main() {
       ),
     );
     expect(download.onPressed, isNull);
+  });
+
+  group('offline packs', () {
+    final withPack = region(
+      'guayaquil',
+      name: 'Guayaquil',
+      version: '2026.09.20',
+      size: 185 * 1000 * 1000,
+      bbox: guayaquilBox,
+      packSize: 40 * 1000 * 1000,
+    );
+
+    testWidgets('a region brings its routes and search without connection', (tester) async {
+      regions = InMemoryRegionRepository(catalog: [withPack, quito]);
+      downloads = ScriptedRegionDownloadService(regions);
+      await pumpScreen(tester);
+
+      expect(inCard('available-guayaquil', find.text('225 MB')), findsOneWidget);
+      expect(
+        inCard('available-guayaquil', find.text('Incluye rutas y búsqueda sin conexión')),
+        findsOneWidget,
+      );
+      expect(
+        inCard('available-quito', find.text('Incluye rutas y búsqueda sin conexión')),
+        findsNothing,
+      );
+
+      await tester.tap(inCard('available-guayaquil', find.text('Descargar')));
+      await tester.pump();
+      downloads.setTask(
+        const RegionDownloadTask(
+          code: 'guayaquil',
+          name: 'Guayaquil',
+          version: '2026.09.20',
+          totalBytes: 225 * 1000 * 1000,
+          receivedBytes: 200 * 1000 * 1000,
+          status: RegionDownloadStatus.downloading,
+          part: RegionDownloadPart.offlinePack,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Rutas y búsqueda · 88 %'), findsOneWidget);
+      expect(find.text('200 MB / 225 MB'), findsOneWidget);
+
+      downloads.clearTask('guayaquil');
+      regions.downloaded = [stored(withPack, withPack: true)];
+      downloads.pendingDownload!.complete(RegionDownloadResult.completed);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Listo: Guayaquil funciona sin conexión, con mapa, rutas y búsqueda.'),
+        findsOneWidget,
+      );
+      expect(
+        inCard('downloaded-guayaquil', find.text('Versión 2026.09.20 · 225 MB')),
+        findsOneWidget,
+      );
+      expect(
+        inCard('downloaded-guayaquil', find.text('Rutas y búsqueda sin conexión · 40 MB')),
+        findsOneWidget,
+      );
+      expect(inCard('downloaded-guayaquil', find.text('Descargar rutas')), findsNothing);
+
+      await tester.tap(inCard('downloaded-guayaquil', find.text('Eliminar')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Liberarás 225 MB.'), findsOneWidget);
+      expect(find.textContaining('ni tendrá rutas ni búsqueda sin conexión'), findsOneWidget);
+    });
+
+    testWidgets('a map downloaded before its pack existed can add it', (tester) async {
+      regions = InMemoryRegionRepository(
+        catalog: [withPack, quito],
+        downloaded: [stored(withPack)],
+      );
+      downloads = ScriptedRegionDownloadService(regions);
+      await pumpScreen(tester);
+
+      expect(
+        inCard(
+          'downloaded-guayaquil',
+          find.text('Rutas y búsqueda sin conexión: sin descargar (40 MB)'),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(inCard('downloaded-guayaquil', find.text('Descargar rutas')));
+      await tester.pump();
+      expect(downloads.calls, ['download:guayaquil:2026.09.20']);
+
+      downloads.setTask(
+        const RegionDownloadTask(
+          code: 'guayaquil',
+          name: 'Guayaquil',
+          version: '2026.09.20',
+          totalBytes: 40 * 1000 * 1000,
+          receivedBytes: 10 * 1000 * 1000,
+          status: RegionDownloadStatus.failed,
+          part: RegionDownloadPart.offlinePack,
+          errorMessage: 'El archivo de esta región no está disponible en el servidor.',
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Error · rutas y búsqueda · 25 %'), findsOneWidget);
+      expect(inCard('downloaded-guayaquil', find.text('Reintentar')), findsOneWidget);
+    });
+
+    testWidgets('a newer pack is offered as an update of the routes', (tester) async {
+      final newerPack = region(
+        'guayaquil',
+        name: 'Guayaquil',
+        version: '2026.09.20',
+        bbox: guayaquilBox,
+        packSize: 41 * 1000 * 1000,
+        packChecksum: 'qq',
+      );
+      regions = InMemoryRegionRepository(
+        catalog: [newerPack],
+        downloaded: [stored(withPack, withPack: true)],
+      );
+      downloads = ScriptedRegionDownloadService(regions);
+      await pumpScreen(tester);
+
+      await tester.tap(inCard('downloaded-guayaquil', find.text('Actualizar rutas')));
+      await tester.pump();
+      expect(downloads.calls, ['download:guayaquil:2026.09.20']);
+    });
+
+    testWidgets('a new version with the same map only counts its new pack', (tester) async {
+      final older = region(
+        'guayaquil',
+        name: 'Guayaquil',
+        bbox: guayaquilBox,
+        packSize: 40 * 1000 * 1000,
+      );
+      final newer = region(
+        'guayaquil',
+        name: 'Guayaquil',
+        version: '2026.09.20',
+        bbox: guayaquilBox,
+        packSize: 41 * 1000 * 1000,
+        packChecksum: 'qq',
+      );
+      regions = InMemoryRegionRepository(
+        catalog: [newer],
+        downloaded: [stored(older, withPack: true, latest: '2026.09.20')],
+      );
+      downloads = ScriptedRegionDownloadService(regions);
+      await pumpScreen(tester);
+
+      expect(find.text('Nueva versión disponible: 2026.09.20 (41 MB)'), findsOneWidget);
+      await tester.tap(inCard('downloaded-guayaquil', find.text('Actualizar')));
+      await tester.pump();
+      expect(downloads.calls, ['download:guayaquil:2026.09.20']);
+    });
   });
 }

@@ -36,6 +36,8 @@ Coordinate _north(Coordinate point, double meters) =>
     Coordinate(point.latitude + meters / 111195, point.longitude);
 
 class _OnDeviceEngine implements OfflineRoutingProvider {
+  final requests = <({List<Coordinate> waypoints, bool alternatives})>[];
+
   @override
   String get name => 'test-engine';
 
@@ -44,6 +46,7 @@ class _OnDeviceEngine implements OfflineRoutingProvider {
     required Coordinate origin,
     required Coordinate destination,
     required RoutingProfile profile,
+    List<Coordinate> waypoints = const [],
   }) async => true;
 
   @override
@@ -51,23 +54,28 @@ class _OnDeviceEngine implements OfflineRoutingProvider {
     required Coordinate origin,
     required Coordinate destination,
     required RoutingProfile profile,
-  }) async => RouteResult(
-    profile: profile,
-    provider: name,
-    source: RouteSource.onDevice,
-    routes: [
-      RouteOption(
-        routeId: 'device',
-        type: RouteType.primary,
-        distanceMeters: distanceMeters(origin, destination),
-        durationSeconds: 60,
-        geometry: [origin, destination],
-        steps: const [],
-      ),
-    ],
-    origin: origin,
-    destination: destination,
-  );
+    List<Coordinate> waypoints = const [],
+    bool alternatives = true,
+  }) async {
+    requests.add((waypoints: waypoints, alternatives: alternatives));
+    return RouteResult(
+      profile: profile,
+      provider: name,
+      source: RouteSource.onDevice,
+      routes: [
+        RouteOption(
+          routeId: 'device',
+          type: RouteType.primary,
+          distanceMeters: distanceMeters(origin, destination),
+          durationSeconds: 60,
+          geometry: [origin, ...waypoints, destination],
+          steps: const [],
+        ),
+      ],
+      origin: origin,
+      destination: destination,
+    );
+  }
 }
 
 void main() {
@@ -210,12 +218,14 @@ void main() {
   });
 
   test('without a stored route an installed on-device engine answers', () async {
+    final engine = _OnDeviceEngine();
     final result = await service(
       const [],
-      provider: _OnDeviceEngine(),
+      provider: engine,
     ).calculateRoute(origin: line.first, destination: line.last, profile: RoutingProfile.car);
     expect(result.source, RouteSource.onDevice);
     expect(result.provider, 'test-engine');
+    expect(engine.requests.single.alternatives, isTrue);
   });
 
   test('a stored route that passes by the stops in order answers them', () async {
@@ -231,12 +241,30 @@ void main() {
     expect(result.geometry, line);
   });
 
-  test('stops off the stored route, or in the other order, need a connection', () async {
+  test('stops off the stored route, or in the other order, go to the engine', () async {
+    final off = [_north(line[60], 500)];
+    final backwards = [_north(line[90], 20), _north(line[40], 20)];
+    for (final stops in [off, backwards]) {
+      final engine = _OnDeviceEngine();
+      final result = await service([_stored(primary)], provider: engine).calculateRoute(
+        origin: line.first,
+        destination: line.last,
+        profile: RoutingProfile.car,
+        waypoints: stops,
+        alternatives: false,
+      );
+      expect(result.source, RouteSource.onDevice);
+      expect(engine.requests.single.waypoints, stops);
+      expect(engine.requests.single.alternatives, isFalse);
+    }
+  });
+
+  test('without an engine, stops off the stored routes need a connection', () async {
     final off = [_north(line[60], 500)];
     final backwards = [_north(line[90], 20), _north(line[40], 20)];
     for (final stops in [off, backwards]) {
       await expectLater(
-        service([_stored(primary)], provider: _OnDeviceEngine()).calculateRoute(
+        service([_stored(primary)]).calculateRoute(
           origin: line.first,
           destination: line.last,
           profile: RoutingProfile.car,

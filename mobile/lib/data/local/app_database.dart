@@ -41,7 +41,7 @@ class AppDatabase extends _$AppDatabase {
   );
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -57,6 +57,15 @@ class AppDatabase extends _$AppDatabase {
       if (from < 3) {
         // Filled by the next catalog refresh.
         await migrator.addColumn(catalogRegions, catalogRegions.assets);
+      }
+      if (from < 4) {
+        // Offline packs: stored regions have none until they are downloaded.
+        await migrator.addColumn(catalogRegions, catalogRegions.routingFormat);
+        await migrator.addColumn(downloadedRegions, downloadedRegions.routingRelativePath);
+        await migrator.addColumn(downloadedRegions, downloadedRegions.routingChecksum);
+        await migrator.addColumn(downloadedRegions, downloadedRegions.routingSize);
+        await migrator.addColumn(regionDownloads, regionDownloads.doneBytes);
+        await migrator.addColumn(regionDownloads, regionDownloads.kind);
       }
     },
     beforeOpen: (details) async {

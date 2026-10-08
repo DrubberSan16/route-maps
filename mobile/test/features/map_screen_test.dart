@@ -306,18 +306,19 @@ void main() {
     await pumpMap(tester);
 
     expect(
-      find.text('Sin conexión: usas los mapas descargados y tus rutas guardadas.'),
+      find.text('Sin conexión: usas los mapas y las rutas guardadas en el teléfono.'),
       findsOneWidget,
     );
+    // The address is still looked up: the phone answers with the downloaded regions.
     await chooseDestination(tester, _casino);
-    expect(find.text(_casino.toString()), findsWidgets, reason: 'no address lookup offline');
+    expect(find.text('Casino de Monte-Carlo'), findsWidgets);
 
     await tester.tap(find.byKey(const Key('route-button')));
     await tester.pumpAndSettle();
     expect(
       find.text(
-        'Sin conexión: calcular una ruta nueva requiere Internet. '
-        'Puedes abrir una de tus rutas guardadas.',
+        'Sin conexión: para calcular rutas nuevas descarga la región en «Mapas offline». '
+        'También puedes abrir una de tus rutas guardadas.',
       ),
       findsOneWidget,
     );

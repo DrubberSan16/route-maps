@@ -181,9 +181,14 @@ if [[ "$MAP_SIZE" -le $((200 * 1024 * 1024)) ]]; then
   expect "resumed download (2 ranges) matches the SHA-256" test "$(sha256sum "$WORK/map.pmtiles" | cut -d' ' -f1)" = "$CHECKSUM"
 fi
 if [[ "$(region .data.routingDownloadUrl)" != null ]]; then
-  status=$(http GET "/maps/regions/$REGION/routing/download" "" -H 'Range: bytes=0-99')
+  status=$(http GET "/maps/regions/$REGION/routing/download" "" -H 'Range: bytes=0-7')
   expect "routing package download with Range -> 206" test "$status" = 206
   expect "routing X-Checksum-Sha256 matches the catalog" test "$(header X-Checksum-Sha256)" = "$(region .data.routingChecksum)"
+  if [[ "$(region .data.routingFormat)" == route-maps-pack ]]; then
+    # Offline pack of the phone: routes, place search and addresses without connection.
+    expect "offline pack starts with its magic number" test "$(head -c 8 "$WORK/body")" = RMPACK01
+    expect "offline pack Content-Type" test "$(header Content-Type)" = application/vnd.route-maps.offline-pack
+  fi
 fi
 
 section "PMTiles for online rendering (/maps/*, Range requests)"

@@ -22,6 +22,28 @@ export interface RegionAsset {
   format: string;
 }
 
+/**
+ * Formats of the routing file of a region, told by its extension: the offline pack of the mobile
+ * app (road network and search index, written by `region.sh pack`) or the Valhalla tiles of the
+ * legacy OSM regions, which no client reads.
+ */
+export const ROUTING_FORMATS = {
+  'route-maps-pack': {
+    extension: '.rmpack',
+    contentType: 'application/vnd.route-maps.offline-pack',
+  },
+  'valhalla-tiles': { extension: '.tar', contentType: 'application/x-tar' },
+} as const;
+export type RoutingFormat = keyof typeof ROUTING_FORMATS;
+
+export const routingFormatOf = (file: string | null): RoutingFormat | null => {
+  if (!file) return null;
+  const format = (Object.keys(ROUTING_FORMATS) as RoutingFormat[]).find((name) =>
+    file.endsWith(ROUTING_FORMATS[name].extension),
+  );
+  return format ?? null;
+};
+
 export interface MapRegion {
   id: string;
   code: string;
@@ -37,6 +59,7 @@ export interface MapRegion {
   minZoom: number;
   maxZoom: number;
   downloadUrl: string | null;
+  /** Offline pack of the mobile app (see ROUTING_FORMATS), relative to the routing storage root. */
   routingFile: string | null;
   routingFileSize: number | null;
   routingChecksum: string | null;

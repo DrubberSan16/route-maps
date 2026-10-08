@@ -18,19 +18,34 @@ class RegionDownloadStore {
     RegionDownloadStatus.failed: 'FAILED',
   };
 
+  static const _partValues = {
+    RegionDownloadPart.map: 'map',
+    RegionDownloadPart.offlinePack: 'routing',
+  };
+
   static RegionDownloadStatus statusOf(String value) =>
       _statusValues.entries.firstWhere((entry) => entry.value == value).key;
+
+  static RegionDownloadPart partOf(String value) => _partValues.entries
+      .firstWhere((entry) => entry.value == value, orElse: () => _partValues.entries.first)
+      .key;
 
   Future<List<RegionDownloadRow>> all() => _db.select(_db.regionDownloads).get();
 
   Future<RegionDownloadRow?> find(String code) =>
       (_db.select(_db.regionDownloads)..where((t) => t.code.equals(code))).getSingleOrNull();
 
-  /// Starts (or restarts) tracking the download of [region].
+  /// Starts (or restarts) tracking the download of one file of [region]: [part]
+  /// (by default the map) from [url] to [relativePath]. [totalBytes] counts
+  /// every file of the download and [doneBytes] those already completed.
   Future<RegionDownloadRow> begin({
     required MapRegion region,
     required String url,
     required String relativePath,
+    RegionDownloadPart part = RegionDownloadPart.map,
+    String? checksum,
+    int? totalBytes,
+    int doneBytes = 0,
   }) async {
     final existing = await find(region.code);
     final now = utcMillis(_clock());
@@ -46,8 +61,10 @@ class RegionDownloadStore {
             code: region.code,
             name: region.name,
             version: region.version,
-            checksum: region.checksum,
-            totalBytes: region.mapSizeBytes,
+            checksum: checksum ?? region.checksum,
+            totalBytes: totalBytes ?? region.mapSizeBytes,
+            doneBytes: Value(doneBytes),
+            kind: Value(_partValues[part]!),
             url: url,
             relativePath: relativePath,
             etag: Value(sameTarget ? existing.etag : null),

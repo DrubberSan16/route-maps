@@ -104,6 +104,14 @@ jobs:
           done
       - name: Catálogo de regiones válido
         run: jq -e '.regions | length > 0 and all(.code | test("^[a-z0-9][a-z0-9-]{1,62}$"))' infrastructure/regions/regions.json
+      - name: Herramientas de datos (red vial, búsqueda y paquetes sin conexión del teléfono)
+        # Standard library only, like the data-tools image (the raster tests need its venv and are
+        # skipped here). The offline packs of the fixture must be the ones the app's tests load.
+        working-directory: infrastructure/data-tools
+        run: |
+          bash -n bin/region.sh
+          python3 -m py_compile bin/native-data.py bin/raster-data.py
+          PYTHONPATH=lib python3 -m unittest discover -s tests -t .
       - name: Docker Compose válido (desarrollo y producción)
         run: |
           ./infrastructure/scripts/init-env.sh

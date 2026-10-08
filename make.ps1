@@ -77,7 +77,8 @@ $commands = [ordered]@{
   'download-region' = 'Descarga las fuentes oficiales auditadas: -Region ecuador'
   'build-map'       = 'Genera el mapa PMTiles de una región descargada (-WaterPolygons: océanos)'
   'build-routing'   = 'Construye grafo de rutas, índice de búsqueda y capas nativas'
-  'prepare-region'  = 'Descarga + mapa + manifiesto + registro: -Region ecuador'
+  'build-pack'      = 'Rutas y búsqueda sin conexión del teléfono + manifiesto + registro: -Region guayaquil'
+  'prepare-region'  = 'Descarga + mapa + rutas y búsqueda sin conexión + manifiesto + registro: -Region ecuador'
   'publish-app'     = 'Publica el APK para el botón «Instalar app»: [-Apk ruta] [-Server servidor-ssh] [-RemoteDir /opt/route-maps]'
   'geocoding-up'    = 'Informa sobre la geocodificación nativa integrada'
   'prod-up'         = 'Producción: construye y levanta con docker-compose.prod.yml'
@@ -126,6 +127,16 @@ switch ($Command) {
   'build-routing' {
     Assert-Region
     Invoke-Docker @tools build $Region
+  }
+  'build-pack' {
+    Assert-Region
+    Invoke-Docker @tools pack $Region
+    Invoke-Docker @tools manifest $Region | Out-Null
+    if (& docker compose ps --status running -q backend 2>$null) {
+      Invoke-Docker compose exec -T backend node dist/src/cli/sync-regions.js
+    } else {
+      'El backend no está en marcha: la región se registra al iniciarlo (.\make.ps1 up).'
+    }
   }
   'prepare-region' {
     Assert-Region

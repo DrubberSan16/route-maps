@@ -67,7 +67,12 @@ class SearchScreen extends ConsumerWidget {
               ),
               onTap: () => Navigator.pop(context, SavedRouteSelection(route)),
             ),
-          if (state.places.isNotEmpty) const _Header('Lugares'),
+          if (state.places.isNotEmpty)
+            _Header(
+              state.placesFromDevice
+                  ? 'Lugares · sin conexión, en tus mapas descargados'
+                  : 'Lugares',
+            ),
           for (final place in state.places)
             ListTile(
               leading: const Icon(Icons.place),

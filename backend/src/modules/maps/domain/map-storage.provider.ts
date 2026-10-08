@@ -1,6 +1,9 @@
 import type { Readable } from 'node:stream';
 
-/** Kind of artefact: the visual map (PMTiles) or the routing package (Valhalla tiles). */
+/**
+ * Kind of artefact: the visual map (PMTiles, with its relief, satellite and overlay archives) or
+ * the routing file of the region (the offline pack of the mobile app, see ROUTING_FORMATS).
+ */
 export type StorageKind = 'map' | 'routing';
 
 export interface StoredFileInfo {
@@ -33,7 +36,7 @@ export interface RegionManifest {
   maxZoom?: number;
   /** Relative to the map storage root. */
   mapFile: string;
-  /** Relative to the routing storage root. */
+  /** Offline pack of the mobile app, relative to the routing storage root. */
   routingFile?: string;
   /** Optional SHA-256 values computed by the pipeline. */
   mapChecksum?: string;

@@ -29,10 +29,13 @@ class SearchState {
   /// Saved routes whose name matches (works offline).
   final List<OfflineRoute> savedRoutes;
 
-  /// Addresses found by the server.
+  /// Addresses found by the server, or by the phone in the downloaded regions.
   final List<GeocodingResult> places;
   final bool isSearching;
   final String? error;
+
+  /// Whether [places] come from the downloaded regions (no connection).
+  bool get placesFromDevice => places.any((place) => place.source == GeocodingSource.device);
 }
 
 final destinationSearchProvider =
@@ -40,8 +43,9 @@ final destinationSearchProvider =
       DestinationSearchController.new,
     );
 
-/// Destination search: coordinates and saved routes on the device, addresses
-/// through the platform's local official-data index when there is connection.
+/// Destination search: coordinates and saved routes on the device; addresses
+/// through the platform's local official-data index when there is connection,
+/// and through the same index of the downloaded regions without it.
 class DestinationSearchController extends Notifier<SearchState> {
   static const debounce = Duration(milliseconds: 400);
   static const minimumLength = 3;
@@ -71,18 +75,12 @@ class DestinationSearchController extends Notifier<SearchState> {
   Future<void> _run(String query, int generation) async {
     final saved = _matching(await ref.read(savedRouteRepositoryProvider).getAll(), query);
     if (!ref.mounted || generation != _generation) return;
-    final online = ref.read(isOnlineProvider);
-    final lookUp = online && state.coordinate == null && query.length >= minimumLength;
+    final lookUp = state.coordinate == null && query.length >= minimumLength;
     state = SearchState(
       query: query,
       coordinate: state.coordinate,
       savedRoutes: saved,
       isSearching: lookUp,
-      error: online || state.coordinate != null
-          ? null
-          : 'Sin conexión: la búsqueda de direcciones necesita Internet. '
-                'Escribe coordenadas (latitud, longitud), mantén presionado el mapa '
-                'o elige una ruta guardada.',
     );
     if (!lookUp) return;
     final near = ref.read(positionProvider).value?.coordinate;

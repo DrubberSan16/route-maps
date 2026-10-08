@@ -42,6 +42,7 @@ import {
 import { DownloadedRegionsService } from '../application/downloaded-regions.service';
 import { MapRegionService } from '../application/map-region.service';
 import { RegionDownloadService } from '../application/region-download.service';
+import { ROUTING_FORMATS } from '../domain/map-region.entity';
 
 @ApiTags('maps / regions')
 @Controller('maps/regions')
@@ -167,9 +168,11 @@ export class RegionsController {
   @RawResponse()
   @Get(':id/routing/download')
   @ApiParam({ name: 'id', example: 'guayaquil' })
-  @ApiProduces('application/x-tar')
+  @ApiProduces(ROUTING_FORMATS['route-maps-pack'].contentType)
   @ApiOperation({
-    summary: 'Download the routing package (Valhalla tiles) for future on-device routing',
+    summary:
+      'Download the offline pack of the region: road network and search index for routes, ' +
+      'place search and addresses on the phone without connection (Range / resumable)',
   })
   async downloadRouting(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
     await this.downloads.send(await this.regions.getEnabled(id), 'routing', req, res);

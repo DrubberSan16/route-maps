@@ -110,7 +110,7 @@ class MapController extends Notifier<MapViewState> {
   MapViewState build() => const MapViewState();
 
   /// Sets the destination and clears the previous route; the stops stay. Without
-  /// a label the address is looked up when there is connection.
+  /// a label the address is looked up (on the phone when there is no connection).
   void setDestination(Coordinate destination, {String? label}) {
     _request++;
     state = MapViewState(
@@ -177,7 +177,8 @@ class MapController extends Notifier<MapViewState> {
   }
 
   /// Calculates the route from the origin (or the current position) through the
-  /// stops to the destination: on the server when online, from stored routes otherwise.
+  /// stops to the destination: on the server when online; otherwise from stored
+  /// routes or on the phone with the downloaded regions.
   Future<void> calculateRoute() async {
     final destination = state.destination;
     if (destination == null) {
@@ -270,7 +271,6 @@ class MapController extends Notifier<MapViewState> {
   /// Replaces the coordinates shown for the destination or a stop at [point]
   /// with its address.
   Future<void> _lookUpLabel(Coordinate point) async {
-    if (!ref.read(isOnlineProvider)) return;
     try {
       final place = await ref.read(geocodingRepositoryProvider).reverse(point);
       if (!ref.mounted || place == null) return;

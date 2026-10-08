@@ -12,7 +12,9 @@ import '../data/remote/api_client.dart';
 import '../data/remote/auth_interceptor.dart';
 import '../data/remote/session_store.dart';
 import '../data/repositories/auth_repository_impl.dart';
+import '../data/repositories/device_geocoding_repository.dart';
 import '../data/repositories/geocoding_repository_impl.dart';
+import '../data/repositories/hybrid_geocoding_repository.dart';
 import '../data/repositories/map_repository_impl.dart';
 import '../data/repositories/region_repository_impl.dart';
 import '../data/repositories/saved_route_repository_impl.dart';
@@ -40,14 +42,16 @@ import '../domain/services/synchronization_service.dart';
 import '../infrastructure/connectivity/reachability_connectivity_service.dart';
 import '../infrastructure/download/region_download_manager.dart';
 import '../infrastructure/location/geolocator_location_service.dart';
+import '../infrastructure/offline/offline_engine.dart';
 import '../infrastructure/security/secure_session_store.dart';
 import '../infrastructure/storage/file_offline_storage_service.dart';
 import '../services/map/map_style_service.dart';
+import '../services/regions/offline_packs.dart';
 import '../services/regions/region_download_service.dart';
+import '../services/routing/device_routing_provider.dart';
 import '../services/routing/hybrid_routing_service.dart';
 import '../services/routing/offline_routing_service.dart';
 import '../services/routing/online_routing_service.dart';
-import '../services/routing/unavailable_offline_routing_provider.dart';
 import '../services/sync/sync_service.dart';
 import '../services/tracking/trip_recorder.dart';
 
@@ -161,14 +165,38 @@ final tripRepositoryProvider = Provider<TripRepository>(
   ),
 );
 
-final geocodingRepositoryProvider = Provider<GeocodingRepository>(
-  (ref) => GeocodingRepositoryImpl(ref.watch(apiClientProvider)),
+/// Routes, place search and addresses calculated on the phone with the offline
+/// packs of the downloaded regions (see docs/offline-architecture.md).
+final offlineEngineProvider = Provider<OfflineEngine>((ref) {
+  final engine = OfflineEngine();
+  ref.onDispose(() => unawaited(engine.dispose()));
+  return engine;
+});
+
+/// The offline packs on the device, read again on every request.
+final offlinePackPathsProvider = Provider<OfflinePackPaths>(
+  (ref) =>
+      storedOfflinePacks(ref.watch(regionRepositoryProvider), ref.watch(offlineStorageProvider)),
 );
 
-/// On-device routing engine (Mode 2). None is bundled yet: see
-/// docs/offline-architecture.md.
+final geocodingRepositoryProvider = Provider<GeocodingRepository>(
+  (ref) => HybridGeocodingRepository(
+    online: GeocodingRepositoryImpl(ref.watch(apiClientProvider)),
+    device: DeviceGeocodingRepository(
+      engine: ref.watch(offlineEngineProvider),
+      packs: ref.watch(offlinePackPathsProvider),
+    ),
+    connectivity: ref.watch(connectivityServiceProvider),
+  ),
+);
+
+/// On-device routing engine (Mode 2).
 final offlineRoutingProviderProvider = Provider<OfflineRoutingProvider>(
-  (ref) => const UnavailableOfflineRoutingProvider(),
+  (ref) => DeviceRoutingProvider(
+    engine: ref.watch(offlineEngineProvider),
+    packs: ref.watch(offlinePackPathsProvider),
+    language: ref.watch(appConfigProvider).routeLanguage,
+  ),
 );
 
 final offlineRoutingServiceProvider = Provider<OfflineRoutingService>(

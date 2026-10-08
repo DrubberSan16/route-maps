@@ -22,6 +22,7 @@ class MapRegion {
     this.routingSizeBytes,
     this.routingChecksum,
     this.routingDownloadUrl,
+    this.routingFormat,
     this.bbox,
     this.assets = const [],
   });
@@ -45,6 +46,7 @@ class MapRegion {
       maxZoom: (json['maxZoom']! as num).toInt(),
       mapDownloadUrl: json['mapDownloadUrl']! as String,
       routingDownloadUrl: json['routingDownloadUrl'] as String?,
+      routingFormat: json['routingFormat'] as String?,
       tilesUrl: json['tilesUrl']! as String,
       updatedAt: DateTime.parse(json['updatedAt']! as String),
       assets: [
@@ -76,8 +78,13 @@ class MapRegion {
   /// Resumable download of the PMTiles file (absolute path on the platform host).
   final String mapDownloadUrl;
 
-  /// Routing graph package for a future on-device engine (see docs/offline-architecture.md).
+  /// Resumable download of the routing file of the region.
   final String? routingDownloadUrl;
+
+  /// What [routingDownloadUrl] serves: [offlinePackFormat] is the offline pack
+  /// the app routes and searches with; anything else (an engine's own tiles) is
+  /// not for the phone.
+  final String? routingFormat;
 
   /// Range-readable PMTiles URL for online rendering.
   final String tilesUrl;
@@ -85,6 +92,20 @@ class MapRegion {
 
   /// Relief, satellite imagery and overlays published with the map.
   final List<RegionAsset> assets;
+
+  /// Format of the offline pack: road network and search index of the region,
+  /// used by the phone for routes, place search and addresses without connection.
+  static const offlinePackFormat = 'route-maps-pack';
+
+  /// Whether the region publishes an offline pack for the phone.
+  bool get hasOfflinePack =>
+      routingFormat == offlinePackFormat &&
+      routingDownloadUrl != null &&
+      routingSizeBytes != null &&
+      routingChecksum != null;
+
+  /// Bytes the phone downloads for the region: the map and the offline pack.
+  int get downloadSizeBytes => mapSizeBytes + (hasOfflinePack ? routingSizeBytes! : 0);
 
   bool contains(Coordinate point) => bbox?.contains(point) ?? false;
 
@@ -186,6 +207,9 @@ class DownloadedRegion {
     this.bbox,
     this.latestVersion,
     this.checkedAt,
+    this.routingRelativePath,
+    this.routingChecksum,
+    this.routingSizeBytes,
   });
 
   final String code;
@@ -206,7 +230,33 @@ class DownloadedRegion {
   final String? latestVersion;
   final DateTime? checkedAt;
 
+  /// Offline pack (routes, place search and addresses without connection),
+  /// relative to the app storage directory; null until it is downloaded.
+  final String? routingRelativePath;
+  final String? routingChecksum;
+  final int? routingSizeBytes;
+
   bool get updateAvailable => latestVersion != null && latestVersion != version;
+
+  bool get hasOfflinePack => routingRelativePath != null;
+
+  /// Bytes on the device: the map and the offline pack.
+  int get storedBytes => sizeBytes + (routingSizeBytes ?? 0);
+
+  /// Whether [latest] (the catalog entry) publishes an offline pack that the
+  /// device does not have, or a newer one.
+  bool needsOfflinePack(MapRegion latest) =>
+      latest.hasOfflinePack && latest.routingChecksum != routingChecksum;
+
+  /// Whether [latest] has the same map file as the device: a new version that
+  /// only changed the offline pack or the catalog data keeps the stored map.
+  bool sameMap(MapRegion latest) => latest.checksum == checksum;
+
+  /// Bytes that updating to [latest] downloads: the map if it changed and the
+  /// offline pack if it is new.
+  int updateBytes(MapRegion latest) =>
+      (latest.version != version && !sameMap(latest) ? latest.mapSizeBytes : 0) +
+      (needsOfflinePack(latest) ? latest.routingSizeBytes! : 0);
 
   bool contains(Coordinate point) => bbox?.contains(point) ?? false;
 }
@@ -239,6 +289,15 @@ class RegionVersionStatus {
 
 enum RegionDownloadStatus { downloading, paused, failed }
 
+/// File of a region being downloaded.
+enum RegionDownloadPart {
+  /// The PMTiles map.
+  map,
+
+  /// The offline pack: routes, place search and addresses without connection.
+  offlinePack,
+}
+
 /// A download in progress, paused or failed, resumable from its `.part` file.
 @immutable
 class RegionDownloadTask {
@@ -249,6 +308,7 @@ class RegionDownloadTask {
     required this.totalBytes,
     required this.receivedBytes,
     required this.status,
+    this.part = RegionDownloadPart.map,
     this.errorCode,
     this.errorMessage,
   });
@@ -256,9 +316,14 @@ class RegionDownloadTask {
   final String code;
   final String name;
   final String version;
+
+  /// Bytes of every file of the download, and of those received so far.
   final int totalBytes;
   final int receivedBytes;
   final RegionDownloadStatus status;
+
+  /// The file being downloaded now.
+  final RegionDownloadPart part;
   final String? errorCode;
   final String? errorMessage;
 
@@ -268,6 +333,7 @@ class RegionDownloadTask {
   RegionDownloadTask copyWith({
     int? receivedBytes,
     RegionDownloadStatus? status,
+    RegionDownloadPart? part,
     String? errorCode,
     String? errorMessage,
   }) {
@@ -280,6 +346,7 @@ class RegionDownloadTask {
       totalBytes: totalBytes,
       receivedBytes: receivedBytes ?? this.receivedBytes,
       status: nextStatus,
+      part: part ?? this.part,
       errorCode: failed ? errorCode ?? this.errorCode : null,
       errorMessage: failed ? errorMessage ?? this.errorMessage : null,
     );

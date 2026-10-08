@@ -32,6 +32,7 @@
     "regions:sync:dev": "tsx src/cli/sync-regions.ts",
     "admin:create": "node dist/src/cli/create-admin.js",
     "admin:create:dev": "tsx src/cli/create-admin.ts",
+    "fixtures:offline": "tsx scripts/offline-fixture.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

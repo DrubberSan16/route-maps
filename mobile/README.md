@@ -2,8 +2,9 @@
 
 Aplicación Android/iOS de la plataforma: mapa vectorial propio (MapLibre +
 PMTiles), búsqueda de destinos, rutas con alternativas, mapas offline por
-región, rutas guardadas que funcionan sin conexión, grabación de recorridos
-con GPS y sincronización offline-first con el backend.
+región con rutas, búsqueda y direcciones calculadas en el teléfono sin
+conexión, rutas guardadas, grabación de recorridos con GPS y sincronización
+offline-first con el backend.
 
 La arquitectura completa está en [`../docs/architecture.md`](../docs/architecture.md)
 y el comportamiento sin conexión en
@@ -59,12 +60,15 @@ dart run build_runner build   # regenera el código de Drift (lib/**/*.g.dart)
 ```
 
 Las pruebas cubren el parseo de respuestas reales de la API
-(`test/fixtures/`), la selección online/offline de rutas, el ruteo con rutas
-guardadas, la detección de regiones, la cola de sincronización y el servicio
-de sincronización, las descargas reanudables contra un servidor HTTP local
-(Range, If-Range, SHA-256, espacio libre, cancelación), la conectividad real
-(Wi-Fi sin Internet), la grabación de recorridos y las pantallas principal y de
-mapas offline.
+(`test/fixtures/`), la selección online/offline de rutas y de búsquedas, el
+ruteo con rutas guardadas, el motor sin conexión (rutas, búsqueda y
+direcciones idénticas a las del backend en la ciudad de prueba de
+`../infrastructure/data-tools/tests/fixtures/offline`), la detección de
+regiones, la cola de sincronización y el servicio de sincronización, las
+descargas reanudables del mapa y del paquete sin conexión contra un servidor
+HTTP local (Range, If-Range, SHA-256, espacio libre, cancelación), la
+conectividad real (Wi-Fi sin Internet), la grabación de recorridos y las
+pantallas principal, de búsqueda y de mapas offline.
 
 ## Estructura
 
@@ -73,8 +77,9 @@ lib/
 ├── core/            configuración, errores, utilidades
 ├── domain/          entidades, contratos de repositorios y servicios, geometría
 ├── data/            Drift (SQLite), cliente HTTP, implementaciones de repositorios
-├── infrastructure/  GPS, conectividad, almacenamiento seguro, archivos, descargas
-├── services/        ruteo (online, offline, híbrido), sincronización, regiones,
+├── infrastructure/  GPS, conectividad, almacenamiento seguro, archivos, descargas,
+│                    motor sin conexión (rutas, búsqueda y direcciones en un isolate)
+├── services/        ruteo (online, en el teléfono, híbrido), sincronización, regiones,
 │                    grabación de recorridos, estilo del mapa
 ├── presentation/    composición de dependencias (Riverpod), app, widgets comunes
 └── features/        pantallas: mapa, búsqueda, mapas offline, rutas, recorridos, cuenta

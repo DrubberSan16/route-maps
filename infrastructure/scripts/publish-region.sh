@@ -6,10 +6,11 @@
 #
 # Converting the national INEC packages needs about 6 GB of RAM and 15 GB of free disk; a small
 # server only needs the results. This script copies them (the maps of every catalog region built
-# from the same native catalog with their relief, satellite and overlay archives, their manifests,
-# the road graph, the search index and the climate layer) to a staging folder on the server, verifies every SHA-256 there, swaps them in (data
-# first, manifests last), restarts the backend so it loads the new graph and index, and registers
-# the manifests. The replaced files are kept in storage/.publish-backup until the next publication.
+# from the same native catalog with their relief, satellite and overlay archives, the offline packs
+# of the phone, their manifests, the road graph, the search index and the climate layer) to a
+# staging folder on the server, verifies every SHA-256 there, swaps them in (data first, manifests
+# last), restarts the backend so it loads the new graph and index, and registers the manifests.
+# The replaced files are kept in storage/.publish-backup until the next publication.
 #
 # Requirements: bash, ssh/scp and Python 3 on the workstation; sudo and Docker on the server.
 set -euo pipefail
@@ -37,7 +38,8 @@ CATALOG="$ROOT/infrastructure/regions/regions.json"
 
 # "<native catalog>" on the first line, then "map <code> <map dir> <map checksum>" for every region
 # built from that catalog, each followed by "asset <code> <file> <checksum>" for the extra archives
-# (relief, satellite, overlays) its manifest lists. Checksums come from the manifests.
+# (relief, satellite, overlays) and "pack <code> <file> <checksum>" for the offline pack its
+# manifest lists. Checksums come from the manifests.
 PLAN="$("$PYTHON" - "$CATALOG" "$REGION" "$STORAGE" <<'PY'
 import json, sys
 from pathlib import Path
@@ -58,6 +60,8 @@ for item in catalog["regions"]:
     print("map", item["code"], directory, data.get("mapChecksum") or "-")
     for asset in data.get("assets") or []:
         print("asset", item["code"], asset["file"], asset["checksum"])
+    if data.get("routingFile"):
+        print("pack", item["code"], data["routingFile"], data.get("routingChecksum") or "-")
 PY
 )"
 PLAN="$(tr -d '\r' <<<"$PLAN")"  # Python on Windows ends its lines with CRLF
@@ -90,6 +94,12 @@ while read -r kind code path expected; do
       [[ "$READY" == *" $code "* ]] || continue
       verify "maps/$path" "$expected" "$code"
       FILES+=("maps/$path")
+      ;;
+    pack)
+      # Offline pack of the phone (roads and search index) of a region that is published.
+      [[ "$READY" == *" $code "* ]] || continue
+      verify "routing/$path" "$expected" "$code"
+      FILES+=("routing/$path")
       ;;
   esac
 done < <(tail -n +2 <<<"$PLAN")

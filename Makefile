@@ -3,7 +3,7 @@
 #   make init                            crea .env con secretos aleatorios
 #   make up                              construye y levanta el stack
 #   make admin-create EMAIL=tu@correo    crea un administrador del panel (/admin/)
-#   make prepare-region REGION=guayaquil descarga + mapa + routing + registro
+#   make prepare-region REGION=guayaquil descarga + mapa + rutas y búsqueda sin conexión + registro
 #   make help                            todos los comandos
 
 SHELL := /usr/bin/env bash
@@ -20,7 +20,7 @@ cli_var = $(if $(filter command line,$(origin $(1))),$($(1)))
 PREPARE_FLAGS := $(if $(SKIP_ROUTING),--skip-routing) $(if $(WATER),--water-polygons) $(if $(FORCE),--force-download)
 
 .PHONY: help init up down restart ps logs build config migrate seed admin-create regions regions-sync \
-        download-region build-map build-routing prepare-region geocoding-up \
+        download-region build-map build-routing build-pack prepare-region geocoding-up \
         refresh-region publish-app prod-up prod-down prod-logs test test-backend test-e2e test-tilegen test-mobile lint \
         check-region
 
@@ -83,7 +83,14 @@ build-map: check-region ## Genera el mapa PMTiles de una región descargada (WAT
 build-routing: check-region ## Construye grafo de rutas, índice de búsqueda y capas nativas: REGION=ecuador
 	$(TOOLS) build $(REGION)
 
-prepare-region: check-region ## Descarga + mapa + manifiesto + registro: REGION=ecuador
+build-pack: check-region ## Rutas y búsqueda sin conexión del teléfono + manifiesto + registro: REGION=guayaquil
+	$(TOOLS) pack $(REGION)
+	$(TOOLS) manifest $(REGION) >/dev/null
+	@if [[ -n "$$($(COMPOSE) ps --status running -q backend 2>/dev/null)" ]]; then \
+		$(COMPOSE) exec -T backend node dist/src/cli/sync-regions.js; \
+	else echo "El backend no está en marcha: la región se registra al iniciarlo (make up)."; fi
+
+prepare-region: check-region ## Descarga + mapa + rutas y búsqueda sin conexión + manifiesto + registro: REGION=ecuador
 	./infrastructure/scripts/download-region.sh $(REGION) $(PREPARE_FLAGS)
 
 refresh-region: check-region ## Actualiza solo si cambió el origen; rollback y validación: REGION=ecuador

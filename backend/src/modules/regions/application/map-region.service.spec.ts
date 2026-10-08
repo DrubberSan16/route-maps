@@ -144,7 +144,7 @@ const GUAYAQUIL: RegionManifest = {
   minZoom: 0,
   maxZoom: 14,
   mapFile: 'south-america/ecuador/guayaquil.pmtiles',
-  routingFile: 'guayaquil/guayaquil.valhalla.tar',
+  routingFile: 'guayaquil/guayaquil.rmpack',
 };
 
 describe('MapRegionService', () => {
@@ -159,7 +159,7 @@ describe('MapRegionService', () => {
     regions = new InMemoryRegions();
     storage = new MemoryStorage();
     storage.put('map', GUAYAQUIL.mapFile, 'pmtiles v1');
-    storage.put('routing', GUAYAQUIL.routingFile!, 'valhalla tiles v1');
+    storage.put('routing', GUAYAQUIL.routingFile!, 'offline pack v1');
     storage.manifests = [GUAYAQUIL];
     events = new RecordedEvents();
     service = new MapRegionService(regions, storage, events as unknown as PlatformEventsService);
@@ -187,8 +187,8 @@ describe('MapRegionService', () => {
         checksum: sha256('pmtiles v1'),
         bbox: GUAYAQUIL.bbox,
         routingFile: GUAYAQUIL.routingFile,
-        routingFileSize: 'valhalla tiles v1'.length,
-        routingChecksum: sha256('valhalla tiles v1'),
+        routingFileSize: 'offline pack v1'.length,
+        routingChecksum: sha256('offline pack v1'),
         enabled: true,
       });
     });
@@ -283,6 +283,35 @@ describe('MapRegionService', () => {
 
       expect(report.errors).toEqual([{ code: expect.any(String), message }]);
       expect(report.registered).toEqual(['monaco']);
+    });
+
+    it('hashes the offline pack again when its manifest checksum changes', async () => {
+      storage.manifests = [{ ...GUAYAQUIL, routingChecksum: sha256('offline pack v1') }];
+      await service.syncFromStorage();
+      storage.hashed = [];
+      // Rebuilt with the same name, size and version: only the manifest checksum tells.
+      storage.put('routing', GUAYAQUIL.routingFile!, 'offline pack v2');
+      storage.manifests = [{ ...GUAYAQUIL, routingChecksum: sha256('offline pack v2') }];
+
+      const report = await service.syncFromStorage();
+
+      expect(report).toMatchObject({ registered: ['guayaquil'], errors: [] });
+      expect(storage.hashed).toEqual([`routing:${GUAYAQUIL.routingFile}`]);
+      expect(regions.regions.get('guayaquil')?.routingChecksum).toBe(sha256('offline pack v2'));
+    });
+
+    it('refuses an offline pack whose checksum does not match its manifest', async () => {
+      storage.manifests = [{ ...GUAYAQUIL, routingChecksum: sha256('another pack') }];
+
+      const report = await service.syncFromStorage();
+
+      expect(report.errors).toEqual([
+        {
+          code: 'guayaquil',
+          message: `Checksum of ${GUAYAQUIL.routingFile} does not match its manifest`,
+        },
+      ]);
+      expect(regions.regions.size).toBe(0);
     });
 
     it('registers the map even when the routing package is not built yet', async () => {

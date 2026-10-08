@@ -4,7 +4,7 @@ module.exports = {
   rootDir: 'src',
   testRegex: '.*\\.spec\\.ts$',
   transform: { '^.+\\.ts$': ['ts-jest', { tsconfig: '<rootDir>/../tsconfig.json' }] },
-  collectCoverageFrom: ['**/*.ts', '!generated/**', '!main.ts', '!cli/**'],
+  collectCoverageFrom: ['**/*.ts', '!generated/**', '!main.ts', '!cli/**', '!testing/**'],
   coverageDirectory: '../coverage',
   testEnvironment: 'node',
 };

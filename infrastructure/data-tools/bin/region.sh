@@ -10,14 +10,16 @@
 #   aliases <region>             apply neighbourhood groups and popular names (no geometry rebuild)
 #   map <region>                 build the visual map (PMTiles) with tilegen
 #   rasters <region>             relief and satellite layers (raster PMTiles, see raster-data)
+#   pack <region>                offline pack of the mobile app: roads and search index of the
+#                                region, for routes and address search without connection
 #   routing <region>             legacy Valhalla graph (OSM regions only)
 #   manifest <region>            write the manifest read by the backend
-#   prepare <region>             download (if missing) + build + map + rasters + manifest
+#   prepare <region>             download (if missing) + build + map + rasters + pack + manifest
 #   source-version <region>      print the upstream data fingerprint
 #
 # Options
 #   --force-download             download again even if the extract exists
-#   --skip-routing               prepare: only the visual map
+#   --skip-routing               prepare: without the offline pack of the phone (only the map)
 #   --skip-rasters               prepare: without the relief and satellite layers
 #   --water-polygons             draw oceans with the OSMCoastline water polygons
 #                                (~1 GB download, kept in storage/imports)
@@ -40,7 +42,8 @@
 #   /data/maps/<dir>/<region>.satellite.pmtiles  satellite view: colour tiles (WebP)
 #   /data/maps/<dir>/<region>.region.json    manifest registered by the backend
 #   /data/maps/world/world.places.json       countries and cities (world only)
-#   /data/routing/<region>/                  Valhalla graph + <region>.valhalla.tar package
+#   /data/routing/<region>/<region>.rmpack   offline pack of the phone (roads and search index)
+#   /data/routing/<region>/                  legacy OSM regions: Valhalla graph + <region>.valhalla.tar
 #
 # Every output is written to a temporary file first and renamed when complete,
 # so services never read half-written data.
@@ -50,6 +53,8 @@ CATALOG="${REGIONS_CATALOG:-/etc/maps-platform/regions.json}"
 IMPORTS_DIR="${IMPORTS_DIR:-/data/imports}"
 MAPS_DIR="${MAPS_DIR:-/data/maps}"
 ROUTING_DIR="${ROUTING_DIR:-/data/routing}"
+# Kilometres around the region kept in its offline pack (routes that leave the region a little).
+PACK_MARGIN_KM="${PACK_MARGIN_KM:-5}"
 # Extra archives a region may have next to its map, listed in the manifest as its assets.
 ASSET_KINDS=(terrain satellite overlays)
 TILEGEN_HOME="${TILEGEN_HOME:-/opt/tilegen}"
@@ -412,6 +417,33 @@ cmd_aliases() {
   native_region=$(jq -r '.source.nativeRegion' <<<"$region")
   native-data aliases "$native_region"
   match_owner "$IMPORTS_DIR/native/$native_region" "$IMPORTS_DIR"
+  log "Phones get the new names with the next offline pack: run 'pack <region>' and 'manifest <region>'"
+}
+
+# The offline pack of the mobile app: the roads and the search index of the region and a margin
+# around it, in one file, so the phone calculates routes, finds places and names addresses without
+# connection with the same data and rules as the backend. The same data always gives the same
+# bytes: phones only download it again when something changed.
+pack_file() { echo "$ROUTING_DIR/$1/$1.rmpack"; }
+
+cmd_pack() {
+  local code=$1 region native_region data bbox out
+  region=$(region_json "$code")
+  is_native "$region" || die "$code has no offline pack: only regions of the native catalog have one"
+  native_region=$(jq -r '.source.nativeRegion' <<<"$region")
+  data="$IMPORTS_DIR/native/$native_region"
+  [[ -s "$data/graph.bin" && -s "$data/search.ndjson" ]] ||
+    die "road graph or search index not found: run 'build $code' first"
+  bbox=$(jq -r '.bbox // empty | join(",")' <<<"$region")
+  [[ -n "$bbox" ]] || die "region '$code' needs a bbox in regions.json for its offline pack"
+  out=$(pack_file "$code")
+  log "Building the offline pack of $code (roads and search index, ${PACK_MARGIN_KM} km around it)"
+  # --bbox=...: the bounds start with a minus sign.
+  native-data pack --graph "$data/graph.bin" --search "$data/search.ndjson" --bbox="$bbox" \
+    --margin-km "$PACK_MARGIN_KM" --region "$code" --name "$(field "$region" name)" \
+    --output "$out" >/dev/null
+  match_owner "$ROUTING_DIR/$code" "$ROUTING_DIR"
+  log "Offline pack ready: $out ($(du -h "$out" | cut -f1))"
 }
 
 cmd_routing() {
@@ -488,9 +520,19 @@ cmd_manifest() {
   map_rel="$dir/$code.pmtiles"
   map_file="$MAPS_DIR/$map_rel"
   [[ -s "$map_file" ]] || die "$map_file not found: run 'map $code' first"
-  if is_native "$region" || is_natural_earth "$region"; then
-    # Never let a stale legacy graph leak into a manifest generated from the
-    # official/native data pipeline.
+  if is_native "$region"; then
+    # The offline pack of the phone; a legacy Valhalla graph never leaks into the manifest of a
+    # region of the native catalog.
+    routing_rel="$code/$code.rmpack"
+    routing_file="$ROUTING_DIR/$routing_rel"
+    local native_data
+    native_data="$IMPORTS_DIR/native/$(jq -r '.source.nativeRegion' <<<"$region")"
+    if [[ -s "$routing_file" && ("$native_data/graph.bin" -nt "$routing_file" ||
+      "$native_data/search.ndjson" -nt "$routing_file") ]]; then
+      log "WARNING: the offline pack of $code is older than its road graph or search index;" \
+        "phones keep the previous data until 'pack $code' and 'manifest $code' run"
+    fi
+  elif is_natural_earth "$region"; then
     routing_rel=""
     routing_file=""
   else
@@ -521,7 +563,11 @@ cmd_manifest() {
   if [[ -n "$routing_file" && -s "$routing_file" ]]; then
     routing_sha=$(sha256sum "$routing_file" | cut -d' ' -f1)
   else
-    log "No distributable routing package for $code; the manifest only lists the map"
+    if is_native "$region"; then
+      log "No offline pack for $code (run 'pack $code'): phones get the map without routes or search"
+    else
+      log "No distributable routing package for $code; the manifest only lists the map"
+    fi
     routing_rel=""
   fi
 
@@ -572,7 +618,9 @@ cmd_prepare() {
   if [[ "$skip_rasters" != true ]]; then
     cmd_rasters "$code" "$force"
   fi
-  if [[ "$skip_routing" != true ]] && ! is_natural_earth "$region" && ! is_native "$region"; then
+  if [[ "$skip_routing" != true ]] && is_native "$region"; then
+    cmd_pack "$code"
+  elif [[ "$skip_routing" != true ]] && ! is_natural_earth "$region"; then
     cmd_routing "$code"
   fi
   cmd_manifest "$code" >/dev/null
@@ -588,9 +636,14 @@ cmd_list() {
     while IFS=$'\t' read -r code name dir source; do
       local extract=no map=no routing=no assets="" kind
       [[ -s "$IMPORTS_DIR/$code.osm.pbf" ]] && extract=yes
-      [[ "$source" == "Natural Earth" && -s "$IMPORTS_DIR/naturalearth/ne_10m_ocean.zip" ]] && extract=yes
+      [[ "$source" == native:* && -s "$IMPORTS_DIR/native/${source#native:}/manifest.json" ]] && extract=yes
+      [[ "$source" == public-domain-world && -s "$IMPORTS_DIR/naturalearth/ne_10m_ocean.zip" ]] && extract=yes
       [[ -s "$MAPS_DIR/$dir/$code.pmtiles" ]] && map=yes
-      [[ -s "$ROUTING_DIR/$code/valhalla.json" ]] && routing=yes
+      if [[ -s "$(pack_file "$code")" ]]; then
+        routing=pack
+      elif [[ -s "$ROUTING_DIR/$code/valhalla.json" ]]; then
+        routing=valhalla
+      fi
       for kind in "${ASSET_KINDS[@]}"; do
         [[ -s "$MAPS_DIR/$dir/$code.$kind.pmtiles" ]] && assets+="${assets:+,}$kind"
       done
@@ -631,6 +684,7 @@ main() {
   aliases) cmd_aliases "${code:?region required}" ;;
   map) cmd_map "${code:?region required}" "$water" ;;
   rasters) cmd_rasters "${code:?region required}" "$force" ;;
+  pack) cmd_pack "${code:?region required}" ;;
   routing) cmd_routing "${code:?region required}" ;;
   manifest) cmd_manifest "${code:?region required}" ;;
   prepare) cmd_prepare "${code:?region required}" "$force" "$skip_routing" "$water" "$skip_rasters" ;;

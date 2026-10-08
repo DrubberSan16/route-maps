@@ -42,6 +42,10 @@ class CatalogRegions extends Table {
   /// API's `assets`); null in catalogs cached before they existed.
   TextColumn get assets => text().nullable()();
 
+  /// Format of the routing download: `route-maps-pack` is the offline pack of
+  /// the app; null in catalogs cached before it existed.
+  TextColumn get routingFormat => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {code};
 }
@@ -69,6 +73,13 @@ class DownloadedRegions extends Table {
   TextColumn get latestVersion => text().nullable()();
   DateTimeColumn get checkedAt => dateTime().nullable()();
 
+  /// Offline pack of the region (road network and search index: routes, place
+  /// search and addresses without connection), relative to the offline storage
+  /// root; null until it is downloaded.
+  TextColumn get routingRelativePath => text().nullable()();
+  TextColumn get routingChecksum => text().nullable()();
+  IntColumn get routingSize => integer().nullable()();
+
   @override
   Set<Column> get primaryKey => {code};
 }
@@ -80,7 +91,15 @@ class RegionDownloads extends Table {
   TextColumn get name => text()();
   TextColumn get version => text()();
   TextColumn get checksum => text()();
+
+  /// Bytes of every file of the download (the map and the offline pack).
   IntColumn get totalBytes => integer()();
+
+  /// Bytes of the files already completed (the map, while the pack downloads).
+  IntColumn get doneBytes => integer().withDefault(const Constant(0))();
+
+  /// File being downloaded: `map` (the PMTiles) or `routing` (the offline pack).
+  TextColumn get kind => text().withDefault(const Constant('map'))();
   TextColumn get url => text()();
 
   /// Final file, relative to the offline storage root.

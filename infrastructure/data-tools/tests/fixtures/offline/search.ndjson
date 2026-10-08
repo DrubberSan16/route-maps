@@ -1,0 +1,67 @@
+{"n":"Guayas","k":"admin","t":"state","x":-79.95,"y":-2.25,"r":90,"d":"Ecuador","b":[-80.5,-3,-79.2,-1.5],"p":"09"}
+{"n":"Guayaquil","k":"admin","t":"county","x":-79.92,"y":-2.2,"r":76,"d":"Guayas","b":[-80.1,-2.4,-79.85,-2],"p":"0901"}
+{"n":"Durán","k":"admin","t":"county","x":-79.825,"y":-2.205,"r":76,"d":"Guayas","b":[-79.84,-2.23,-79.8,-2.18],"p":"0907"}
+{"n":"Rocafuerte","k":"admin","t":"administrative","x":-79.888,"y":-2.189,"r":58,"d":"Guayaquil, Guayas","b":[-79.892,-2.193,-79.886,-2.184],"p":"090112"}
+{"n":"Eloy Alfaro","k":"admin","t":"administrative","x":-79.83,"y":-2.199,"r":58,"d":"Durán, Guayas","b":[-79.836,-2.204,-79.828,-2.192],"p":"090750"}
+{"n":"El Paraíso","k":"admin","t":"administrative","x":-79.8205,"y":-2.2065,"r":58,"d":"Durán, Guayas","b":[-79.823,-2.209,-79.818,-2.204],"p":"090751"}
+{"n":"Guayaquil","k":"place","t":"city","x":-79.886,"y":-2.188,"r":94,"d":"Guayas","b":[-79.9,-2.2,-79.87,-2.17],"p":"090150","pop":2650288}
+{"n":"Durán","k":"place","t":"town","x":-79.834,"y":-2.196,"r":86,"d":"Guayas","b":[-79.836,-2.198,-79.832,-2.194],"p":"090750","pop":315724}
+{"n":"El Paraíso","k":"place","t":"village","x":-79.8193,"y":-2.2058,"r":66,"d":"Durán, Guayas","b":[-79.8205,-2.2062,-79.8178,-2.2048],"p":"090751"}
+{"n":"La Toma","k":"place","t":"hamlet","x":-79.902,"y":-2.189,"r":46,"d":"Rocafuerte, Guayaquil, Guayas","p":"090112"}
+{"n":"Las Peñas","k":"place","t":"suburb","x":-79.8828,"y":-2.1838,"r":62,"d":"Guayaquil, Guayas","b":[-79.8838,-2.1846,-79.8818,-2.183],"p":"090150"}
+{"n":"Urdesa Central","k":"place","t":"suburb","x":-79.8955,"y":-2.1815,"r":62,"d":"Rocafuerte, Guayaquil, Guayas","b":[-79.898,-2.184,-79.893,-2.179],"p":"090112"}
+{"n":"Hospital Luis Vernaza","k":"poi","t":"hospital","x":-79.8838,"y":-2.1863,"r":64,"d":"Hospital · Guayaquil, Guayas","c":"hospital","p":"090150"}
+{"n":"Hospital del Niño","k":"poi","t":"hospital","x":-79.8338,"y":-2.1963,"r":64,"d":"Hospital · Eloy Alfaro, Durán, Guayas","c":"hospital","p":"090750"}
+{"n":"Centro de Salud Rocafuerte","k":"poi","t":"clinic","x":-79.8886,"y":-2.1888,"r":58,"d":"Centro de salud · Rocafuerte, Guayaquil, Guayas","c":"hospital","p":"090112"}
+{"n":"Unidad Educativa Vicente Rocafuerte","k":"poi","t":"school","x":-79.8875,"y":-2.1902,"r":54,"d":"Institución educativa · Rocafuerte, Guayaquil, Guayas","c":"school","p":"090112"}
+{"n":"Parque Seminario","k":"poi","t":"park","x":-79.8865,"y":-2.1874,"r":56,"d":"Parque · Rocafuerte, Guayaquil, Guayas","c":"park","p":"090112","a":["Parque de las Iguanas"]}
+{"n":"Malecón 2000","k":"poi","t":"promenade","x":-79.8827,"y":-2.188,"r":66,"d":"Malecón · Guayaquil, Guayas","c":"tourism","p":"090150"}
+{"n":"Mercado Central","k":"poi","t":"marketplace","x":-79.8856,"y":-2.1914,"r":60,"d":"Mercado · Guayaquil, Guayas","c":"shop","p":"090150"}
+{"n":"Catedral Metropolitana","k":"poi","t":"place_of_worship","x":-79.8867,"y":-2.1865,"r":58,"d":"Templo · Rocafuerte, Guayaquil, Guayas","c":"place_of_worship","p":"090112"}
+{"n":"Terminal Terrestre de Durán","k":"poi","t":"bus_station","x":-79.8358,"y":-2.1985,"r":66,"d":"Terminal de buses · Eloy Alfaro, Durán, Guayas","c":"bus","p":"090750"}
+{"n":"Hotel Oro Verde","k":"poi","t":"hotel","x":-79.8887,"y":-2.1869,"r":54,"d":"Alojamiento · Rocafuerte, Guayaquil, Guayas","c":"lodging","p":"090112"}
+{"n":"Farmacia Cruz Azul","k":"poi","t":"pharmacy","x":-79.8852,"y":-2.1911,"r":52,"d":"Farmacia · Guayaquil, Guayas","c":"pharmacy","p":"090150"}
+{"n":"Museo Antropológico y de Arte Contemporáneo","k":"poi","t":"museum","x":-79.8826,"y":-2.1899,"r":60,"d":"Museo · Guayaquil, Guayas","c":"museum","p":"090150","a":["MAAC"]}
+{"n":"Faro del Cerro Santa Ana","k":"poi","t":"viewpoint","x":-79.8832,"y":-2.1834,"r":58,"d":"Lugar de interés · Guayaquil, Guayas","c":"tourism","p":"090150"}
+{"n":"Gasolinera","k":"poi","t":"fuel","x":-79.8903,"y":-2.1908,"r":24,"d":"Rocafuerte, Guayaquil, Guayas","c":"fuel","p":"090112"}
+{"n":"C. Junín","k":"street","t":"calle","x":-79.8875,"y":-2.185,"r":44,"d":"Rocafuerte, Guayaquil, Guayas","b":[-79.89,-2.185,-79.886,-2.185],"p":"090112"}
+{"n":"C. Junín","k":"street","t":"calle","x":-79.8845,"y":-2.185,"r":44,"d":"Guayaquil, Guayas","b":[-79.886,-2.185,-79.883,-2.185],"p":"090150"}
+{"n":"C. Vélez","k":"street","t":"calle","x":-79.88785,"y":-2.186075,"r":44,"d":"Rocafuerte, Guayaquil, Guayas","b":[-79.89,-2.18615,-79.886,-2.186],"p":"090112"}
+{"n":"C. Vélez","k":"street","t":"calle","x":-79.8845,"y":-2.186,"r":44,"d":"Guayaquil, Guayas","b":[-79.886,-2.186,-79.883,-2.186],"p":"090150"}
+{"n":"Av. 9 de Octubre","k":"street","t":"avenida","x":-79.8875,"y":-2.187,"r":54,"d":"Rocafuerte, Guayaquil, Guayas","b":[-79.89,-2.187,-79.886,-2.187],"p":"090112","a":["Avenida Nueve de Octubre"]}
+{"n":"Av. 9 de Octubre","k":"street","t":"avenida","x":-79.8835,"y":-2.187,"r":54,"d":"Guayaquil, Guayas","b":[-79.886,-2.187,-79.8804,-2.187],"p":"090150","a":["Avenida Nueve de Octubre"]}
+{"n":"C. Luque","k":"street","t":"calle","x":-79.8885,"y":-2.188,"r":44,"d":"Rocafuerte, Guayaquil, Guayas","b":[-79.89,-2.188,-79.887,-2.188],"p":"090112"}
+{"n":"C. Luque","k":"street","t":"calle","x":-79.8845,"y":-2.188,"r":44,"d":"Guayaquil, Guayas","b":[-79.886,-2.188,-79.883,-2.188],"p":"090150"}
+{"n":"C. Aguirre","k":"street","t":"calle","x":-79.8875,"y":-2.189,"r":44,"d":"Rocafuerte, Guayaquil, Guayas","b":[-79.89,-2.189,-79.886,-2.189],"p":"090112"}
+{"n":"C. Aguirre","k":"street","t":"calle","x":-79.8855,"y":-2.189,"r":44,"d":"Guayaquil, Guayas","b":[-79.886,-2.189,-79.884,-2.189],"p":"090150"}
+{"n":"C. Ballén","k":"street","t":"calle","x":-79.8875,"y":-2.19,"r":44,"d":"Rocafuerte, Guayaquil, Guayas","b":[-79.89,-2.19,-79.886,-2.19],"p":"090112"}
+{"n":"C. Ballén","k":"street","t":"calle","x":-79.8845,"y":-2.19,"r":44,"d":"Guayaquil, Guayas","b":[-79.886,-2.19,-79.883,-2.19],"p":"090150"}
+{"n":"Av. 10 de Agosto","k":"street","t":"avenida","x":-79.8875,"y":-2.191,"r":54,"d":"Rocafuerte, Guayaquil, Guayas","b":[-79.89,-2.191,-79.886,-2.191],"p":"090112"}
+{"n":"Av. 10 de Agosto","k":"street","t":"avenida","x":-79.8845,"y":-2.191,"r":54,"d":"Guayaquil, Guayas","b":[-79.886,-2.191,-79.883,-2.191],"p":"090150"}
+{"n":"C. Sucre","k":"street","t":"calle","x":-79.8885,"y":-2.192,"r":44,"d":"Rocafuerte, Guayaquil, Guayas","b":[-79.89,-2.192,-79.886,-2.192],"p":"090112"}
+{"n":"C. Sucre","k":"street","t":"calle","x":-79.8845,"y":-2.192,"r":44,"d":"Guayaquil, Guayas","b":[-79.886,-2.192,-79.883,-2.192],"p":"090150"}
+{"n":"Av. Quito","k":"street","t":"avenida","x":-79.89,"y":-2.1885,"r":54,"d":"Rocafuerte, Guayaquil, Guayas","b":[-79.89,-2.192,-79.89,-2.185],"p":"090112"}
+{"n":"C. Pedro Moncayo","k":"street","t":"calle","x":-79.889,"y":-2.1885,"r":44,"d":"Rocafuerte, Guayaquil, Guayas","b":[-79.889,-2.192,-79.889,-2.185],"p":"090112"}
+{"n":"C. Boyacá","k":"street","t":"calle","x":-79.888,"y":-2.1885,"r":44,"d":"Rocafuerte, Guayaquil, Guayas","b":[-79.888,-2.192,-79.888,-2.185],"p":"090112"}
+{"n":"C. García Avilés","k":"street","t":"calle","x":-79.887,"y":-2.1885,"r":44,"d":"Rocafuerte, Guayaquil, Guayas","b":[-79.887,-2.192,-79.887,-2.185],"p":"090112"}
+{"n":"C. Chimborazo","k":"street","t":"calle","x":-79.886,"y":-2.1885,"r":44,"d":"Guayaquil, Guayas","b":[-79.886,-2.192,-79.886,-2.185],"p":"090150"}
+{"n":"C. Chile","k":"street","t":"calle","x":-79.885,"y":-2.1885,"r":44,"d":"Guayaquil, Guayas","b":[-79.885,-2.192,-79.885,-2.185],"p":"090150"}
+{"n":"C. Rocafuerte","k":"street","t":"calle","x":-79.884,"y":-2.1885,"r":44,"d":"Guayaquil, Guayas","b":[-79.884,-2.192,-79.884,-2.185],"p":"090150"}
+{"n":"Malecón Simón Bolívar","k":"street","t":"malecon","x":-79.883,"y":-2.1885,"r":34,"d":"Guayaquil, Guayas","b":[-79.883,-2.192,-79.883,-2.185],"p":"090150","a":["Malecón 2000"]}
+{"n":"Escalinata Diego Noboa","k":"street","t":"escalinata","x":-79.8828,"y":-2.1846,"r":34,"d":"Guayaquil, Guayas","b":[-79.883,-2.185,-79.8826,-2.1842],"p":"090150"}
+{"n":"Sendero El Faro","k":"street","t":"sendero","x":-79.88295,"y":-2.18355,"r":34,"d":"Guayaquil, Guayas","b":[-79.8832,-2.1842,-79.8826,-2.1834],"p":"090150"}
+{"n":"Túnel Cerro del Carmen","k":"street","t":"tunel","x":-79.891,"y":-2.1842,"r":34,"d":"Rocafuerte, Guayaquil, Guayas","b":[-79.894,-2.185,-79.89,-2.182],"p":"090112"}
+{"n":"Av. Pedro Menéndez Gilbert","k":"street","t":"avenida","x":-79.8941,"y":-2.1805,"r":54,"d":"Rocafuerte, Guayaquil, Guayas","b":[-79.8942,-2.182,-79.894,-2.179],"p":"090112"}
+{"n":"Camino a La Toma","k":"street","t":"camino","x":-79.895,"y":-2.1883,"r":35,"d":"Rocafuerte, Guayaquil, Guayas","b":[-79.902,-2.189,-79.89,-2.1878],"p":"090112"}
+{"n":"Av. Jaime Roldós Aguilera","k":"street","t":"avenida","x":-79.8795,"y":-2.1841,"r":54,"d":"Guayaquil, Guayas","b":[-79.88,-2.1858,-79.879,-2.183],"p":"090150"}
+{"n":"C. Los Almendros","k":"street","t":"calle","x":-79.8579,"y":-2.19075,"r":44,"d":"Eloy Alfaro, Durán, Guayas","b":[-79.858,-2.1915,-79.8578,-2.19],"p":"090750"}
+{"n":"C. Principal","k":"street","t":"calle","x":-79.8335,"y":-2.195,"r":44,"d":"Eloy Alfaro, Durán, Guayas","b":[-79.835,-2.195,-79.833,-2.195],"p":"090750"}
+{"n":"C. Bolívar","k":"street","t":"calle","x":-79.8345,"y":-2.196,"r":44,"d":"Eloy Alfaro, Durán, Guayas","b":[-79.835,-2.196,-79.833,-2.196],"p":"090750"}
+{"n":"C. Rocafuerte","k":"street","t":"calle","x":-79.8335,"y":-2.197,"r":44,"d":"Eloy Alfaro, Durán, Guayas","b":[-79.835,-2.197,-79.833,-2.197],"p":"090750"}
+{"n":"Av. Nicolás Lapentti","k":"street","t":"avenida","x":-79.835,"y":-2.1955,"r":54,"d":"Eloy Alfaro, Durán, Guayas","b":[-79.835,-2.197,-79.835,-2.195],"p":"090750"}
+{"n":"C. Sucre","k":"street","t":"calle","x":-79.834,"y":-2.1955,"r":44,"d":"Eloy Alfaro, Durán, Guayas","b":[-79.834,-2.197,-79.834,-2.195],"p":"090750"}
+{"n":"C. Olmedo","k":"street","t":"calle","x":-79.833,"y":-2.1955,"r":44,"d":"Eloy Alfaro, Durán, Guayas","b":[-79.833,-2.197,-79.833,-2.195],"p":"090750"}
+{"n":"C. Única","k":"street","t":"calle","x":-79.8192,"y":-2.20295,"r":44,"d":"El Paraíso, Durán, Guayas","b":[-79.821,-2.203,-79.8186,-2.2029],"p":"090751"}
+{"n":"C. La Iglesia","k":"street","t":"calle","x":-79.8198,"y":-2.2026,"r":44,"d":"El Paraíso, Durán, Guayas","b":[-79.8198,-2.203,-79.8198,-2.2022],"p":"090751"}
+{"n":"Sendero Isla Santay","k":"street","t":"sendero","x":-79.88525,"y":-2.2202,"r":34,"d":"Rocafuerte, Guayaquil, Guayas","b":[-79.886,-2.2204,-79.883,-2.22],"p":"090112"}
+{"n":"C. de la Isla","k":"street","t":"calle","x":-79.883,"y":-2.2208,"r":44,"d":"Rocafuerte, Guayaquil, Guayas","b":[-79.883,-2.2214,-79.883,-2.2202],"p":"090112"}

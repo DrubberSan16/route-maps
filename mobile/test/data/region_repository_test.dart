@@ -74,6 +74,18 @@ void main() {
     );
   }
 
+  Future<DownloadedRegion> storePack(DownloadedRegion region) async {
+    final file = await storage.regionPackFile(region.code, region.version);
+    await file.create(recursive: true);
+    await file.writeAsBytes(List.filled(4, 2));
+    return regions.saveOfflinePack(
+      code: region.code,
+      relativePath: await storage.relativePathOf(file),
+      checksum: 'pp',
+      sizeBytes: 4,
+    );
+  }
+
   test('parses the catalog captured from the platform', () {
     final parsed = [
       for (final item in fixtureData('regions_list')! as List<Object?>)
@@ -82,6 +94,10 @@ void main() {
     final monaco = parsed.single;
     expect(monaco.code, 'monaco');
     expect(monaco.mapSizeBytes, 791537);
+    // Captured when routing was an engine's own archive: not an offline pack for the phone.
+    expect(monaco.routingFormat, isNull);
+    expect(monaco.hasOfflinePack, isFalse);
+    expect(monaco.downloadSizeBytes, 791537);
     expect(monaco.bbox!.contains(const Coordinate(43.7384, 7.4246)), isTrue);
     expect(monaco.mapDownloadUrl, '/api/v1/maps/regions/monaco/download');
   });
@@ -125,9 +141,58 @@ void main() {
 
   test('deleting a region removes its row and its files', () async {
     final stored = await storeFile(catalog.last);
+    final pack = await storePack(stored);
     await regions.deleteDownloaded('guayaquil');
     expect(await regions.downloadedRegions(), isEmpty);
     expect(await (await storage.resolve(stored.relativePath)).exists(), isFalse);
+    expect(await (await storage.resolve(pack.routingRelativePath!)).exists(), isFalse);
+  });
+
+  test('the offline pack stays with new map versions until it is replaced', () async {
+    final v1 = region('guayaquil', bbox: guayaquilBox, version: '2026.08.01', packSize: 4);
+    final stored = await storePack(await storeFile(v1));
+    expect(stored.hasOfflinePack, isTrue);
+    expect(stored.routingRelativePath, 'packs/guayaquil/2026.08.01/guayaquil.rmpack');
+    expect(stored.routingChecksum, 'pp');
+    expect(stored.storedBytes, 16 + 4);
+    expect(stored.needsOfflinePack(v1), isFalse);
+    expect(stored.needsOfflinePack(region('guayaquil', packSize: 4, packChecksum: 'qq')), isTrue);
+    expect(stored.needsOfflinePack(region('guayaquil')), isFalse, reason: 'none published');
+
+    final updated = await storeFile(
+      region('guayaquil', bbox: guayaquilBox, version: '2026.09.20', packSize: 4),
+    );
+    expect(updated.version, '2026.09.20');
+    expect(updated.routingRelativePath, stored.routingRelativePath);
+    expect(updated.routingChecksum, 'pp');
+  });
+
+  test('a pack whose file disappeared is forgotten; the map stays', () async {
+    final stored = await storePack(await storeFile(catalog.last));
+    await (await storage.resolve(stored.routingRelativePath!)).delete();
+    expect(await regions.removeMissingFiles(), isEmpty);
+    final kept = (await regions.downloadedRegions()).single;
+    expect(kept.relativePath, stored.relativePath);
+    expect(kept.hasOfflinePack, isFalse);
+    expect(kept.routingChecksum, isNull);
+    expect(kept.routingSizeBytes, isNull);
+  });
+
+  test('a region whose map disappeared is forgotten with its pack', () async {
+    final stored = await storePack(await storeFile(catalog.last));
+    await (await storage.resolve(stored.relativePath)).delete();
+    expect(await regions.removeMissingFiles(), ['guayaquil']);
+    expect(await (await storage.resolve(stored.routingRelativePath!)).exists(), isFalse);
+  });
+
+  test('the catalog keeps the offline pack of each region', () async {
+    catalog = [region('guayaquil', bbox: guayaquilBox, packSize: 40 * 1000 * 1000)];
+    await regions.refreshCatalog();
+    online = false;
+    final cached = (await regions.cachedCatalog()).single;
+    expect(cached.routingFormat, MapRegion.offlinePackFormat);
+    expect(cached.hasOfflinePack, isTrue);
+    expect(cached.downloadSizeBytes, 185 * 1000 * 1000 + 40 * 1000 * 1000);
   });
 
   group('map source (offline first)', () {

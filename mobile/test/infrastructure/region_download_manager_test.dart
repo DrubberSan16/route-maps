@@ -78,7 +78,8 @@ void main() {
 
     server.dropAfter = null;
     final file = await manager().download(request(etag: '"v1"'));
-    expect(server.requests.last, (range: 'bytes=$partial-', ifRange: '"v1"'));
+    expect(server.requests.last.range, 'bytes=$partial-');
+    expect(server.requests.last.ifRange, '"v1"');
     expect(await file.readAsBytes(), content);
   });
 

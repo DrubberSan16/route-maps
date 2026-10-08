@@ -49,6 +49,29 @@ void main() {
     expect(await Directory('${base.path}/offline/regions/guayaquil').exists(), isFalse);
   });
 
+  test('offline packs live apart from the maps and are replaced on their own', () async {
+    final pack = await storage.regionPackFile('guayaquil', '2026.08.01');
+    expect(pack.path, '${base.path}/offline/packs/guayaquil/2026.08.01/guayaquil.rmpack');
+    expect(await storage.relativePathOf(pack), 'packs/guayaquil/2026.08.01/guayaquil.rmpack');
+    await pack.create(recursive: true);
+    final map = await storage.regionMapFile('guayaquil', '2026.09.20');
+    await map.create(recursive: true);
+
+    // A newer map does not take the pack of the previous version with it.
+    await storage.deleteRegionFiles('guayaquil', keepVersion: '2026.09.20');
+    expect(await pack.exists(), isTrue);
+    final newer = await storage.regionPackFile('guayaquil', '2026.09.20');
+    await newer.create(recursive: true);
+    await storage.deleteRegionPacks('guayaquil', keepVersion: '2026.09.20');
+    expect(await pack.exists(), isFalse);
+    expect(await newer.exists(), isTrue);
+    expect(await map.exists(), isTrue);
+
+    await storage.deleteRegionPacks('guayaquil');
+    expect(await Directory('${base.path}/offline/packs/guayaquil').exists(), isFalse);
+    expect(() => storage.regionPackFile('../x', '1'), throwsArgumentError);
+  });
+
   test('values from the API cannot become paths outside the directory', () async {
     expect(() => storage.regionMapFile('..', '1'), throwsArgumentError);
     expect(() => storage.regionMapFile('guayaquil', '../../x'), throwsArgumentError);

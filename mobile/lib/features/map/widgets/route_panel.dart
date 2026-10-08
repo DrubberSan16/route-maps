@@ -143,7 +143,7 @@ class RoutePanel extends StatelessWidget {
     RouteSource.server => 'Calculada en el servidor (${result.provider})',
     RouteSource.savedRoute =>
       'Ruta guardada «${option.savedRouteName ?? ''}», disponible sin conexión',
-    RouteSource.onDevice => 'Calculada en el dispositivo (${result.provider})',
+    RouteSource.onDevice => 'Calculada en el teléfono con los mapas descargados',
   };
 }
 

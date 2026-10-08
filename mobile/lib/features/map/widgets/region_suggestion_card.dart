@@ -63,7 +63,7 @@ class RegionSuggestionCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    '${region.name}   ${formatBytes(region.mapSizeBytes)}',
+                    '${region.name}   ${formatBytes(region.downloadSizeBytes)}',
                     style: theme.textTheme.titleMedium,
                   ),
                 ),
